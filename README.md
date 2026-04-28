@@ -1,8 +1,16 @@
 <h1 align="center">
 <img src="https://files.seeusercontent.com/2026/04/09/hOy5/logo.png"/>
 </h1>
+
 <p align="center">
   <img src="https://skills.syvixor.com/api/icons?perline=15&i=flutter,dart,materialdesign"/>
+</p>
+
+<p align="center">
+  <img alt="GitHub License" src="https://img.shields.io/github/license/caolib/kira">
+  <img alt="GitHub Issues or Pull Requests" src="https://img.shields.io/github/issues/caolib/kira">
+  <img src="https://img.shields.io/github/stars/caolib/kira" alt="Stars"/>
+  <img src="https://img.shields.io/github/downloads/caolib/kira/latest/total" alt="Latest Downloads"/>
 </p>
 
 ## 简介
@@ -62,7 +70,7 @@ flutter run
 
 ```sh
 flutter run -d win
-flutter run -d emulato
+flutter run -d emulator
 ```
 
 查看可用设备
@@ -76,7 +84,7 @@ flutter devices
 ```sh
 flutter emulators
 
-flutter emulators --launch 上个命令中输出的设备id
+flutter emulators --launch 设备ID
 ```
 
 ### 构建安装包
