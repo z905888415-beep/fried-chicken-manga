@@ -77,7 +77,9 @@ class UserManager extends ChangeNotifier {
   static const _keySavedCredentials = 'saved_credentials';
   static const _keyThemeMode = 'theme_mode';
   static const _keyThemeColor = 'theme_color';
+  static const _keyThemeVariant = 'theme_variant';
   static const _keyCustomThemeColor = 'custom_theme_color';
+  static const _keyBottomNavShowLabels = 'bottom_nav_show_labels';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
   static const _keyReaderMode = 'reader_mode';
   static const _keyReaderScrollDirection = 'reader_scroll_direction';
@@ -112,7 +114,9 @@ class UserManager extends ChangeNotifier {
   List<SavedCredential> _savedCredentials = [];
   ThemeMode _themeMode = ThemeMode.system;
   String _themeColor = appThemeOptions.first.id;
+  DynamicSchemeVariant _themeVariant = appThemeVariantOptions.first.variant;
   int _customThemeColorValue = defaultCustomThemeColor.toARGB32();
+  bool _bottomNavShowLabels = true;
   String _bookshelfOrdering = '-datetime_updated';
   int _readerMode = 0;
   int _readerScrollDirection = 2;
@@ -148,7 +152,9 @@ class UserManager extends ChangeNotifier {
       List.unmodifiable(_savedCredentials);
   ThemeMode get themeMode => _themeMode;
   String get themeColor => _themeColor;
+  DynamicSchemeVariant get themeVariant => _themeVariant;
   Color get customThemeColor => Color(_customThemeColorValue);
+  bool get bottomNavShowLabels => _bottomNavShowLabels;
   AppThemeOption get themeOption {
     if (_themeColor == customThemeOptionId) {
       return AppThemeOption(
@@ -159,6 +165,8 @@ class UserManager extends ChangeNotifier {
     }
     return resolveAppThemeOption(_themeColor);
   }
+  AppThemeVariantOption get themeVariantOption =>
+      resolveAppThemeVariantOption(_themeVariant.name);
 
   String get bookshelfOrdering => _bookshelfOrdering;
   int get readerMode => _readerMode;
@@ -228,9 +236,12 @@ class UserManager extends ChangeNotifier {
     _themeColor = savedThemeColor == customThemeOptionId
         ? customThemeOptionId
         : resolveAppThemeOption(savedThemeColor).id;
+    _themeVariant =
+        resolveAppThemeVariantOption(prefs.getString(_keyThemeVariant)).variant;
     _customThemeColorValue =
         prefs.getInt(_keyCustomThemeColor) ??
         defaultCustomThemeColor.toARGB32();
+    _bottomNavShowLabels = prefs.getBool(_keyBottomNavShowLabels) ?? true;
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
     _readerMode = prefs.getInt(_keyReaderMode) ?? 0;
@@ -428,6 +439,15 @@ class UserManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setThemeVariant(DynamicSchemeVariant variant) async {
+    if (_themeVariant == variant) return;
+
+    _themeVariant = variant;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyThemeVariant, variant.name);
+    notifyListeners();
+  }
+
   Future<void> setCustomThemeColor(Color color) async {
     final nextColorValue = color.toARGB32();
     final shouldNotify =
@@ -442,6 +462,15 @@ class UserManager extends ChangeNotifier {
     await prefs.setString(_keyThemeColor, customThemeOptionId);
 
     if (shouldNotify) notifyListeners();
+  }
+
+  Future<void> setBottomNavShowLabels(bool enabled) async {
+    if (_bottomNavShowLabels == enabled) return;
+
+    _bottomNavShowLabels = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBottomNavShowLabels, enabled);
+    notifyListeners();
   }
 
   Future<void> setBookshelfOrdering(String ordering) async {

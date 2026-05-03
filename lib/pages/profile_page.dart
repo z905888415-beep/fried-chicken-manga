@@ -329,10 +329,13 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: Column(
                     children: [
                       ListTile(
-                        leading: const Icon(Icons.palette_outlined),
+                        leading: const _SettingIcon(
+                          icon: Icons.palette_rounded,
+                          color: Color(0xFF7C8CFF),
+                        ),
                         title: const Text('外观'),
                         subtitle: Text(
-                          '${_user.themeOption.label} · ${_user.themeMode == ThemeMode.system ? '跟随系统' : _user.themeMode == ThemeMode.light ? '浅色' : '深色'}',
+                          '${_user.themeOption.label} · ${_user.themeVariantOption.label} · ${_user.themeMode == ThemeMode.system ? '跟随系统' : _user.themeMode == ThemeMode.light ? '浅色' : '深色'}',
                           style: tt.bodySmall,
                         ),
                         trailing: const Icon(Icons.chevron_right),
@@ -345,7 +348,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       ListTile(
-                        leading: const Icon(Icons.dns_outlined),
+                        leading: const _SettingIcon(
+                          icon: Icons.dns_rounded,
+                          color: Color(0xFF2BB8A5),
+                        ),
                         title: const Text('网络'),
                         subtitle: Text(
                           'API 线路 ${_user.apiRoute + 1}',
@@ -364,7 +370,10 @@ class _ProfilePageState extends State<ProfilePage> {
                           _user.savedUsername != null &&
                           _user.savedPassword != null)
                         SwitchListTile(
-                          secondary: const Icon(Icons.login),
+                          secondary: const _SettingIcon(
+                            icon: Icons.login_rounded,
+                            color: Color(0xFF68C46C),
+                          ),
                           title: const Text('自动登录'),
                           subtitle: const Text('登录过期时自动重新登录'),
                           value: _user.autoLogin,
@@ -372,7 +381,10 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       ListTile(
-                        leading: const Icon(Icons.download_done_outlined),
+                        leading: const _SettingIcon(
+                          icon: Icons.download_done_rounded,
+                          color: Color(0xFFFFA24C),
+                        ),
                         title: const Text('本地漫画'),
                         subtitle: const Text('查看和管理已下载的漫画章节'),
                         trailing: const Icon(Icons.chevron_right),
@@ -385,7 +397,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       ListTile(
-                        leading: const Icon(Icons.history),
+                        leading: const _SettingIcon(
+                          icon: Icons.history_rounded,
+                          color: Color(0xFF9B7BFF),
+                        ),
                         title: const Text('浏览记录'),
                         subtitle: const Text('查看最近浏览过的漫画'),
                         trailing: const Icon(Icons.chevron_right),
@@ -400,7 +415,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       ListTile(
-                        leading: const Icon(Icons.info_outline),
+                        leading: const _SettingIcon(
+                          icon: Icons.info_rounded,
+                          color: Color(0xFF4FA8FF),
+                        ),
                         title: const Text('关于'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => Navigator.push(
@@ -1495,6 +1513,26 @@ class DisclaimerPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SettingIcon extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+
+  const _SettingIcon({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icon, color: color, size: 20),
     );
   }
 }

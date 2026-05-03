@@ -67,6 +67,7 @@ class _KiraAppState extends State<KiraApp> {
       colorScheme: ColorScheme.fromSeed(
         seedColor: seedColor,
         brightness: brightness,
+        dynamicSchemeVariant: _user.themeVariant,
         surface: brightness == Brightness.dark ? Colors.black : Colors.white,
       ),
       useMaterial3: true,
@@ -274,7 +275,9 @@ class _MainPageState extends State<MainPage> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        labelBehavior: _user.bottomNavShowLabels
+            ? NavigationDestinationLabelBehavior.alwaysShow
+            : NavigationDestinationLabelBehavior.alwaysHide,
         destinations: [
           const NavigationDestination(
             icon: Icon(Icons.home_outlined),
