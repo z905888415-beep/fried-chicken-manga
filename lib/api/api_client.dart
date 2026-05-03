@@ -7,12 +7,14 @@ import 'package:dio/dio.dart';
 import '../models/comic.dart';
 import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
+import '../models/comic_comment.dart';
 import '../models/user_manager.dart';
 
 class ApiClient {
   static const _hostSg = 'mapi.hotmangasg.com';
   static const _hostSd = 'mapi.hotmangasd.com';
   static const _hostComment = 'api.mangacopy.com';
+  static const _hostComicComment = 'api.copy2000.online';
   static const _hostCopy = 'www.mangacopy.com';
   static const _hostWeb = 'www.manga2026.xyz';
 
@@ -217,6 +219,19 @@ class ApiClient {
   }
 
   String _url(String path, [String? _]) => 'https://${_nextHost()}$path';
+
+  Options _browserRequestOptions(
+    String host, {
+    String secFetchSite = 'same-site',
+  }) {
+    return Options(
+      headers: {
+        'Host': host,
+        'referer': 'https://www.mangacopy.com/',
+        'sec-fetch-site': secFetchSite,
+      },
+    );
+  }
 
   String _buildRegisterCookie() {
     final random = Random();
@@ -599,10 +614,39 @@ class ApiClient {
         'offset': offset,
         '_update': true,
       },
+      options: _browserRequestOptions(_hostComment),
     );
     final results = resp.data['results'] as Map<String, dynamic>;
     final list = (results['list'] as List)
         .map((e) => ChapterComment.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return (list: list, total: results['total'] as int? ?? 0);
+  }
+
+  // 9.2 漫画评论 / 评论回复
+  Future<({List<ComicComment> list, int total})> getComicComments(
+    String comicId, {
+    String replyId = '',
+    int limit = 10,
+    int offset = 0,
+  }) async {
+    final resp = await _commentDio.get(
+      'https://$_hostComicComment/api/v3/comments',
+      queryParameters: {
+        'comic_id': comicId,
+        'reply_id': replyId,
+        'limit': limit,
+        'offset': offset,
+        'platform': 3,
+      },
+      options: _browserRequestOptions(
+        _hostComicComment,
+        secFetchSite: 'cross-site',
+      ),
+    );
+    final results = resp.data['results'] as Map<String, dynamic>;
+    final list = (results['list'] as List)
+        .map((e) => ComicComment.fromJson(Map<String, dynamic>.from(e)))
         .toList();
     return (list: list, total: results['total'] as int? ?? 0);
   }

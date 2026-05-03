@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:characters/characters.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/chapter.dart';
@@ -7,6 +8,7 @@ import '../utils/data_cache.dart';
 import '../utils/download_manager.dart';
 import '../utils/reading_history.dart';
 import '../utils/toast.dart';
+import 'comic_comments_sheet.dart';
 import 'reader_page.dart';
 
 class ComicDetailPage extends StatefulWidget {
@@ -25,6 +27,9 @@ class ComicDetailPage extends StatefulWidget {
 }
 
 class _ComicDetailPageState extends State<ComicDetailPage> {
+  static const _continueReadingNameMaxLength = 10;
+  static const _nextChapterNameMaxLength = 10;
+
   final _api = ApiClient();
   final _cache = DataCache();
   final _downloads = DownloadManager();
@@ -290,11 +295,32 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   String _continueReadingLabel() {
-    final name = _lastBrowseName ?? '';
+    final name = _truncateContinueReadingName(_lastBrowseName ?? '');
     if (_lastBrowseTotalPage > 1) {
-      return '$name · $_lastBrowsePage/$_lastBrowseTotalPage';
+      return name.isEmpty
+          ? '$_lastBrowsePage/$_lastBrowseTotalPage'
+          : '$name · $_lastBrowsePage/$_lastBrowseTotalPage';
     }
     return name;
+  }
+
+  String _truncateContinueReadingName(String name) {
+    return _truncateChapterName(name, maxLength: _continueReadingNameMaxLength);
+  }
+
+  String _truncateNextChapterName(String name) {
+    return _truncateChapterName(name, maxLength: _nextChapterNameMaxLength);
+  }
+
+  String _truncateChapterName(String name, {required int maxLength}) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '';
+
+    final chars = trimmed.characters;
+    if (chars.length <= maxLength) {
+      return trimmed;
+    }
+    return '${chars.take(maxLength).toString()}...';
   }
 
   Future<void> _syncNextBrowseChapter() async {
@@ -377,15 +403,36 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   Future<void> _toggleCollect() async {
+    final comicId = _comic?.uuid;
+    if (comicId == null || comicId.isEmpty) return;
+
     final newState = !_isCollected;
     setState(() => _isCollected = newState);
     try {
-      await _api.toggleCollect(_comic!.uuid!, collect: newState);
+      await _api.toggleCollect(comicId, collect: newState);
       await _saveCache();
     } catch (_) {
       setState(() => _isCollected = !newState);
       await _saveCache();
     }
+  }
+
+  Future<void> _showComicComments() async {
+    final comic = _comic;
+    final comicId = comic?.uuid;
+    if (comic == null || comicId == null || comicId.isEmpty) {
+      showToast(context, '当前漫画暂时无法查看评论', isError: true);
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          ComicCommentsSheet(comicId: comicId, comicName: comic.name),
+    );
   }
 
   bool _isChapterDownloaded(String chapterUuid) =>
@@ -486,20 +533,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     final tt = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_comic?.name ?? ''),
-        actions: [
-          if (_comic != null)
-            IconButton(
-              icon: Icon(
-                _isCollected ? Icons.bookmark : Icons.bookmark_border,
-                color: _isCollected ? cs.primary : null,
-              ),
-              onPressed: _toggleCollect,
-              tooltip: _isCollected ? '取消收藏' : '收藏',
-            ),
-        ],
-      ),
+      appBar: AppBar(title: Text(_comic?.name ?? '')),
       body: _loadingComic
           ? const Center(child: CircularProgressIndicator())
           : _comic == null
@@ -564,7 +598,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                             ).then((_) => _loadLocalHistory()),
                             icon: const Icon(Icons.skip_next, size: 20),
                             label: Text(
-                              _nextBrowseChapter!.name,
+                              _truncateNextChapterName(
+                                _nextBrowseChapter!.name,
+                              ),
                               style: const TextStyle(fontSize: 13),
                             ),
                           ),
@@ -966,6 +1002,58 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                             ],
                           ),
                         ],
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                onPressed:
+                                    comic.uuid == null || comic.uuid!.isEmpty
+                                    ? null
+                                    : _showComicComments,
+                                icon: const Icon(
+                                  Icons.forum_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('评论'),
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                onPressed:
+                                    comic.uuid == null || comic.uuid!.isEmpty
+                                    ? null
+                                    : _toggleCollect,
+                                icon: Icon(
+                                  _isCollected
+                                      ? Icons.bookmark
+                                      : Icons.bookmark_border,
+                                  size: 18,
+                                ),
+                                label: Text(_isCollected ? '已收藏' : '收藏'),
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -1034,24 +1122,39 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                   if (_totalPages > 1) ...[
                     ...List.generate(_totalPages, (i) {
                       final isSelected = i == _chapterPage;
+                      final pageButtonShape = RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      );
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 2),
                         child: isSelected
-                            ? FilledButton.tonal(
-                                onPressed: null,
+                            ? FilledButton(
+                                onPressed: () {},
                                 style: FilledButton.styleFrom(
-                                  minimumSize: const Size(36, 36),
+                                  minimumSize: const Size(38, 38),
+                                  maximumSize: const Size(38, 38),
+                                  fixedSize: const Size(38, 38),
                                   padding: EdgeInsets.zero,
+                                  backgroundColor: cs.primary,
+                                  foregroundColor: cs.onPrimary,
+                                  disabledBackgroundColor: cs.primary,
+                                  disabledForegroundColor: cs.onPrimary,
+                                  shape: pageButtonShape,
                                   tapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
                                 ),
                                 child: Text('${i + 1}'),
                               )
-                            : OutlinedButton(
+                            : FilledButton.tonal(
                                 onPressed: () => _loadChapterPage(i),
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size(36, 36),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(38, 38),
+                                  maximumSize: const Size(38, 38),
+                                  fixedSize: const Size(38, 38),
                                   padding: EdgeInsets.zero,
+                                  backgroundColor: cs.surfaceContainerHigh,
+                                  foregroundColor: cs.onSurfaceVariant,
+                                  shape: pageButtonShape,
                                   tapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
                                 ),

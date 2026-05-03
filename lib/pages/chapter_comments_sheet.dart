@@ -11,6 +11,8 @@ class ChapterCommentsSheet extends StatefulWidget {
   final String chapterName;
   final List<ChapterComment>? initialComments;
   final int? initialTotal;
+  final void Function(List<ChapterComment> comments, int total)?
+      onCommentsUpdated;
   final bool hasNextChapter;
   final VoidCallback? onNextChapter;
   final VoidCallback? onBackToCatalog;
@@ -21,6 +23,7 @@ class ChapterCommentsSheet extends StatefulWidget {
     required this.chapterName,
     this.initialComments,
     this.initialTotal,
+    this.onCommentsUpdated,
     this.hasNextChapter = false,
     this.onNextChapter,
     this.onBackToCatalog,
@@ -43,6 +46,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   List<ChapterComment> _comments = [];
   bool _loading = true;
   bool _loadingMore = false;
+  bool _loadingAll = false;
   String? _error;
   int _total = 0;
   bool _useCompactLayout = true;
@@ -63,9 +67,16 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       _comments = List<ChapterComment>.from(widget.initialComments!);
       _total = widget.initialTotal ?? _comments.length;
       _loading = false;
+      if (_user.commentAutoLoadAll && _comments.length < _total) {
+        _loadAllComments();
+      }
       return;
     }
-    _loadComments();
+    _loadComments().then((_) {
+      if (_user.commentAutoLoadAll && _comments.length < _total) {
+        _loadAllComments();
+      }
+    });
   }
 
   @override
@@ -74,8 +85,19 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     super.dispose();
   }
 
+  void _notifyCommentsUpdated() {
+    final callback = widget.onCommentsUpdated;
+    if (callback == null) return;
+    callback(
+      List<ChapterComment>.from(_comments),
+      _total < _comments.length ? _comments.length : _total,
+    );
+  }
+
   Future<void> _loadComments({bool loadMore = false}) async {
-    if (widget.initialComments != null) return;
+    if (!loadMore && widget.initialComments != null && _comments.isNotEmpty) {
+      return;
+    }
     if (loadMore) {
       if (_loading || _loadingMore || _comments.length >= _total) return;
       setState(() => _loadingMore = true);
@@ -110,6 +132,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         _loadingMore = false;
         _error = null;
       });
+      _notifyCommentsUpdated();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _tryLoadMoreWhenNearBottom();
@@ -140,6 +163,41 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     }
   }
 
+  Future<void> _loadAllComments() async {
+    if (_loadingAll) return;
+    setState(() => _loadingAll = true);
+
+    try {
+      while (mounted && _comments.length < _total) {
+        final data = await _api.getChapterComments(
+          widget.chapterUuid,
+          limit: _pageSize,
+          offset: _comments.length,
+        );
+        if (!mounted) return;
+
+        final newComments = data.list
+            .where((item) => !_comments.any((e) => e.id == item.id))
+            .toList();
+        if (newComments.isEmpty) break;
+
+        setState(() {
+          _comments = [..._comments, ...newComments];
+          _total = data.total;
+        });
+        _notifyCommentsUpdated();
+
+        if (_comments.length < _total) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loadingAll = false);
+    }
+  }
+
+  bool get _allCommentsLoaded => _total > 0 && _comments.length >= _total;
+
   String _formatRelativeTime(String raw) {
     if (raw.isEmpty) return '';
 
@@ -164,12 +222,15 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (_) => _CommentSettingsPanel(
         useCompactLayout: _useCompactLayout,
         showUserAvatar: _showUserAvatar,
         showUserName: _showUserName,
         showCommentTime: _showCommentTime,
         commentFontScale: _commentFontScale,
+        commentPreload: _user.commentPreload,
+        commentAutoLoadAll: _user.commentAutoLoadAll,
         onLayoutChanged: (compact) {
           if (!mounted) return;
           setState(() => _useCompactLayout = compact);
@@ -194,6 +255,12 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
           if (!mounted) return;
           setState(() => _commentFontScale = scale);
           _user.setCommentFontScale(scale);
+        },
+        onPreloadChanged: (enabled) {
+          _user.setCommentPreload(enabled);
+        },
+        onAutoLoadAllChanged: (enabled) {
+          _user.setCommentAutoLoadAll(enabled);
         },
       ),
     );
@@ -258,6 +325,23 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                               ],
                             ),
                           ),
+                          if (!_allCommentsLoaded)
+                            _loadingAll
+                                ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: Padding(
+                                      padding: EdgeInsets.all(2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  )
+                                : IconButton(
+                                    tooltip: '加载全部评论',
+                                    onPressed: _loadAllComments,
+                                    icon: const Icon(Icons.refresh),
+                                  ),
                           IconButton(
                             tooltip: _useCompactLayout ? '切换为列表布局' : '切换为紧凑布局',
                             onPressed: () {
@@ -278,7 +362,11 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                             icon: const Icon(Icons.tune),
                           ),
                           Text(
-                            _total > 0 ? '$_total 条' : '',
+                            _total > 0
+                                ? (_allCommentsLoaded
+                                      ? '$_total 条'
+                                      : '${_comments.length}/$_total')
+                                : '',
                             style: tt.bodySmall?.copyWith(
                               color: cs.onSurfaceVariant,
                             ),
@@ -554,12 +642,12 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         compact: true,
         fontScale: _commentFontScale,
       );
-      final bodyPainter = TextPainter(
-        text: TextSpan(text: entry.content, style: compactBodyStyle),
-        textDirection: TextDirection.ltr,
-        textScaler: textScaler,
-        maxLines: 1,
-      )..layout(minWidth: 0, maxWidth: preferredMaxWidth);
+      final bodyWidth = _measureTextWidth(
+        entry.content,
+        compactBodyStyle,
+        textScaler,
+        preferredMaxWidth,
+      );
 
       final headerWidth = _estimateCompactHeaderWidth(
         context,
@@ -567,9 +655,16 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         preferredMaxWidth,
       );
 
-      final contentWidth = bodyPainter.size.width > headerWidth
-          ? bodyPainter.size.width
-          : headerWidth;
+      var contentWidth = bodyWidth > headerWidth ? bodyWidth : headerWidth;
+      final mergedInlineWidth = _estimateCompactMergedInlineWidth(
+        context,
+        entry,
+        bodyWidth: bodyWidth,
+        maxWidth: preferredMaxWidth,
+      );
+      if (mergedInlineWidth > contentWidth) {
+        contentWidth = mergedInlineWidth;
+      }
 
       final cardWidth = (contentWidth + 24).clamp(minWidth, preferredMaxWidth);
       return _CommentLayoutItem(entry: entry, width: cardWidth);
@@ -634,35 +729,33 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   ) {
     final textTheme = Theme.of(context).textTheme;
     final textScaler = MediaQuery.textScalerOf(context);
+    final showCountTag = _shouldShowMergedCountTag(entry.count);
 
     if (entry.isMerged) {
+      final countTagWidth = showCountTag
+          ? _estimateMergedCountTagWidth(
+              context,
+              entry.count,
+              maxWidth,
+              compact: true,
+            )
+          : 0.0;
+
       if (!_showUserAvatar) {
-        if (!_shouldShowMergedCountTag(entry.count)) return 0;
-        final countTagWidth = _measureTextWidth(
-          _formatMergedCount(entry.count),
-          textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
-          textScaler,
-          maxWidth,
-        );
-        return countTagWidth + 20;
+        return countTagWidth;
       }
+
       final avatarCount = entry.avatarComments().length;
       final avatarWidth = _avatarStackWidth(
         avatarCount,
         avatarSize: 22,
         overlap: 8,
       );
-      if (!_shouldShowMergedCountTag(entry.count)) {
-        return avatarWidth + 12;
+      if (!showCountTag) {
+        return avatarWidth;
       }
 
-      final countTagWidth = _measureTextWidth(
-        _formatMergedCount(entry.count),
-        textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
-        textScaler,
-        maxWidth,
-      );
-      return avatarWidth + countTagWidth + 34;
+      return avatarWidth + 8 + countTagWidth;
     }
 
     var width = 0.0;
@@ -700,20 +793,63 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     return width;
   }
 
-  double _measureTextWidth(
-    String text,
-    TextStyle? style,
-    TextScaler textScaler,
-    double maxWidth,
-  ) {
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-      textScaler: textScaler,
-      maxLines: 1,
-    )..layout(minWidth: 0, maxWidth: maxWidth);
-    return painter.size.width;
+  double _estimateCompactMergedInlineWidth(
+    BuildContext context,
+    ChapterCommentDisplayEntry entry, {
+    required double bodyWidth,
+    required double maxWidth,
+  }) {
+    if (!entry.isMerged ||
+        _showUserAvatar ||
+        !_shouldShowMergedCountTag(entry.count)) {
+      return bodyWidth;
+    }
+
+    return bodyWidth +
+        8 +
+        _estimateMergedCountTagWidth(
+          context,
+          entry.count,
+          maxWidth,
+          compact: true,
+        );
   }
+
+}
+
+double _measureTextWidth(
+  String text,
+  TextStyle? style,
+  TextScaler textScaler,
+  double maxWidth,
+) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+    textScaler: textScaler,
+    maxLines: 1,
+  )..layout(minWidth: 0, maxWidth: maxWidth);
+  return painter.size.width;
+}
+
+double _estimateMergedCountTagWidth(
+  BuildContext context,
+  int count,
+  double maxWidth, {
+  required bool compact,
+}) {
+  final textTheme = Theme.of(context).textTheme;
+  final textScaler = MediaQuery.textScalerOf(context);
+  final labelWidth = _measureTextWidth(
+    _formatMergedCount(count),
+    textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
+    textScaler,
+    maxWidth,
+  );
+  final minWidth = compact ? 24.0 : 28.0;
+  final horizontalPadding = compact ? 12.0 : 16.0;
+  final intrinsicWidth = labelWidth + horizontalPadding;
+  return intrinsicWidth < minWidth ? minWidth : intrinsicWidth;
 }
 
 class _CommentSkeleton extends StatefulWidget {
@@ -835,6 +971,7 @@ class _CommentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final brightness = Theme.of(context).brightness;
     final horizontalPadding = compact ? 10.0 : 12.0;
     final topPadding = compact ? 8.0 : 12.0;
     final bottomPadding = compact ? 4.0 : 12.0;
@@ -848,6 +985,7 @@ class _CommentCard extends StatelessWidget {
       fontScale: fontScale,
     );
     final showMetaRow = showAvatar || showUserName || showCommentTime;
+    final isHotMergedComment = entry.isMerged && _isHotMergedComment(entry.count);
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -856,9 +994,11 @@ class _CommentCard extends StatelessWidget {
         horizontalPadding,
         bottomPadding,
       ),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(16),
+      decoration: _buildCommentCardDecoration(
+        cs,
+        brightness: brightness,
+        compact: compact,
+        highlightAsHot: isHotMergedComment,
       ),
       child: entry.isMerged
           ? _MergedCommentContent(
@@ -950,7 +1090,9 @@ class _MergedCommentContent extends StatelessWidget {
         );
       }
       return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: compact
+            ? CrossAxisAlignment.center
+            : CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Text(
@@ -961,9 +1103,15 @@ class _MergedCommentContent extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: _MergedCommentCountTag(count: entry.count, compact: compact),
+          Align(
+            alignment: compact ? Alignment.center : Alignment.topCenter,
+            child: Padding(
+              padding: EdgeInsets.only(top: compact ? 0 : 2),
+              child: _MergedCommentCountTag(
+                count: entry.count,
+                compact: compact,
+              ),
+            ),
           ),
         ],
       );
@@ -1008,23 +1156,54 @@ class _MergedCommentCountTag extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final isHot = _isHotMergedComment(count);
+    final tagHeight = compact ? 24.0 : 28.0;
+    final gradient = isHot
+        ? LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: const [Color(0xFFFFC44D), Color(0xFFFF6B3D)],
+          )
+        : null;
+    final backgroundColor = isHot ? null : cs.primary;
+    final foregroundColor = isHot ? Colors.white : cs.onPrimary;
 
     return Container(
-      constraints: BoxConstraints(minWidth: compact ? 24 : 28),
+      constraints: BoxConstraints(
+        minWidth: compact ? 24 : 28,
+        minHeight: tagHeight,
+      ),
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 6 : 8,
-        vertical: compact ? 2 : 4,
       ),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: cs.primary,
+        color: backgroundColor,
+        gradient: gradient,
         borderRadius: BorderRadius.circular(999),
+        boxShadow: isHot
+            ? [
+                BoxShadow(
+                  color: const Color(0xFFFF8A3D).withValues(alpha: 0.28),
+                  blurRadius: compact ? 12 : 16,
+                  offset: Offset(0, compact ? 3 : 4),
+                ),
+              ]
+            : null,
       ),
       child: Text(
         _formatMergedCount(count),
         textAlign: TextAlign.center,
+        textHeightBehavior: const TextHeightBehavior(
+          applyHeightToFirstAscent: false,
+          applyHeightToLastDescent: false,
+        ),
+        strutStyle: const StrutStyle(height: 1, forceStrutHeight: true),
         style: tt.labelSmall?.copyWith(
-          color: cs.onPrimary,
+          color: foregroundColor,
           fontWeight: FontWeight.w700,
+          letterSpacing: isHot ? 0.15 : 0,
+          height: 1,
         ),
       ),
     );
@@ -1142,11 +1321,15 @@ class _CommentSettingsPanel extends StatefulWidget {
   final bool showUserName;
   final bool showCommentTime;
   final double commentFontScale;
+  final bool commentPreload;
+  final bool commentAutoLoadAll;
   final ValueChanged<bool> onLayoutChanged;
   final ValueChanged<bool> onShowAvatarChanged;
   final ValueChanged<bool> onShowUserNameChanged;
   final ValueChanged<bool> onShowCommentTimeChanged;
   final ValueChanged<double> onFontScaleChanged;
+  final ValueChanged<bool> onPreloadChanged;
+  final ValueChanged<bool> onAutoLoadAllChanged;
 
   const _CommentSettingsPanel({
     required this.useCompactLayout,
@@ -1154,11 +1337,15 @@ class _CommentSettingsPanel extends StatefulWidget {
     required this.showUserName,
     required this.showCommentTime,
     required this.commentFontScale,
+    required this.commentPreload,
+    required this.commentAutoLoadAll,
     required this.onLayoutChanged,
     required this.onShowAvatarChanged,
     required this.onShowUserNameChanged,
     required this.onShowCommentTimeChanged,
     required this.onFontScaleChanged,
+    required this.onPreloadChanged,
+    required this.onAutoLoadAllChanged,
   });
 
   @override
@@ -1171,6 +1358,8 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
   late bool _showUserName;
   late bool _showCommentTime;
   late double _commentFontScale;
+  late bool _commentPreload;
+  late bool _commentAutoLoadAll;
 
   @override
   void initState() {
@@ -1180,6 +1369,8 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
     _showUserName = widget.showUserName;
     _showCommentTime = widget.showCommentTime;
     _commentFontScale = widget.commentFontScale;
+    _commentPreload = widget.commentPreload;
+    _commentAutoLoadAll = widget.commentAutoLoadAll;
   }
 
   @override
@@ -1204,7 +1395,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1279,6 +1470,26 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                   widget.onShowCommentTimeChanged(value);
                 },
               ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('预加载评论'),
+                subtitle: const Text('进入章节时提前加载评论并显示数量'),
+                value: _commentPreload,
+                onChanged: (value) {
+                  setState(() => _commentPreload = value);
+                  widget.onPreloadChanged(value);
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('自动加载全部评论'),
+                subtitle: const Text('打开评论区时自动加载所有评论'),
+                value: _commentAutoLoadAll,
+                onChanged: (value) {
+                  setState(() => _commentAutoLoadAll = value);
+                  widget.onAutoLoadAllChanged(value);
+                },
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -1317,6 +1528,56 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
 String _formatMergedCount(int count) => '$count';
 
 bool _shouldShowMergedCountTag(int count) => count > 1;
+
+bool _isHotMergedComment(int count) => count >= 10;
+
+BoxDecoration _buildCommentCardDecoration(
+  ColorScheme colorScheme, {
+  required Brightness brightness,
+  required bool compact,
+  required bool highlightAsHot,
+}) {
+  final borderRadius = BorderRadius.circular(16);
+  if (!highlightAsHot) {
+    return BoxDecoration(
+      color: colorScheme.surfaceContainerLow,
+      borderRadius: borderRadius,
+    );
+  }
+
+  final startColor = Color.lerp(
+    colorScheme.surfaceContainerLow,
+    const Color(0xFFFFD89A),
+    brightness == Brightness.dark ? 0.18 : 0.36,
+  )!;
+  final endColor = Color.lerp(
+    colorScheme.surfaceContainerLow,
+    const Color(0xFFFFA05C),
+    brightness == Brightness.dark ? 0.12 : 0.22,
+  )!;
+  final borderColor = const Color(0xFFFFB34D).withValues(
+    alpha: brightness == Brightness.dark ? 0.42 : 0.7,
+  );
+
+  return BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [startColor, endColor],
+    ),
+    borderRadius: borderRadius,
+    border: Border.all(color: borderColor),
+    boxShadow: [
+      BoxShadow(
+        color: const Color(0xFFFF8A3D).withValues(
+          alpha: brightness == Brightness.dark ? 0.16 : 0.12,
+        ),
+        blurRadius: compact ? 14 : 18,
+        offset: Offset(0, compact ? 4 : 6),
+      ),
+    ],
+  );
+}
 
 TextStyle? _buildCommentUserStyle(
   TextTheme textTheme,

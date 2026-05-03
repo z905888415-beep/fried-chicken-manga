@@ -7,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../api/api_client.dart';
 import '../models/chapter.dart';
+import '../models/chapter_comment.dart';
 import '../models/user_manager.dart';
 import '../utils/download_manager.dart';
 import '../utils/image_load_stats.dart';
@@ -86,6 +87,10 @@ class _ReaderPageState extends State<ReaderPage> {
   final Map<int, int> _imageRetryCounts = {};
   final Map<int, String> _imageRetryTokens = {};
 
+  List<ChapterComment>? _cachedComments;
+  int _cachedCommentTotal = 0;
+  String? _cachedCommentChapterUuid;
+
   bool get _isPageMode => _user.readerMode == 1;
   bool get _isVerticalPageMode => _isPageMode && _user.readerPageVertical;
   bool get _isDarkMode => Theme.of(context).brightness == Brightness.dark;
@@ -93,6 +98,53 @@ class _ReaderPageState extends State<ReaderPage> {
       !_isPageMode && _user.readerScrollDirection != 2;
   bool get _isReversedScrollMode =>
       !_isPageMode && _user.readerScrollDirection == 1;
+
+  int get _commentCount {
+    if (_detail == null) return 0;
+    if (_detail!.isDownloaded) return _detail!.commentTotal;
+    if (_hasCommentCacheFor(_detail!.uuid)) return _cachedCommentTotal;
+    return 0;
+  }
+
+  bool _hasCommentCacheFor(String chapterUuid) =>
+      _cachedCommentChapterUuid == chapterUuid && _cachedComments != null;
+
+  void _updateCommentCache(
+    String chapterUuid,
+    List<ChapterComment> comments,
+    int total, {
+    bool rebuild = false,
+  }) {
+    var nextComments = List<ChapterComment>.from(comments);
+    var nextTotal = total < nextComments.length ? nextComments.length : total;
+
+    if (_cachedCommentChapterUuid == chapterUuid && _cachedComments != null) {
+      if (_cachedComments!.length > nextComments.length) {
+        nextComments = List<ChapterComment>.from(_cachedComments!);
+      }
+      if (_cachedCommentTotal > nextTotal) {
+        nextTotal = _cachedCommentTotal;
+      }
+    }
+
+    void apply() {
+      _cachedComments = nextComments;
+      _cachedCommentTotal = nextTotal;
+      _cachedCommentChapterUuid = chapterUuid;
+    }
+
+    if (rebuild && mounted) {
+      setState(apply);
+      return;
+    }
+    apply();
+  }
+
+  void _clearCommentCache() {
+    _cachedComments = null;
+    _cachedCommentTotal = 0;
+    _cachedCommentChapterUuid = null;
+  }
 
   bool _isFirstLoad = true;
 
@@ -189,6 +241,7 @@ class _ReaderPageState extends State<ReaderPage> {
       }
       _autoAdvancingChapter = false;
       _saveReadingHistory();
+      _preloadComments();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _preloadImages(startPage - 1);
       });
@@ -208,8 +261,32 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
+  Future<void> _preloadComments() async {
+    if (!_user.commentPreload) return;
+    if (_detail == null || _detail!.isDownloaded) return;
+    if (_hasCommentCacheFor(_currentUuid)) return;
+
+    final chapterUuid = _currentUuid;
+
+    try {
+      final data = await _api.getChapterComments(chapterUuid, limit: 100);
+      if (!mounted || _currentUuid != chapterUuid) return;
+      _updateCommentCache(
+        chapterUuid,
+        data.list,
+        data.total,
+        rebuild: true,
+      );
+    } catch (_) {
+      // 预加载失败不影响正常流程
+    }
+  }
+
   void _goChapter(String? uuid) {
     if (uuid == null) return;
+    if (_currentUuid != uuid) {
+      _clearCommentCache();
+    }
     _currentUuid = uuid;
     _loadChapter();
   }
@@ -717,7 +794,7 @@ class _ReaderPageState extends State<ReaderPage> {
         OutlinedButton.icon(
           onPressed: _showChapterComments,
           icon: const Icon(Icons.forum_outlined),
-          label: const Text('评论'),
+          label: Text(_commentCount > 0 ? '$_commentCount' : '评论'),
           style: buttonStyle,
         ),
         if (hasNext)
@@ -778,7 +855,7 @@ class _ReaderPageState extends State<ReaderPage> {
                   OutlinedButton.icon(
                     onPressed: _showChapterComments,
                     icon: const Icon(Icons.forum_outlined, size: 18),
-                    label: const Text('评论'),
+                    label: Text(_commentCount > 0 ? '$_commentCount' : '评论'),
                     style: buttonStyle,
                   ),
                   if (hasNext)
@@ -833,6 +910,14 @@ class _ReaderPageState extends State<ReaderPage> {
     final detail = _detail;
     if (detail == null) return;
 
+    final useCachedComments = _hasCommentCacheFor(detail.uuid);
+    final initialComments = detail.isDownloaded
+        ? detail.comments
+        : (useCachedComments ? _cachedComments : null);
+    final initialTotal = detail.isDownloaded
+        ? detail.commentTotal
+        : (useCachedComments ? _cachedCommentTotal : null);
+
     final action = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -841,8 +926,19 @@ class _ReaderPageState extends State<ReaderPage> {
       builder: (_) => ChapterCommentsSheet(
         chapterUuid: detail.uuid,
         chapterName: detail.name,
-        initialComments: detail.isDownloaded ? detail.comments : null,
-        initialTotal: detail.isDownloaded ? detail.commentTotal : null,
+        initialComments: initialComments,
+        initialTotal: initialTotal,
+        onCommentsUpdated: detail.isDownloaded
+            ? null
+            : (comments, total) {
+                if (!mounted || _currentUuid != detail.uuid) return;
+                _updateCommentCache(
+                  detail.uuid,
+                  comments,
+                  total,
+                  rebuild: true,
+                );
+              },
         hasNextChapter: detail.next != null,
         onNextChapter: detail.next == null
             ? null
@@ -1091,9 +1187,18 @@ class _ReaderPageState extends State<ReaderPage> {
                           tooltip: '目录',
                         ),
                         IconButton(
-                          icon: const Icon(
-                            Icons.forum_outlined,
-                            color: Colors.white,
+                          icon: Badge(
+                            isLabelVisible: _commentCount > 0,
+                            backgroundColor: Colors.white,
+                            textColor: Colors.black,
+                            label: Text(
+                              '$_commentCount',
+                              style: const TextStyle(fontSize: 10),
+                            ),
+                            child: const Icon(
+                              Icons.forum_outlined,
+                              color: Colors.white,
+                            ),
                           ),
                           onPressed: _showChapterComments,
                           tooltip: '章节评论',
