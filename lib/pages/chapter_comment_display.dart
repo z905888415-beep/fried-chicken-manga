@@ -1,16 +1,40 @@
 import '../models/chapter_comment.dart';
 
+// 标点符号正则，用于规范化评论文本
+final _punctuationRegex = RegExp(r'[^\w\s一-鿿]');
+
+/// 规范化评论文本：去除标点符号、转小写、去除首尾空格
+String _normalizeComment(String text) {
+  return text
+      .replaceAll(_punctuationRegex, '')
+      .toLowerCase()
+      .trim();
+}
+
+/// 从评论列表中选择出现次数最多的原始文本作为显示文本
+String _selectDisplayText(List<ChapterComment> comments) {
+  final counts = <String, int>{};
+  for (final comment in comments) {
+    counts[comment.comment] = (counts[comment.comment] ?? 0) + 1;
+  }
+  return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+}
+
 List<ChapterCommentDisplayEntry> groupChapterComments(
   Iterable<ChapterComment> comments,
 ) {
-  final groupedByContent = <String, List<ChapterComment>>{};
+  final groupedByNormalized = <String, List<ChapterComment>>{};
   final orderedKeys = <String>[];
   final duplicates = <ChapterComment>[];
 
   for (final comment in comments) {
-    final key = comment.comment;
-    final bucket = groupedByContent.putIfAbsent(key, () {
-      orderedKeys.add(key);
+    final normalizedKey = _normalizeComment(comment.comment);
+    if (normalizedKey.isEmpty) {
+      duplicates.add(comment);
+      continue;
+    }
+    final bucket = groupedByNormalized.putIfAbsent(normalizedKey, () {
+      orderedKeys.add(normalizedKey);
       return <ChapterComment>[];
     });
     // 同一用户重复发相同内容的评论不参与合并，保留为独立条目
@@ -24,8 +48,8 @@ List<ChapterCommentDisplayEntry> groupChapterComments(
   }
 
   final entries = [
-    for (final key in orderedKeys)
-      ChapterCommentDisplayEntry(comments: groupedByContent[key]!),
+    for (final normalizedKey in orderedKeys)
+      ChapterCommentDisplayEntry(comments: groupedByNormalized[normalizedKey]!),
     for (final dup in duplicates)
       ChapterCommentDisplayEntry(comments: [dup]),
   ];
@@ -38,8 +62,8 @@ List<ChapterCommentDisplayEntry> groupChapterComments(
     ..sort((a, b) {
       final countCompare = b.count.compareTo(a.count);
       if (countCompare != 0) return countCompare;
-      return firstAppearanceOrder[a.content]!.compareTo(
-        firstAppearanceOrder[b.content]!,
+      return firstAppearanceOrder[a._normalizedKey]!.compareTo(
+        firstAppearanceOrder[b._normalizedKey]!,
       );
     });
 
@@ -55,11 +79,16 @@ class ChapterCommentDisplayEntry {
 
   final List<ChapterComment> comments;
 
+  /// 规范化后的分组key，用于排序时保持稳定顺序
+  late final String _normalizedKey = _normalizeComment(primaryComment.comment);
+
   bool get isMerged => comments.length > 1;
 
   ChapterComment get primaryComment => comments.first;
 
-  String get content => primaryComment.comment;
+  /// 合并评论时显示多数优先的原始文本，单条评论直接显示原文
+  String get content =>
+      isMerged ? _selectDisplayText(comments) : primaryComment.comment;
 
   int get count => comments.length;
 

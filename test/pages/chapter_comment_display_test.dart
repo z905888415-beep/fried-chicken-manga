@@ -81,14 +81,28 @@ void main() {
     );
   });
 
-  test('comment content must match exactly to be merged', () {
+  test('comments with trailing spaces are merged', () {
     final entries = groupChapterComments([
       comment(id: 1, userId: 'u1', userName: 'A', content: '一样'),
       comment(id: 2, userId: 'u2', userName: 'B', content: '一样 '),
     ]);
 
-    expect(entries, hasLength(2));
-    expect(entries[0].count, 1);
-    expect(entries[1].count, 1);
+    expect(entries, hasLength(1));
+    expect(entries[0].count, 2);
+    expect(entries[0].isMerged, isTrue);
+  });
+
+  test('comments with punctuation differences are merged with majority text', () {
+    final entries = groupChapterComments([
+      comment(id: 1, userId: 'u1', userName: 'A', content: '我操'),
+      comment(id: 2, userId: 'u2', userName: 'B', content: '我操！'),
+      comment(id: 3, userId: 'u3', userName: 'C', content: '我操'),
+      comment(id: 4, userId: 'u4', userName: 'D', content: '我操！'),
+      comment(id: 5, userId: 'u5', userName: 'E', content: '我操'),
+    ]);
+
+    expect(entries, hasLength(1));
+    expect(entries[0].count, 5);
+    expect(entries[0].content, '我操'); // 多数优先
   });
 }
