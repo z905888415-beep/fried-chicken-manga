@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
+import '../utils/comic_hero_tags.dart';
 import 'comic_detail_page.dart';
 import 'home_page.dart';
 
@@ -77,16 +78,26 @@ class _RecommendPageState extends State<RecommendPage> {
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
                 ),
-                itemBuilder: (_, i) => ComicCard(
-                  comic: _comics[i],
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ComicDetailPage(pathWord: _comics[i].pathWord),
+                itemBuilder: (_, i) {
+                  final comic = _comics[i];
+                  final heroTagBase = ComicHeroTags.base(
+                    scope: 'recommend',
+                    pathWord: comic.pathWord,
+                    index: i,
+                  );
+                  return ComicCard(
+                    comic: comic,
+                    heroTagBase: heroTagBase,
+                    onTap: () => Navigator.push(
+                      context,
+                      ComicDetailPage.route(
+                        pathWord: comic.pathWord,
+                        initialComic: comic,
+                        heroTagBase: heroTagBase,
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
             ),
     );

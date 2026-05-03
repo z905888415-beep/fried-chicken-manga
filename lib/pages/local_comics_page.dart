@@ -475,8 +475,9 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
             IconButton(
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => ComicDetailPage(pathWord: widget.pathWord),
+                ComicDetailPage.route(
+                  pathWord: widget.pathWord,
+                  initialComic: comic,
                 ),
               ),
               icon: const Icon(Icons.public),

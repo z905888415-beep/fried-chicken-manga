@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/user_manager.dart';
+import '../utils/comic_hero_tags.dart';
 import '../utils/toast.dart';
 import 'comic_detail_page.dart';
 
@@ -336,6 +337,11 @@ class _BrowseHistoryCard extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     final comic = item.comic;
     final authors = comic.authors.map((e) => e.name).where((e) => e.isNotEmpty);
+    final heroTagBase = ComicHeroTags.base(
+      scope: 'browse-history',
+      pathWord: comic.pathWord,
+      index: item.id,
+    );
 
     return Card(
       margin: EdgeInsets.zero,
@@ -343,12 +349,12 @@ class _BrowseHistoryCard extends StatelessWidget {
       child: InkWell(
         onTap: () => Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => ComicDetailPage(
-              pathWord: comic.pathWord,
-              lastBrowseId: item.lastBrowseId,
-              lastBrowseName: item.lastBrowseName,
-            ),
+          ComicDetailPage.route(
+            pathWord: comic.pathWord,
+            initialComic: comic,
+            heroTagBase: heroTagBase,
+            lastBrowseId: item.lastBrowseId,
+            lastBrowseName: item.lastBrowseName,
           ),
         ),
         child: Padding(
@@ -360,28 +366,34 @@ class _BrowseHistoryCard extends StatelessWidget {
                 width: 84,
                 child: AspectRatio(
                   aspectRatio: 0.72,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: CachedNetworkImage(
-                      imageUrl: comic.cover,
-                      fit: BoxFit.cover,
-                      placeholder: (_, _) => Container(
-                        color: cs.surfaceContainerHighest,
-                        child: Center(
-                          child: Icon(
-                            Icons.image,
-                            color: cs.onSurfaceVariant,
-                            size: 28,
+                  child: _hero(
+                    heroTagBase,
+                    ComicHeroTags.cover,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: CachedNetworkImage(
+                        imageUrl: comic.cover,
+                        fit: BoxFit.cover,
+                        fadeInDuration: Duration.zero,
+                        fadeOutDuration: Duration.zero,
+                        placeholder: (_, _) => Container(
+                          color: cs.surfaceContainerHighest,
+                          child: Center(
+                            child: Icon(
+                              Icons.image,
+                              color: cs.onSurfaceVariant,
+                              size: 28,
+                            ),
                           ),
                         ),
-                      ),
-                      errorWidget: (_, _, _) => Container(
-                        color: cs.surfaceContainerHighest,
-                        child: Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            color: cs.onSurfaceVariant,
-                            size: 28,
+                        errorWidget: (_, _, _) => Container(
+                          color: cs.surfaceContainerHighest,
+                          child: Center(
+                            child: Icon(
+                              Icons.broken_image,
+                              color: cs.onSurfaceVariant,
+                              size: 28,
+                            ),
                           ),
                         ),
                       ),
@@ -476,6 +488,27 @@ class _BrowseHistoryCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _hero(
+    String heroTagBase,
+    String Function(String base) tagOf,
+    Widget child,
+  ) {
+    return Hero(
+      tag: tagOf(heroTagBase),
+      createRectTween: ComicHeroTags.createRectTween,
+      placeholderBuilder: _buildHeroPlaceholder,
+      child: child,
+    );
+  }
+
+  Widget _buildHeroPlaceholder(
+    BuildContext context,
+    Size heroSize,
+    Widget child,
+  ) {
+    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 }
 

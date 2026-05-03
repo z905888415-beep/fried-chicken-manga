@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/comic.dart' as m;
+import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
 import 'comic_detail_page.dart';
 
@@ -434,12 +435,20 @@ class _SearchPageState extends State<SearchPage> {
               sliver: SliverGrid(
                 delegate: SliverChildBuilderDelegate((_, i) {
                   final c = _comics[i];
+                  final heroTagBase = ComicHeroTags.base(
+                    scope: 'search',
+                    pathWord: c.pathWord,
+                    index: i,
+                  );
                   return _ComicGridItem(
                     comic: c,
+                    heroTagBase: heroTagBase,
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => ComicDetailPage(pathWord: c.pathWord),
+                      ComicDetailPage.route(
+                        pathWord: c.pathWord,
+                        initialComic: c,
+                        heroTagBase: heroTagBase,
                       ),
                     ),
                   );
@@ -468,42 +477,54 @@ class _TagChipData {
 
 class _ComicGridItem extends StatelessWidget {
   final Comic comic;
+  final String? heroTagBase;
   final VoidCallback onTap;
-  const _ComicGridItem({required this.comic, required this.onTap});
+  const _ComicGridItem({
+    required this.comic,
+    this.heroTagBase,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
     return GestureDetector(
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Card(
-              margin: EdgeInsets.zero,
-              child: CachedNetworkImage(
-                imageUrl: comic.cover,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                placeholder: (_, _) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                    child: Icon(
-                      Icons.image,
-                      color: cs.onSurfaceVariant,
-                      size: 32,
+            child: _hero(
+              ComicHeroTags.cover,
+              Card(
+                clipBehavior: Clip.antiAlias,
+                margin: EdgeInsets.zero,
+                child: CachedNetworkImage(
+                  imageUrl: comic.cover,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  placeholder: (_, _) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.image,
+                        color: cs.onSurfaceVariant,
+                        size: 32,
+                      ),
                     ),
                   ),
-                ),
-                errorWidget: (_, _, _) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                    child: Icon(
-                      Icons.broken_image,
-                      color: cs.onSurfaceVariant,
-                      size: 32,
+                  errorWidget: (_, _, _) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.broken_image,
+                        color: cs.onSurfaceVariant,
+                        size: 32,
+                      ),
                     ),
                   ),
                 ),
@@ -520,5 +541,24 @@ class _ComicGridItem extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _hero(String Function(String base) tagOf, Widget child) {
+    final base = heroTagBase;
+    if (base == null) return child;
+    return Hero(
+      tag: tagOf(base),
+      createRectTween: ComicHeroTags.createRectTween,
+      placeholderBuilder: _buildHeroPlaceholder,
+      child: child,
+    );
+  }
+
+  Widget _buildHeroPlaceholder(
+    BuildContext context,
+    Size heroSize,
+    Widget child,
+  ) {
+    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 }

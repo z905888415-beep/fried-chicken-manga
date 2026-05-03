@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
+import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
 import 'comic_detail_page.dart';
 import 'recommend_page.dart';
@@ -90,11 +91,13 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openComic(Comic comic) {
+  void _openComic(Comic comic, String heroTagBase) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => ComicDetailPage(pathWord: comic.pathWord),
+      ComicDetailPage.route(
+        pathWord: comic.pathWord,
+        initialComic: comic,
+        heroTagBase: heroTagBase,
       ),
     );
   }
@@ -154,9 +157,15 @@ class _HomePageState extends State<HomePage> {
                   itemCount: _recommendations.length,
                   itemBuilder: (_, i) {
                     final c = _recommendations[i];
+                    final heroTagBase = ComicHeroTags.base(
+                      scope: 'home-recommend',
+                      pathWord: c.pathWord,
+                      index: i,
+                    );
                     return _RecommendCard(
                       comic: c,
-                      onTap: () => _openComic(c),
+                      heroTagBase: heroTagBase,
+                      onTap: () => _openComic(c, heroTagBase),
                     );
                   },
                 ),
@@ -179,10 +188,19 @@ class _HomePageState extends State<HomePage> {
               padding: EdgeInsets.symmetric(horizontal: hp),
               sliver: SliverGrid(
                 delegate: SliverChildBuilderDelegate(
-                  (_, i) => ComicCard(
-                    comic: _rankingPreview[i],
-                    onTap: () => _openComic(_rankingPreview[i]),
-                  ),
+                  (_, i) {
+                    final comic = _rankingPreview[i];
+                    final heroTagBase = ComicHeroTags.base(
+                      scope: 'home-ranking',
+                      pathWord: comic.pathWord,
+                      index: i,
+                    );
+                    return ComicCard(
+                      comic: comic,
+                      heroTagBase: heroTagBase,
+                      onTap: () => _openComic(comic, heroTagBase),
+                    );
+                  },
                   childCount: _rankingPreview.length,
                 ),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -249,12 +267,33 @@ class _SectionTitle extends StatelessWidget {
 
 class _RecommendCard extends StatelessWidget {
   final Comic comic;
+  final String? heroTagBase;
   final VoidCallback onTap;
-  const _RecommendCard({required this.comic, required this.onTap});
+  const _RecommendCard({
+    required this.comic,
+    this.heroTagBase,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final title = Text(
+      comic.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.bodySmall,
+    );
+    final authorText = Text(
+      comic.authors.map((a) => a.name).join(' / '),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context)
+          .textTheme
+          .labelSmall
+          ?.copyWith(color: cs.onSurfaceVariant),
+    );
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -264,93 +303,138 @@ class _RecommendCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: Card(
-                margin: EdgeInsets.zero,
-                child: CachedNetworkImage(
-                  imageUrl: comic.cover,
-                  fit: BoxFit.cover,
-                  width: 130,
-                  height: double.infinity,
-                  placeholder: (_, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                        child: Icon(Icons.image,
-                            color: cs.onSurfaceVariant, size: 32)),
-                  ),
-                  errorWidget: (_, _, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                        child: Icon(Icons.broken_image,
-                            color: cs.onSurfaceVariant, size: 32)),
+              child: _hero(
+                ComicHeroTags.cover,
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  margin: EdgeInsets.zero,
+                  child: CachedNetworkImage(
+                    imageUrl: comic.cover,
+                    fit: BoxFit.cover,
+                    width: 130,
+                    height: double.infinity,
+                    fadeInDuration: Duration.zero,
+                    fadeOutDuration: Duration.zero,
+                    placeholder: (_, _) => Container(
+                      color: cs.surfaceContainerHighest,
+                      child: Center(
+                        child: Icon(
+                          Icons.image,
+                          color: cs.onSurfaceVariant,
+                          size: 32,
+                        ),
+                      ),
+                    ),
+                    errorWidget: (_, _, _) => Container(
+                      color: cs.surfaceContainerHighest,
+                      child: Center(
+                        child: Icon(
+                          Icons.broken_image,
+                          color: cs.onSurfaceVariant,
+                          size: 32,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            Text(comic.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall),
-            if (comic.authors.isNotEmpty)
-              Text(
-                comic.authors.map((a) => a.name).join(' / '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: cs.onSurfaceVariant),
-              ),
+            title,
+            if (comic.authors.isNotEmpty) authorText,
           ],
         ),
       ),
     );
+  }
+
+  Widget _hero(String Function(String base) tagOf, Widget child) {
+    final base = heroTagBase;
+    if (base == null) return child;
+    return Hero(
+      tag: tagOf(base),
+      createRectTween: ComicHeroTags.createRectTween,
+      placeholderBuilder: _buildHeroPlaceholder,
+      child: child,
+    );
+  }
+
+  Widget _buildHeroPlaceholder(
+    BuildContext context,
+    Size heroSize,
+    Widget child,
+  ) {
+    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 }
 
 /// 漫画网格卡片，多页面复用
 class ComicCard extends StatelessWidget {
   final Comic comic;
+  final String? heroTagBase;
   final VoidCallback onTap;
-  const ComicCard({super.key, required this.comic, required this.onTap});
+  const ComicCard({
+    super.key,
+    required this.comic,
+    this.heroTagBase,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final title = Text(
+      comic.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: tt.bodySmall,
+    );
+
     return GestureDetector(
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Card(
-              margin: EdgeInsets.zero,
-              child: CachedNetworkImage(
-                imageUrl: comic.cover,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                placeholder: (_, _) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                      child: Icon(Icons.image,
-                          color: cs.onSurfaceVariant, size: 32)),
-                ),
-                errorWidget: (_, _, _) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                      child: Icon(Icons.broken_image,
-                          color: cs.onSurfaceVariant, size: 32)),
+            child: _hero(
+              ComicHeroTags.cover,
+              Card(
+                clipBehavior: Clip.antiAlias,
+                margin: EdgeInsets.zero,
+                child: CachedNetworkImage(
+                  imageUrl: comic.cover,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  placeholder: (_, _) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.image,
+                        color: cs.onSurfaceVariant,
+                        size: 32,
+                      ),
+                    ),
+                  ),
+                  errorWidget: (_, _, _) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.broken_image,
+                        color: cs.onSurfaceVariant,
+                        size: 32,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
           const SizedBox(height: 6),
-          Text(comic.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tt.bodySmall),
+          title,
           const SizedBox(height: 2),
           Row(
             children: [
@@ -373,6 +457,25 @@ class ComicCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _hero(String Function(String base) tagOf, Widget child) {
+    final base = heroTagBase;
+    if (base == null) return child;
+    return Hero(
+      tag: tagOf(base),
+      createRectTween: ComicHeroTags.createRectTween,
+      placeholderBuilder: _buildHeroPlaceholder,
+      child: child,
+    );
+  }
+
+  Widget _buildHeroPlaceholder(
+    BuildContext context,
+    Size heroSize,
+    Widget child,
+  ) {
+    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 
   static String formatPopular(int n) {

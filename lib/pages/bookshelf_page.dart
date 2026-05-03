@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/user_manager.dart';
+import '../utils/comic_hero_tags.dart';
 import '../utils/toast.dart';
 import 'comic_detail_page.dart';
 import 'home_page.dart';
@@ -387,18 +388,26 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                   ? _items.where((e) => e.hasUpdate).toList()
                                   : _items;
                               final item = filtered[i];
+                              final heroTagBase = ComicHeroTags.base(
+                                scope: _showUpdateOnly
+                                    ? 'bookshelf-updates'
+                                    : 'bookshelf',
+                                pathWord: item.comic.pathWord,
+                                index: i,
+                              );
                               return Stack(
                                 children: [
                                   ComicCard(
                                     comic: item.comic,
+                                    heroTagBase: heroTagBase,
                                     onTap: () => Navigator.push(
                                       context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ComicDetailPage(
-                                          pathWord: item.comic.pathWord,
-                                          lastBrowseId: item.lastBrowseId,
-                                          lastBrowseName: item.lastBrowseName,
-                                        ),
+                                      ComicDetailPage.route(
+                                        pathWord: item.comic.pathWord,
+                                        initialComic: item.comic,
+                                        heroTagBase: heroTagBase,
+                                        lastBrowseId: item.lastBrowseId,
+                                        lastBrowseName: item.lastBrowseName,
                                       ),
                                     ).then((_) => _load(silent: true)),
                                   ),

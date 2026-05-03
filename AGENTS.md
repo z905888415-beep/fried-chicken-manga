@@ -24,6 +24,7 @@ Prefer keeping page-specific UI logic inside `lib/pages/` and moving reusable be
 
 ## Testing Guidelines
 Use `flutter_test` for unit and widget coverage. Name files `*_test.dart` and mirror the source area when possible, for example `test/pages/home_page_test.dart`. New features and bug fixes should include tests when the behavior can be exercised outside platform-only code.
+If you are codex, you must elevate your rights to execute flutter related commands outside the sandbox.
 
 ## Commit & Pull Request Guidelines
 Recent history uses emoji-prefixed Conventional Commit types with concise Chinese summaries, for example `✨ feat: 添加检查更新功能` and `🐛 fix: 登录过期后提醒用户登录`. Keep that format for new commits.

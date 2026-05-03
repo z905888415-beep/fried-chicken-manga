@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:characters/characters.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/chapter.dart';
+import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
 import '../utils/download_manager.dart';
 import '../utils/reading_history.dart';
@@ -13,14 +13,44 @@ import 'reader_page.dart';
 
 class ComicDetailPage extends StatefulWidget {
   final String pathWord;
+  final Comic? initialComic;
+  final String? heroTagBase;
   final String? lastBrowseId;
   final String? lastBrowseName;
   const ComicDetailPage({
     super.key,
     required this.pathWord,
+    this.initialComic,
+    this.heroTagBase,
     this.lastBrowseId,
     this.lastBrowseName,
   });
+
+  static Route<void> route({
+    required String pathWord,
+    Comic? initialComic,
+    String? heroTagBase,
+    String? lastBrowseId,
+    String? lastBrowseName,
+  }) {
+    return PageRouteBuilder<void>(
+      transitionDuration: ComicHeroTags.transitionDuration,
+      reverseTransitionDuration: ComicHeroTags.reverseTransitionDuration,
+      pageBuilder: (context, animation, secondaryAnimation) => ComicDetailPage(
+        pathWord: pathWord,
+        initialComic: initialComic,
+        heroTagBase: heroTagBase,
+        lastBrowseId: lastBrowseId,
+        lastBrowseName: lastBrowseName,
+      ),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        if (animation.status == AnimationStatus.reverse) {
+          return Opacity(opacity: 0, child: child);
+        }
+        return child;
+      },
+    );
+  }
 
   @override
   State<ComicDetailPage> createState() => _ComicDetailPageState();
@@ -38,7 +68,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   final Set<String> _selectedChapterIds = {};
   String _selectedGroup = 'default';
   bool _loadingComic = true;
-  bool _refreshingComic = false;
   bool _loadingChapters = false;
   bool _keepShowingCachedChapters = false;
   int _chapterTotal = 0;
@@ -62,6 +91,8 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   @override
   void initState() {
     super.initState();
+    _comic = widget.initialComic;
+    _loadingComic = widget.initialComic == null;
     _lastBrowseId = widget.lastBrowseId;
     _lastBrowseName = widget.lastBrowseName;
     _downloads.addListener(_handleDownloadChanged);
@@ -165,7 +196,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         if (!showRefreshNotice) {
           _loadingComic = true;
         }
-        _refreshingComic = showRefreshNotice;
       });
     }
 
@@ -188,8 +218,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       await _loadCollectState();
     } catch (_) {
       if (mounted) setState(() => _loadingComic = false);
-    } finally {
-      if (mounted) setState(() => _refreshingComic = false);
     }
   }
 
@@ -461,6 +489,16 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     });
   }
 
+  void _toggleDownloadSelectionMode() {
+    if (_selectionMode) {
+      _exitSelectionMode();
+      return;
+    }
+    if (_displayChapters.any(_isChapterSelectable)) {
+      _enterSelectionMode();
+    }
+  }
+
   void _toggleChapterSelection(Chapter chapter) {
     if (!_isChapterSelectable(chapter)) return;
     setState(() {
@@ -559,21 +597,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           : Stack(
               children: [
                 _buildBody(cs, tt),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: IgnorePointer(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      switchInCurve: Curves.easeOut,
-                      switchOutCurve: Curves.easeIn,
-                      child: _refreshingComic
-                          ? _buildRefreshingNotice(cs, tt)
-                          : const SizedBox.shrink(),
-                    ),
-                  ),
-                ),
                 if (_lastBrowseId != null)
                   Positioned(
                     right: 16,
@@ -637,38 +660,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     await _loadComic();
   }
 
-  Widget _buildRefreshingNotice(ColorScheme cs, TextTheme tt) {
-    return Material(
-      color: cs.primaryContainer.withValues(alpha: 0.7),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.onPrimaryContainer,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '正在刷新最新数据...',
-                style: tt.bodySmall?.copyWith(
-                  color: cs.onPrimaryContainer,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildDownloadToolbar(ColorScheme cs, TextTheme tt) {
     final pendingCount = _downloads.pendingCountForComic(widget.pathWord);
     final downloadedCount = _downloads
@@ -702,14 +693,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                     icon: const Icon(Icons.download_for_offline, size: 18),
                     label: const Text('下载选中'),
                   ),
-                  TextButton(
-                    onPressed: _exitSelectionMode,
-                    child: const Text('取消'),
-                  ),
-                  Text(
-                    '按当前列表顺序串行下载，避免请求太频繁',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  ),
                 ],
               )
             : Wrap(
@@ -717,16 +700,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  FilledButton.tonalIcon(
-                    onPressed: _displayChapters.any(_isChapterSelectable)
-                        ? () => _enterSelectionMode()
-                        : null,
-                    icon: const Icon(
-                      Icons.download_for_offline_outlined,
-                      size: 18,
-                    ),
-                    label: const Text('下载'),
-                  ),
                   if (pendingCount > 0)
                     Chip(
                       avatar: SizedBox(
@@ -748,10 +721,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       ),
                       label: Text('已下载 $downloadedCount 章'),
                     ),
-                  Text(
-                    '长按章节卡片可快速多选',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  ),
                 ],
               ),
       ),
@@ -874,6 +843,79 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
+  Widget _hero(String Function(String base) tagOf, Widget child) {
+    final base = widget.heroTagBase;
+    if (base == null) return child;
+    return Hero(
+      tag: tagOf(base),
+      createRectTween: ComicHeroTags.createRectTween,
+      placeholderBuilder: _buildHeroPlaceholder,
+      child: child,
+    );
+  }
+
+  Widget _buildHeroPlaceholder(
+    BuildContext context,
+    Size heroSize,
+    Widget child,
+  ) {
+    return SizedBox(width: heroSize.width, height: heroSize.height);
+  }
+
+  Widget _buildDetailActions(Comic comic) {
+    final buttonStyle = FilledButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed:
+                _selectionMode || _displayChapters.any(_isChapterSelectable)
+                ? _toggleDownloadSelectionMode
+                : null,
+            icon: Icon(
+              _selectionMode
+                  ? Icons.close
+                  : Icons.download_for_offline_outlined,
+              size: 18,
+            ),
+            label: Text(_selectionMode ? '取消' : '下载'),
+            style: buttonStyle,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: comic.uuid == null || comic.uuid!.isEmpty
+                ? null
+                : _showComicComments,
+            icon: const Icon(Icons.forum_outlined, size: 18),
+            label: const Text('评论'),
+            style: buttonStyle,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: comic.uuid == null || comic.uuid!.isEmpty
+                ? null
+                : _toggleCollect,
+            icon: Icon(
+              _isCollected ? Icons.bookmark : Icons.bookmark_border,
+              size: 18,
+            ),
+            label: Text(_isCollected ? '已收藏' : '收藏'),
+            style: buttonStyle,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildBody(ColorScheme cs, TextTheme tt) {
     final comic = _comic!;
     return RefreshIndicator(
@@ -887,25 +929,30 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: CachedNetworkImage(
-                      imageUrl: comic.cover,
-                      width: 120,
-                      height: 160,
-                      fit: BoxFit.cover,
-                      placeholder: (_, _) => Container(
+                  _hero(
+                    ComicHeroTags.cover,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: CachedNetworkImage(
+                        imageUrl: comic.cover,
                         width: 120,
                         height: 160,
-                        color: cs.surfaceContainerHighest,
-                      ),
-                      errorWidget: (_, _, _) => Container(
-                        width: 120,
-                        height: 160,
-                        color: cs.surfaceContainerHighest,
-                        child: Icon(
-                          Icons.broken_image,
-                          color: cs.onSurfaceVariant,
+                        fit: BoxFit.cover,
+                        fadeInDuration: Duration.zero,
+                        fadeOutDuration: Duration.zero,
+                        placeholder: (_, _) => Container(
+                          width: 120,
+                          height: 160,
+                          color: cs.surfaceContainerHighest,
+                        ),
+                        errorWidget: (_, _, _) => Container(
+                          width: 120,
+                          height: 160,
+                          color: cs.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.broken_image,
+                            color: cs.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     ),
@@ -915,6 +962,15 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          comic.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: tt.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         if (comic.authors.isNotEmpty) ...[
                           Row(
                             children: [
@@ -1002,58 +1058,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                             ],
                           ),
                         ],
-                        const SizedBox(height: 14),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: FilledButton.tonalIcon(
-                                onPressed:
-                                    comic.uuid == null || comic.uuid!.isEmpty
-                                    ? null
-                                    : _showComicComments,
-                                icon: const Icon(
-                                  Icons.forum_outlined,
-                                  size: 18,
-                                ),
-                                label: const Text('评论'),
-                                style: FilledButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton.tonalIcon(
-                                onPressed:
-                                    comic.uuid == null || comic.uuid!.isEmpty
-                                    ? null
-                                    : _toggleCollect,
-                                icon: Icon(
-                                  _isCollected
-                                      ? Icons.bookmark
-                                      : Icons.bookmark_border,
-                                  size: 18,
-                                ),
-                                label: Text(_isCollected ? '已收藏' : '收藏'),
-                                style: FilledButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
                       ],
                     ),
                   ),
@@ -1077,6 +1081,12 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                 ),
               ),
             ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _buildDetailActions(comic),
+            ),
+          ),
           // ── 分组切换 ──
           if (comic.groups != null && comic.groups!.length > 1)
             SliverToBoxAdapter(
