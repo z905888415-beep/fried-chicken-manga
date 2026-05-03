@@ -26,6 +26,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
   bool _refreshing = false;
   bool _showingLoginPrompt = false;
   late String _ordering = _user.bookshelfOrdering;
+  bool _showUpdateOnly = false;
 
   @override
   void initState() {
@@ -274,6 +275,13 @@ class _BookshelfPageState extends State<BookshelfPage> {
                         padding: EdgeInsets.fromLTRB(hp, 4, hp, 8),
                         child: Row(
                           children: [
+                            FilterChip(
+                              label: const Text('看更新'),
+                              selected: _showUpdateOnly,
+                              onSelected: (v) =>
+                                  setState(() => _showUpdateOnly = v),
+                            ),
+                            const SizedBox(width: 8),
                             Text(
                               '共 $_total 部收藏',
                               style: tt.bodySmall?.copyWith(
@@ -347,73 +355,95 @@ class _BookshelfPageState extends State<BookshelfPage> {
                         ),
                       ),
                     ),
-                    SliverPadding(
-                      padding: EdgeInsets.symmetric(horizontal: hp),
-                      sliver: SliverGrid(
-                        delegate: SliverChildBuilderDelegate((_, i) {
-                          final item = _items[i];
-                          return Stack(
+                    if (_showUpdateOnly && _items.every((e) => !e.hasUpdate))
+                      SliverFillRemaining(
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              ComicCard(
-                                comic: item.comic,
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => ComicDetailPage(
-                                      pathWord: item.comic.pathWord,
-                                      lastBrowseId: item.lastBrowseId,
-                                      lastBrowseName: item.lastBrowseName,
-                                    ),
-                                  ),
-                                ).then((_) => _load(silent: true)),
+                              Icon(
+                                Icons.check_circle_outline,
+                                size: 48,
+                                color: cs.onSurfaceVariant,
                               ),
-                              if (item.hasUpdate)
-                                Positioned(
-                                  top: 0,
-                                  right: 0,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: cs.error,
-                                      borderRadius: const BorderRadius.only(
-                                        topRight: Radius.circular(12),
-                                        bottomLeft: Radius.circular(10),
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: cs.error.withValues(
-                                            alpha: 0.6,
-                                          ),
-                                          blurRadius: 8,
-                                          spreadRadius: 2,
-                                        ),
-                                      ],
-                                    ),
-                                    child: Text(
-                                      '更新',
-                                      style: TextStyle(
-                                        color: cs.onError,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
+                              const SizedBox(height: 12),
+                              Text(
+                                '没有漫画更新 🥲',
+                                style: tt.bodyMedium?.copyWith(
+                                  color: cs.onSurfaceVariant,
                                 ),
+                              ),
                             ],
-                          );
-                        }, childCount: _items.length),
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 130,
-                              childAspectRatio: 0.55,
-                              mainAxisSpacing: 12,
-                              crossAxisSpacing: 12,
-                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: EdgeInsets.symmetric(horizontal: hp),
+                        sliver: SliverGrid(
+                          delegate: SliverChildBuilderDelegate(
+                            (_, i) {
+                              final filtered = _showUpdateOnly
+                                  ? _items.where((e) => e.hasUpdate).toList()
+                                  : _items;
+                              final item = filtered[i];
+                              return Stack(
+                                children: [
+                                  ComicCard(
+                                    comic: item.comic,
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ComicDetailPage(
+                                          pathWord: item.comic.pathWord,
+                                          lastBrowseId: item.lastBrowseId,
+                                          lastBrowseName: item.lastBrowseName,
+                                        ),
+                                      ),
+                                    ).then((_) => _load(silent: true)),
+                                  ),
+                                  if (item.hasUpdate)
+                                    Positioned(
+                                      top: 0,
+                                      right: 0,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: cs.error,
+                                          borderRadius: const BorderRadius.only(
+                                            topRight: Radius.circular(12),
+                                            bottomLeft: Radius.circular(10),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '更新',
+                                          style: TextStyle(
+                                            color: cs.onError,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                            childCount: _showUpdateOnly
+                                ? _items.where((e) => e.hasUpdate).length
+                                : _items.length,
+                          ),
+                          gridDelegate:
+                              const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 130,
+                                childAspectRatio: 0.55,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                              ),
+                        ),
                       ),
-                    ),
                     if (_loadingMore)
                       SliverToBoxAdapter(
                         child: Padding(

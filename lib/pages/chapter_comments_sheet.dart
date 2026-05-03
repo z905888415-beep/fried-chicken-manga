@@ -320,19 +320,22 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                       children: [
                         FilledButton.icon(
                           style: buttonStyle,
-                          onPressed: widget.hasNextChapter
-                              ? widget.onNextChapter
-                              : () {
-                                  widget.onBackToCatalog?.call();
-                                  Navigator.of(context).pop('back_to_catalog');
-                                },
-                          icon: Icon(
-                            widget.hasNextChapter
-                                ? Icons.skip_next_rounded
-                                : Icons.list_rounded,
-                          ),
-                          label: Text(widget.hasNextChapter ? '下一话' : '返回目录'),
+                          onPressed: () {
+                            widget.onBackToCatalog?.call();
+                            Navigator.of(context).pop('back_to_catalog');
+                          },
+                          icon: const Icon(Icons.list_rounded),
+                          label: const Text('返回目录'),
                         ),
+                        if (widget.hasNextChapter) ...[
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            style: buttonStyle,
+                            onPressed: widget.onNextChapter,
+                            icon: const Icon(Icons.skip_next_rounded),
+                            label: const Text('下一话'),
+                          ),
+                        ],
                         const SizedBox(width: 8),
                         SizedBox.square(
                           dimension: 52,
@@ -641,7 +644,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
           textScaler,
           maxWidth,
         );
-        return countTagWidth + 34;
+        return countTagWidth + 20;
       }
       final avatarCount = entry.avatarComments().length;
       final avatarWidth = _avatarStackWidth(
@@ -938,21 +941,48 @@ class _MergedCommentContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final showCountTag = _shouldShowMergedCountTag(entry.count);
 
+    if (!showAvatar) {
+      if (!showCountTag) {
+        return SelectableText(
+          entry.content,
+          minLines: compact ? 1 : null,
+          style: bodyStyle,
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              entry.content,
+              maxLines: compact ? 3 : null,
+              overflow: compact ? TextOverflow.ellipsis : null,
+              style: bodyStyle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: _MergedCommentCountTag(count: entry.count, compact: compact),
+          ),
+        ],
+      );
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            if (showAvatar)
-              _CommentAvatarStack(
-                comments: entry.avatarComments(),
-                avatarSize: compact ? 22.0 : 26.0,
-                overlap: compact ? 8.0 : 10.0,
-              ),
+            _CommentAvatarStack(
+              comments: entry.avatarComments(),
+              avatarSize: compact ? 22.0 : 26.0,
+              overlap: compact ? 8.0 : 10.0,
+            ),
             const Spacer(),
             if (showCountTag) ...[
-              if (showAvatar) const SizedBox(width: 8),
+              const SizedBox(width: 8),
               _MergedCommentCountTag(count: entry.count, compact: compact),
             ],
           ],
@@ -1225,7 +1255,6 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('显示头像'),
-                subtitle: const Text('合并评论的头像不受影响'),
                 value: _showUserAvatar,
                 onChanged: (value) {
                   setState(() => _showUserAvatar = value);
@@ -1285,7 +1314,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
   }
 }
 
-String _formatMergedCount(int count) => count > 99 ? 'x99+' : 'x$count';
+String _formatMergedCount(int count) => '$count';
 
 bool _shouldShowMergedCountTag(int count) => count > 1;
 
