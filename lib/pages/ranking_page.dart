@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../utils/comic_hero_tags.dart';
+import '../utils/comic_card_skeleton.dart';
 import 'comic_detail_page.dart';
 import 'home_page.dart';
 
@@ -36,6 +37,7 @@ class _RankingPageState extends State<RankingPage> {
     });
     try {
       final data = await _api.getComicList(ordering: _ordering, limit: 21);
+      if (!mounted) return;
       setState(() {
         _comics = data.list;
         _total = data.total;
@@ -43,22 +45,27 @@ class _RankingPageState extends State<RankingPage> {
         _loading = false;
       });
     } catch (_) {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _loadMore() async {
     if (_loadingMore || _offset >= _total) return;
-    _loadingMore = true;
+    setState(() => _loadingMore = true);
     try {
       final data = await _api.getComicList(
           ordering: _ordering, limit: 21, offset: _offset);
+      if (!mounted) return;
       setState(() {
         _comics.addAll(data.list);
         _offset = _comics.length;
       });
     } catch (_) {}
-    _loadingMore = false;
+    if (mounted) {
+      setState(() => _loadingMore = false);
+    } else {
+      _loadingMore = false;
+    }
   }
 
   @override
@@ -66,6 +73,13 @@ class _RankingPageState extends State<RankingPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final contentWidth = screenWidth.clamp(0.0, 900.0);
     final hp = (screenWidth - contentWidth) / 2 + 16;
+
+    const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 130,
+      childAspectRatio: 0.55,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -98,7 +112,12 @@ class _RankingPageState extends State<RankingPage> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? GridView.builder(
+              padding: EdgeInsets.symmetric(horizontal: hp, vertical: 12),
+              itemCount: 21,
+              gridDelegate: gridDelegate,
+              itemBuilder: (_, _) => const ComicCardSkeleton(),
+            )
           : NotificationListener<ScrollNotification>(
               onNotification: (n) {
                 if (n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
@@ -106,35 +125,47 @@ class _RankingPageState extends State<RankingPage> {
                 }
                 return false;
               },
-              child: GridView.builder(
-                padding: EdgeInsets.symmetric(horizontal: hp, vertical: 12),
-                itemCount: _comics.length,
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 130,
-                  childAspectRatio: 0.55,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                ),
-                itemBuilder: (_, i) {
-                  final comic = _comics[i];
-                  final heroTagBase = ComicHeroTags.base(
-                    scope: 'ranking',
-                    pathWord: comic.pathWord,
-                    index: i,
-                  );
-                  return ComicCard(
-                    comic: comic,
-                    heroTagBase: heroTagBase,
-                    onTap: () => Navigator.push(
-                      context,
-                      ComicDetailPage.route(
-                        pathWord: comic.pathWord,
-                        initialComic: comic,
-                        heroTagBase: heroTagBase,
+              child: CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
+                    sliver: SliverGrid(
+                      gridDelegate: gridDelegate,
+                      delegate: SliverChildBuilderDelegate((_, i) {
+                        final comic = _comics[i];
+                        final heroTagBase = ComicHeroTags.base(
+                          scope: 'ranking',
+                          pathWord: comic.pathWord,
+                          index: i,
+                        );
+                        return ComicCard(
+                          comic: comic,
+                          heroTagBase: heroTagBase,
+                          onTap: () => Navigator.push(
+                            context,
+                            ComicDetailPage.route(
+                              pathWord: comic.pathWord,
+                              initialComic: comic,
+                              heroTagBase: heroTagBase,
+                            ),
+                          ),
+                        );
+                      }, childCount: _comics.length),
+                    ),
+                  ),
+                  if (_loadingMore)
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
+                      sliver: SliverGrid(
+                        gridDelegate: gridDelegate,
+                        delegate: SliverChildBuilderDelegate(
+                          (_, _) => const ComicCardSkeleton(),
+                          childCount: 6,
+                        ),
                       ),
                     ),
-                  );
-                },
+                  const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
+                ],
               ),
             ),
     );

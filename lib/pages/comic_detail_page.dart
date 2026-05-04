@@ -73,8 +73,10 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   int _chapterTotal = 0;
   int _chapterPage = 0; // 当前页码（0-based）
   static const _pageSize = 100;
+  // 会话内章节分页缓存：key 为 "group:page"，离开详情页时随 State 一起销毁
+  final Map<String, ({List<Chapter> list, int total})> _chapterPageCache = {};
   bool _briefExpanded = false;
-  bool _reversed = true;
+  bool _reversed = false;
   bool _isCollected = false;
   bool _selectionMode = false;
   Chapter? _nextBrowseChapter;
@@ -95,6 +97,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     _loadingComic = widget.initialComic == null;
     _lastBrowseId = widget.lastBrowseId;
     _lastBrowseName = widget.lastBrowseName;
+    if (_lastBrowseId != null) _reversed = true;
     _downloads.addListener(_handleDownloadChanged);
     _initializePage();
   }
@@ -126,6 +129,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         _lastBrowseName = record.chapterName;
         _lastBrowsePage = record.page;
         _lastBrowseTotalPage = record.totalPage;
+        _reversed = true;
       });
       await _syncNextBrowseChapter();
     }
@@ -234,9 +238,31 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     int page, {
     String? group,
     bool keepVisibleDuringLoad = false,
+    bool forceRefresh = false,
   }) async {
     if (_loadingChapters) return;
     final targetGroup = group ?? _selectedGroup;
+    final cacheKey = '$targetGroup:$page';
+
+    // 命中会话内缓存：直接复用，避免重复请求
+    if (!forceRefresh) {
+      final cached = _chapterPageCache[cacheKey];
+      if (cached != null) {
+        setState(() {
+          _chapters = cached.list;
+          _chapterTotal = cached.total;
+          _chapterPage = page;
+          _selectedGroup = targetGroup;
+          _loadingChapters = false;
+          _keepShowingCachedChapters = false;
+          _selectionMode = false;
+          _selectedChapterIds.clear();
+        });
+        await _saveCache();
+        await _syncNextBrowseChapter();
+        return;
+      }
+    }
 
     setState(() {
       _loadingChapters = true;
@@ -257,6 +283,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         offset: page * _pageSize,
       );
       if (!mounted) return;
+      _chapterPageCache[cacheKey] = result;
       setState(() {
         _chapters = result.list;
         _chapterTotal = result.total;
@@ -392,12 +419,19 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       final nextPage = _chapterPage < _totalPages - 1 ? _chapterPage + 1 : null;
       Chapter? nextChapter;
       if (nextPage != null) {
-        final result = await _api.getChapterList(
-          widget.pathWord,
-          group: _selectedGroup,
-          limit: _pageSize,
-          offset: nextPage * _pageSize,
-        );
+        final cacheKey = '$_selectedGroup:$nextPage';
+        final cached = _chapterPageCache[cacheKey];
+        final result =
+            cached ??
+            await _api.getChapterList(
+              widget.pathWord,
+              group: _selectedGroup,
+              limit: _pageSize,
+              offset: nextPage * _pageSize,
+            );
+        if (cached == null) {
+          _chapterPageCache[cacheKey] = result;
+        }
         for (final chapter in result.list) {
           if (chapter.uuid == nextUuid) {
             nextChapter = chapter;
@@ -656,6 +690,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
 
   Future<void> _refresh() async {
     _exitSelectionMode();
+    _chapterPageCache.clear();
     await _loadLocalHistory();
     await _loadComic();
   }
@@ -1173,13 +1208,33 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       );
                     }),
                   ],
-                  IconButton(
-                    icon: Icon(
-                      _reversed ? Icons.arrow_downward : Icons.arrow_upward,
-                      size: 20,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: FilledButton.tonal(
+                      onPressed: () =>
+                          setState(() => _reversed = !_reversed),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(38, 38),
+                        maximumSize: const Size(38, 38),
+                        fixedSize: const Size(38, 38),
+                        padding: EdgeInsets.zero,
+                        backgroundColor: cs.surfaceContainerHigh,
+                        foregroundColor: cs.onSurfaceVariant,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Tooltip(
+                        message: _reversed ? '逆序（新→旧）' : '正序（旧→新）',
+                        child: Icon(
+                          _reversed
+                              ? Icons.arrow_downward
+                              : Icons.arrow_upward,
+                          size: 20,
+                        ),
+                      ),
                     ),
-                    tooltip: _reversed ? '逆序（新→旧）' : '正序（旧→新）',
-                    onPressed: () => setState(() => _reversed = !_reversed),
                   ),
                 ],
               ),

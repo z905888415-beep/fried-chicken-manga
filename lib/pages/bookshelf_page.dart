@@ -4,6 +4,7 @@ import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/user_manager.dart';
 import '../utils/comic_hero_tags.dart';
+import '../utils/comic_card_skeleton.dart';
 import '../utils/toast.dart';
 import 'comic_detail_page.dart';
 import 'home_page.dart';
@@ -27,7 +28,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
   bool _refreshing = false;
   bool _showingLoginPrompt = false;
   late String _ordering = _user.bookshelfOrdering;
-  bool _showUpdateOnly = false;
+  late bool _showUpdateOnly = _user.bookshelfShowUpdateOnly;
 
   @override
   void initState() {
@@ -213,7 +214,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
           ? CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(
-                  child: SizedBox(height: MediaQuery.of(context).padding.top),
+                  child: SizedBox(
+                    height: MediaQuery.of(context).padding.top + 12,
+                  ),
                 ),
                 SliverFillRemaining(
                   child: Center(
@@ -264,7 +267,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   slivers: [
                     SliverToBoxAdapter(
                       child: SizedBox(
-                        height: MediaQuery.of(context).padding.top,
+                        height: MediaQuery.of(context).padding.top + 12,
                       ),
                     ),
                     if (_refreshing)
@@ -279,8 +282,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
                             FilterChip(
                               label: const Text('看更新'),
                               selected: _showUpdateOnly,
-                              onSelected: (v) =>
-                                  setState(() => _showUpdateOnly = v),
+                              onSelected: (v) {
+                                setState(() => _showUpdateOnly = v);
+                                _user.setBookshelfShowUpdateOnly(v);
+                              },
                             ),
                             const SizedBox(width: 8),
                             Text(
@@ -454,30 +459,20 @@ class _BookshelfPageState extends State<BookshelfPage> {
                         ),
                       ),
                     if (_loadingMore)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
-                          child: Center(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  '正在加载更多漫画...',
-                                  style: tt.bodyMedium?.copyWith(
-                                    color: cs.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
+                        sliver: SliverGrid(
+                          delegate: SliverChildBuilderDelegate(
+                            (_, _) => const ComicCardSkeleton(),
+                            childCount: 6,
                           ),
+                          gridDelegate:
+                              const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 130,
+                                childAspectRatio: 0.55,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                              ),
                         ),
                       ),
                     const SliverPadding(padding: EdgeInsets.only(bottom: 24)),

@@ -63,13 +63,34 @@ class _KiraAppState extends State<KiraApp> {
 
   ThemeData _buildTheme(Brightness brightness) {
     final seedColor = _user.themeOption.seedColor;
-    return ThemeData(
-      colorScheme: ColorScheme.fromSeed(
+    var colorScheme = ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: brightness,
+      dynamicSchemeVariant: _user.themeVariant,
+    );
+
+    // 修复“彩虹”等变体会固定生成独立色相（例如粉色）且不随主题色变化的背景问题
+    if (_user.themeVariant == DynamicSchemeVariant.rainbow) {
+      final standardScheme = ColorScheme.fromSeed(
         seedColor: seedColor,
         brightness: brightness,
-        dynamicSchemeVariant: _user.themeVariant,
-        surface: brightness == Brightness.dark ? Colors.black : Colors.white,
-      ),
+      );
+      colorScheme = colorScheme.copyWith(
+        surface: standardScheme.surface,
+        surfaceDim: standardScheme.surfaceDim,
+        surfaceBright: standardScheme.surfaceBright,
+        surfaceContainerLowest: standardScheme.surfaceContainerLowest,
+        surfaceContainerLow: standardScheme.surfaceContainerLow,
+        surfaceContainer: standardScheme.surfaceContainer,
+        surfaceContainerHigh: standardScheme.surfaceContainerHigh,
+        surfaceContainerHighest: standardScheme.surfaceContainerHighest,
+        onSurface: standardScheme.onSurface,
+        onSurfaceVariant: standardScheme.onSurfaceVariant,
+      );
+    }
+
+    return ThemeData(
+      colorScheme: colorScheme,
       useMaterial3: true,
       cardTheme: _cardTheme,
     );

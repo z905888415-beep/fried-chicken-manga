@@ -35,14 +35,14 @@ class SavedCredential {
       );
 
   Map<String, dynamic> toJson() => {
-        'username': username,
-        'password': password,
-        if (token != null) 'token': token,
-        if (loginSource != null) 'login_source': loginSource,
-        if (userId != null) 'user_id': userId,
-        if (nickname != null) 'nickname': nickname,
-        if (avatar != null) 'avatar': avatar,
-      };
+    'username': username,
+    'password': password,
+    if (token != null) 'token': token,
+    if (loginSource != null) 'login_source': loginSource,
+    if (userId != null) 'user_id': userId,
+    if (nickname != null) 'nickname': nickname,
+    if (avatar != null) 'avatar': avatar,
+  };
 
   SavedCredential copyWith({
     String? token,
@@ -50,16 +50,15 @@ class SavedCredential {
     String? userId,
     String? nickname,
     String? avatar,
-  }) =>
-      SavedCredential(
-        username: username,
-        password: password,
-        token: token ?? this.token,
-        loginSource: loginSource ?? this.loginSource,
-        userId: userId ?? this.userId,
-        nickname: nickname ?? this.nickname,
-        avatar: avatar ?? this.avatar,
-      );
+  }) => SavedCredential(
+    username: username,
+    password: password,
+    token: token ?? this.token,
+    loginSource: loginSource ?? this.loginSource,
+    userId: userId ?? this.userId,
+    nickname: nickname ?? this.nickname,
+    avatar: avatar ?? this.avatar,
+  );
 }
 
 class UserManager extends ChangeNotifier {
@@ -81,6 +80,7 @@ class UserManager extends ChangeNotifier {
   static const _keyCustomThemeColor = 'custom_theme_color';
   static const _keyBottomNavShowLabels = 'bottom_nav_show_labels';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
+  static const _keyBookshelfShowUpdateOnly = 'bookshelf_show_update_only';
   static const _keyReaderMode = 'reader_mode';
   static const _keyReaderScrollDirection = 'reader_scroll_direction';
   static const _keyReaderImageGap = 'reader_image_gap';
@@ -118,6 +118,7 @@ class UserManager extends ChangeNotifier {
   int _customThemeColorValue = defaultCustomThemeColor.toARGB32();
   bool _bottomNavShowLabels = true;
   String _bookshelfOrdering = '-datetime_updated';
+  bool _bookshelfShowUpdateOnly = false;
   int _readerMode = 0;
   int _readerScrollDirection = 2;
   double _readerImageGap = 0.0;
@@ -165,10 +166,12 @@ class UserManager extends ChangeNotifier {
     }
     return resolveAppThemeOption(_themeColor);
   }
+
   AppThemeVariantOption get themeVariantOption =>
       resolveAppThemeVariantOption(_themeVariant.name);
 
   String get bookshelfOrdering => _bookshelfOrdering;
+  bool get bookshelfShowUpdateOnly => _bookshelfShowUpdateOnly;
   int get readerMode => _readerMode;
   int get readerScrollDirection => _readerScrollDirection;
   double get readerImageGap => _readerImageGap;
@@ -236,14 +239,17 @@ class UserManager extends ChangeNotifier {
     _themeColor = savedThemeColor == customThemeOptionId
         ? customThemeOptionId
         : resolveAppThemeOption(savedThemeColor).id;
-    _themeVariant =
-        resolveAppThemeVariantOption(prefs.getString(_keyThemeVariant)).variant;
+    _themeVariant = resolveAppThemeVariantOption(
+      prefs.getString(_keyThemeVariant),
+    ).variant;
     _customThemeColorValue =
         prefs.getInt(_keyCustomThemeColor) ??
         defaultCustomThemeColor.toARGB32();
     _bottomNavShowLabels = prefs.getBool(_keyBottomNavShowLabels) ?? true;
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
+    _bookshelfShowUpdateOnly =
+        prefs.getBool(_keyBookshelfShowUpdateOnly) ?? false;
     _readerMode = prefs.getInt(_keyReaderMode) ?? 0;
     _readerScrollDirection = prefs.getInt(_keyReaderScrollDirection) ?? 2;
     _readerImageGap = prefs.getDouble(_keyReaderImageGap) ?? 0.0;
@@ -477,6 +483,14 @@ class UserManager extends ChangeNotifier {
     _bookshelfOrdering = ordering;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyBookshelfOrdering, ordering);
+    notifyListeners();
+  }
+
+  Future<void> setBookshelfShowUpdateOnly(bool value) async {
+    if (_bookshelfShowUpdateOnly == value) return;
+    _bookshelfShowUpdateOnly = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBookshelfShowUpdateOnly, value);
     notifyListeners();
   }
 

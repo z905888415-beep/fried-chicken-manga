@@ -341,6 +341,9 @@ class LocalComicDetailPage extends StatefulWidget {
 }
 
 class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
+  static const _continueReadingNameMaxLength = 10;
+  static const _nextChapterNameMaxLength = 10;
+
   final _downloads = DownloadManager();
   final Set<String> _selectedChapterIds = {};
   bool _selectionMode = false;
@@ -349,6 +352,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
   String? _lastBrowseId;
   String? _lastBrowseName;
   int _lastBrowsePage = 1;
+  int _lastBrowseTotalPage = 0;
 
   @override
   void initState() {
@@ -391,7 +395,52 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
       _lastBrowseId = record.chapterUuid;
       _lastBrowseName = record.chapterName;
       _lastBrowsePage = record.page;
+      _lastBrowseTotalPage = record.totalPage;
     });
+  }
+
+  bool get _isLastBrowseComplete {
+    if (_lastBrowseTotalPage <= 0) return false;
+    final unreadThreshold = _lastBrowseTotalPage <= 1
+        ? 1
+        : _lastBrowseTotalPage - 1;
+    return _lastBrowsePage >= unreadThreshold;
+  }
+
+  String _continueReadingLabel() {
+    final name = _truncateContinueReadingName(_lastBrowseName ?? '');
+    if (_lastBrowseTotalPage > 1) {
+      return name.isEmpty
+          ? '$_lastBrowsePage/$_lastBrowseTotalPage'
+          : '$name · $_lastBrowsePage/$_lastBrowseTotalPage';
+    }
+    return name;
+  }
+
+  String _truncateContinueReadingName(String name) =>
+      _truncateChapterName(name, maxLength: _continueReadingNameMaxLength);
+
+  String _truncateNextChapterName(String name) =>
+      _truncateChapterName(name, maxLength: _nextChapterNameMaxLength);
+
+  String _truncateChapterName(String name, {required int maxLength}) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '';
+    final chars = trimmed.characters;
+    if (chars.length <= maxLength) return trimmed;
+    return '${chars.take(maxLength).toString()}...';
+  }
+
+  /// 在已下载章节中查找当前章节的下一章，未找到返回 null
+  DownloadedChapterSummary? _findNextDownloadedChapter(
+    List<DownloadedChapterSummary> chapters,
+  ) {
+    if (_lastBrowseId == null) return null;
+    final index = chapters.indexWhere(
+      (item) => item.chapterUuid == _lastBrowseId,
+    );
+    if (index < 0 || index + 1 >= chapters.length) return null;
+    return chapters[index + 1];
   }
 
   Future<void> _deleteSelected() async {
@@ -464,6 +513,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
 
     final displayChapters = _reversed ? chapters.reversed.toList() : chapters;
     final comic = info.comic;
+    final nextChapter = _findNextDownloadedChapter(chapters);
 
     return Scaffold(
       appBar: AppBar(
@@ -515,8 +565,10 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
           ],
         ],
       ),
-      body: CustomScrollView(
-        slivers: [
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -580,24 +632,6 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        if (_lastBrowseId != null) ...[
-                          const SizedBox(height: 8),
-                          FilledButton.tonalIcon(
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ReaderPage(
-                                  pathWord: widget.pathWord,
-                                  chapterUuid: _lastBrowseId!,
-                                  chapterName: _lastBrowseName ?? '',
-                                  initialPage: _lastBrowsePage,
-                                ),
-                              ),
-                            ).then((_) => _loadHistory()),
-                            icon: const Icon(Icons.play_arrow, size: 18),
-                            label: Text('继续  ${_lastBrowseName ?? ''}'),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -696,6 +730,58 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
               ),
             ),
           ),
+        ],
+      ),
+          if (_lastBrowseId != null)
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: Wrap(
+                spacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.end,
+                children: [
+                  if (nextChapter != null && _isLastBrowseComplete)
+                    FloatingActionButton.extended(
+                      heroTag: 'local_next_chapter',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ReaderPage(
+                            pathWord: widget.pathWord,
+                            chapterUuid: nextChapter.chapterUuid,
+                            chapterName: nextChapter.chapterName,
+                          ),
+                        ),
+                      ).then((_) => _loadHistory()),
+                      icon: const Icon(Icons.skip_next, size: 20),
+                      label: Text(
+                        _truncateNextChapterName(nextChapter.chapterName),
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  FloatingActionButton.extended(
+                    heroTag: 'local_continue_reading',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ReaderPage(
+                          pathWord: widget.pathWord,
+                          chapterUuid: _lastBrowseId!,
+                          chapterName: _lastBrowseName ?? '',
+                          initialPage: _lastBrowsePage,
+                        ),
+                      ),
+                    ).then((_) => _loadHistory()),
+                    icon: const Icon(Icons.play_arrow, size: 20),
+                    label: Text(
+                      _continueReadingLabel(),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

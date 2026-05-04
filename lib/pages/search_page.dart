@@ -4,6 +4,7 @@ import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/comic.dart' as m;
 import '../utils/comic_hero_tags.dart';
+import '../utils/comic_card_skeleton.dart';
 import '../utils/data_cache.dart';
 import 'comic_detail_page.dart';
 
@@ -18,13 +19,9 @@ class _SearchPageState extends State<SearchPage> {
   static const _searchInitCacheKey = 'search_init_v2';
   static const _searchInitCacheTtl = Duration(days: 3);
   static const _tagSpacing = 8.0;
-  static const _tagRows = 4;
-  static const _tagRowHeight = 36.0;
-  static const _tagScrollbarSpace = 20.0;
 
   final _api = ApiClient();
   final _searchController = TextEditingController();
-  final _tagScrollController = ScrollController();
   List<String> _keywords = [];
   List<m.Theme> _tags = [];
   String? _selectedTag;
@@ -46,23 +43,8 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
-    _tagScrollController.dispose();
     _searchController.dispose();
     super.dispose();
-  }
-
-  List<List<_TagChipData>> _buildTagColumns() {
-    final items = _tags.map((t) {
-      final countLabel = t.count > 0 ? ' ${t.count}' : '';
-      return _TagChipData(label: '${t.name}$countLabel', pathWord: t.pathWord);
-    }).toList();
-
-    final columns = <List<_TagChipData>>[];
-    for (var i = 0; i < items.length; i += _tagRows) {
-      final end = (i + _tagRows < items.length) ? i + _tagRows : items.length;
-      columns.add(items.sublist(i, end));
-    }
-    return columns;
   }
 
   Future<void> _loadInit() async {
@@ -152,19 +134,25 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _loadMore() async {
     if (_loadingMore || _offset >= _total) return;
-    _loadingMore = true;
+    setState(() => _loadingMore = true);
     if (_searchQuery != null) {
       try {
         final result = await _api.searchComics(_searchQuery!, offset: _offset);
-        setState(() {
-          _comics.addAll(result.list);
-          _offset = _comics.length;
-        });
+        if (mounted) {
+          setState(() {
+            _comics.addAll(result.list);
+            _offset = _comics.length;
+          });
+        }
       } catch (_) {}
     } else {
       await _loadComics(reset: false);
     }
-    _loadingMore = false;
+    if (mounted) {
+      setState(() => _loadingMore = false);
+    } else {
+      _loadingMore = false;
+    }
   }
 
   void _selectTag(String? tagPathWord) {
@@ -203,11 +191,6 @@ class _SearchPageState extends State<SearchPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final contentWidth = screenWidth.clamp(0.0, 900.0);
     final hp = (screenWidth - contentWidth) / 2 + 16;
-    const tagSectionHeight =
-        _tagRows * _tagRowHeight +
-        (_tagRows - 1) * _tagSpacing +
-        _tagScrollbarSpace;
-    final tagColumns = _buildTagColumns();
 
     if (_loading) return const Center(child: CircularProgressIndicator());
 
@@ -326,69 +309,20 @@ class _SearchPageState extends State<SearchPage> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    SizedBox(
-                      height: tagSectionHeight,
-                      child: Scrollbar(
-                        controller: _tagScrollController,
-                        thumbVisibility: true,
-                        trackVisibility: true,
-                        child: SingleChildScrollView(
-                          controller: _tagScrollController,
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.only(
-                            bottom: _tagScrollbarSpace,
+                    Wrap(
+                      spacing: _tagSpacing,
+                      runSpacing: _tagSpacing,
+                      children: [
+                        for (final t in _tags)
+                          FilterChip(
+                            label: Text(
+                              t.count > 0 ? '${t.name} ${t.count}' : t.name,
+                            ),
+                            selected: _selectedTag == t.pathWord,
+                            showCheckmark: false,
+                            onSelected: (_) => _selectTag(t.pathWord),
                           ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              for (var i = 0; i < tagColumns.length; i++)
-                                Padding(
-                                  padding: EdgeInsets.only(
-                                    right: i == tagColumns.length - 1
-                                        ? 0
-                                        : _tagSpacing,
-                                  ),
-                                  child: IntrinsicWidth(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        for (
-                                          var j = 0;
-                                          j < tagColumns[i].length;
-                                          j++
-                                        ) ...[
-                                          SizedBox(
-                                            height: _tagRowHeight,
-                                            child: FilterChip(
-                                              label: Text(
-                                                tagColumns[i][j].label,
-                                              ),
-                                              selected:
-                                                  _selectedTag ==
-                                                  tagColumns[i][j].pathWord,
-                                              showCheckmark: false,
-                                              onSelected: (selected) =>
-                                                  _selectTag(
-                                                    selected
-                                                        ? tagColumns[i][j]
-                                                              .pathWord
-                                                        : tagColumns[i][j]
-                                                              .pathWord,
-                                                  ),
-                                            ),
-                                          ),
-                                          if (j != tagColumns[i].length - 1)
-                                            const SizedBox(height: _tagSpacing),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      ],
                     ),
                     if (_comics.isNotEmpty) ...[
                       const SizedBox(height: 16),
@@ -461,18 +395,27 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ),
             ),
+          if (_loadingMore && _comics.isNotEmpty)
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
+              sliver: SliverGrid(
+                delegate: SliverChildBuilderDelegate(
+                  (_, _) => const ComicCardSkeleton(),
+                  childCount: 6,
+                ),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 130,
+                  childAspectRatio: 0.55,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                ),
+              ),
+            ),
           const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
         ],
       ),
     );
   }
-}
-
-class _TagChipData {
-  final String label;
-  final String? pathWord;
-
-  const _TagChipData({required this.label, this.pathWord});
 }
 
 class _ComicGridItem extends StatelessWidget {

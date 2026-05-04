@@ -32,34 +32,35 @@ class _AppearancePageState extends State<AppearancePage> {
 
   Future<void> _pickCustomThemeColor() async {
     var selectedColor = _user.customThemeColor;
-    final didSelectColor = await ColorPicker(
-      color: selectedColor,
-      onColorChanged: (color) => selectedColor = color,
-      pickersEnabled: const <ColorPickerType, bool>{
-        ColorPickerType.both: false,
-        ColorPickerType.primary: false,
-        ColorPickerType.accent: false,
-        ColorPickerType.bw: false,
-        ColorPickerType.custom: false,
-        ColorPickerType.wheel: true,
-      },
-      enableShadesSelection: false,
-      enableTonalPalette: false,
-      enableOpacity: false,
-      showColorCode: true,
-      colorCodeHasColor: true,
-      showEditIconButton: true,
-      wheelDiameter: 220,
-      wheelWidth: 20,
-      wheelSquareBorderRadius: 12,
-      wheelHasBorder: true,
-      heading: const Text('点击色盘选择一个自定义主题色'),
-      wheelSubheading: const Text('拖动取色点，实时预览主题色'),
-      borderRadius: 12,
-    ).showPickerDialog(
-      context,
-      constraints: const BoxConstraints(maxWidth: 460),
-    );
+    final didSelectColor =
+        await ColorPicker(
+          color: selectedColor,
+          onColorChanged: (color) => selectedColor = color,
+          pickersEnabled: const <ColorPickerType, bool>{
+            ColorPickerType.both: false,
+            ColorPickerType.primary: false,
+            ColorPickerType.accent: false,
+            ColorPickerType.bw: false,
+            ColorPickerType.custom: false,
+            ColorPickerType.wheel: true,
+          },
+          enableShadesSelection: false,
+          enableTonalPalette: false,
+          enableOpacity: false,
+          showColorCode: true,
+          colorCodeHasColor: true,
+          showEditIconButton: true,
+          wheelDiameter: 220,
+          wheelWidth: 20,
+          wheelSquareBorderRadius: 12,
+          wheelHasBorder: true,
+          heading: const Text('点击色盘选择一个自定义主题色'),
+          wheelSubheading: const Text('拖动取色点，实时预览主题色'),
+          borderRadius: 12,
+        ).showPickerDialog(
+          context,
+          constraints: const BoxConstraints(maxWidth: 460),
+        );
 
     if (!didSelectColor) return;
 
@@ -81,15 +82,33 @@ class _AppearancePageState extends State<AppearancePage> {
   }
 
   ThemeData _buildPreviewTheme(Brightness brightness) {
-    return ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _user.themeOption.seedColor,
-        brightness: brightness,
-        dynamicSchemeVariant: _user.themeVariant,
-        surface: brightness == Brightness.dark ? Colors.black : Colors.white,
-      ),
-      useMaterial3: true,
+    final seedColor = _user.themeOption.seedColor;
+    var colorScheme = ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: brightness,
+      dynamicSchemeVariant: _user.themeVariant,
     );
+
+    if (_user.themeVariant == DynamicSchemeVariant.rainbow) {
+      final standardScheme = ColorScheme.fromSeed(
+        seedColor: seedColor,
+        brightness: brightness,
+      );
+      colorScheme = colorScheme.copyWith(
+        surface: standardScheme.surface,
+        surfaceDim: standardScheme.surfaceDim,
+        surfaceBright: standardScheme.surfaceBright,
+        surfaceContainerLowest: standardScheme.surfaceContainerLowest,
+        surfaceContainerLow: standardScheme.surfaceContainerLow,
+        surfaceContainer: standardScheme.surfaceContainer,
+        surfaceContainerHigh: standardScheme.surfaceContainerHigh,
+        surfaceContainerHighest: standardScheme.surfaceContainerHighest,
+        onSurface: standardScheme.onSurface,
+        onSurfaceVariant: standardScheme.onSurfaceVariant,
+      );
+    }
+
+    return ThemeData(colorScheme: colorScheme, useMaterial3: true);
   }
 
   @override
@@ -247,26 +266,26 @@ class _ThemeColorTile extends StatelessWidget {
     return Material(
       color: selected ? color.withValues(alpha: 0.14) : cs.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         side: BorderSide(
           color: selected ? color.withValues(alpha: 0.65) : cs.outlineVariant,
         ),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: SizedBox(
-          width: 56,
-          height: 56,
+          width: 48,
+          height: 48,
           child: Padding(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(6),
             child: Stack(
               children: [
                 Positioned.fill(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: color,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                 ),
