@@ -157,14 +157,18 @@ class _SearchPageState extends State<SearchPage> {
 
   void _selectTag(String? tagPathWord) {
     _searchController.clear();
+    // 再次点击已选中的标签：清除搜索状态
+    final isToggleOff =
+        tagPathWord != null && _selectedTag == tagPathWord;
+    final next = isToggleOff ? null : tagPathWord;
     setState(() {
-      _selectedTag = tagPathWord;
+      _selectedTag = next;
       _searchQuery = null;
       _offset = 0;
       _total = 0;
       _comics = [];
     });
-    if (tagPathWord != null) {
+    if (next != null) {
       _loadComics();
     }
   }
@@ -314,14 +318,16 @@ class _SearchPageState extends State<SearchPage> {
                       runSpacing: _tagSpacing,
                       children: [
                         for (final t in _tags)
-                          FilterChip(
-                            label: Text(
-                              t.count > 0 ? '${t.name} ${t.count}' : t.name,
+                          if (_selectedTag == null ||
+                              _selectedTag == t.pathWord)
+                            FilterChip(
+                              label: Text(
+                                t.count > 0 ? '${t.name} ${t.count}' : t.name,
+                              ),
+                              selected: _selectedTag == t.pathWord,
+                              showCheckmark: false,
+                              onSelected: (_) => _selectTag(t.pathWord),
                             ),
-                            selected: _selectedTag == t.pathWord,
-                            showCheckmark: false,
-                            onSelected: (_) => _selectTag(t.pathWord),
-                          ),
                       ],
                     ),
                     if (_comics.isNotEmpty) ...[
@@ -368,6 +374,9 @@ class _SearchPageState extends State<SearchPage> {
               padding: EdgeInsets.symmetric(horizontal: hp),
               sliver: SliverGrid(
                 delegate: SliverChildBuilderDelegate((_, i) {
+                  if (i >= _comics.length) {
+                    return const ComicCardSkeleton();
+                  }
                   final c = _comics[i];
                   final heroTagBase = ComicHeroTags.base(
                     scope: 'search',
@@ -386,23 +395,7 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                     ),
                   );
-                }, childCount: _comics.length),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 130,
-                  childAspectRatio: 0.55,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                ),
-              ),
-            ),
-          if (_loadingMore && _comics.isNotEmpty)
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
-              sliver: SliverGrid(
-                delegate: SliverChildBuilderDelegate(
-                  (_, _) => const ComicCardSkeleton(),
-                  childCount: 6,
-                ),
+                }, childCount: _comics.length + (_loadingMore ? 6 : 0)),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                   maxCrossAxisExtent: 130,
                   childAspectRatio: 0.55,

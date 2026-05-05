@@ -95,6 +95,9 @@ class _RecommendPageState extends State<RecommendPage> {
                     sliver: SliverGrid(
                       gridDelegate: gridDelegate,
                       delegate: SliverChildBuilderDelegate((_, i) {
+                        if (i >= _comics.length) {
+                          return const ComicCardSkeleton();
+                        }
                         final comic = _comics[i];
                         final heroTagBase = ComicHeroTags.base(
                           scope: 'recommend',
@@ -113,20 +116,9 @@ class _RecommendPageState extends State<RecommendPage> {
                             ),
                           ),
                         );
-                      }, childCount: _comics.length),
+                      }, childCount: _comics.length + (_loadingMore ? 6 : 0)),
                     ),
                   ),
-                  if (_loadingMore)
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
-                      sliver: SliverGrid(
-                        gridDelegate: gridDelegate,
-                        delegate: SliverChildBuilderDelegate(
-                          (_, _) => const ComicCardSkeleton(),
-                          childCount: 6,
-                        ),
-                      ),
-                    ),
                   const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
                 ],
               ),

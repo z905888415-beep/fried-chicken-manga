@@ -384,96 +384,83 @@ class _BookshelfPageState extends State<BookshelfPage> {
                         ),
                       )
                     else
-                      SliverPadding(
-                        padding: EdgeInsets.symmetric(horizontal: hp),
-                        sliver: SliverGrid(
-                          delegate: SliverChildBuilderDelegate(
-                            (_, i) {
-                              final filtered = _showUpdateOnly
-                                  ? _items.where((e) => e.hasUpdate).toList()
-                                  : _items;
-                              final item = filtered[i];
-                              final heroTagBase = ComicHeroTags.base(
-                                scope: _showUpdateOnly
-                                    ? 'bookshelf-updates'
-                                    : 'bookshelf',
-                                pathWord: item.comic.pathWord,
-                                index: i,
-                              );
-                              return Stack(
-                                children: [
-                                  ComicCard(
-                                    comic: item.comic,
-                                    heroTagBase: heroTagBase,
-                                    onTap: () => Navigator.push(
-                                      context,
-                                      ComicDetailPage.route(
-                                        pathWord: item.comic.pathWord,
-                                        initialComic: item.comic,
-                                        heroTagBase: heroTagBase,
-                                        lastBrowseId: item.lastBrowseId,
-                                        lastBrowseName: item.lastBrowseName,
-                                      ),
-                                    ).then((_) => _load(silent: true)),
-                                  ),
-                                  if (item.hasUpdate)
-                                    Positioned(
-                                      top: 0,
-                                      right: 0,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
+                      Builder(
+                        builder: (_) {
+                          final filtered = _showUpdateOnly
+                              ? _items.where((e) => e.hasUpdate).toList()
+                              : _items;
+                          final skeletonCount = _loadingMore ? 6 : 0;
+                          final totalCount = filtered.length + skeletonCount;
+                          return SliverPadding(
+                            padding: EdgeInsets.symmetric(horizontal: hp),
+                            sliver: SliverGrid(
+                              delegate: SliverChildBuilderDelegate((_, i) {
+                                if (i >= filtered.length) {
+                                  return const ComicCardSkeleton();
+                                }
+                                final item = filtered[i];
+                                final heroTagBase = ComicHeroTags.base(
+                                  scope: _showUpdateOnly
+                                      ? 'bookshelf-updates'
+                                      : 'bookshelf',
+                                  pathWord: item.comic.pathWord,
+                                  index: i,
+                                );
+                                return Stack(
+                                  children: [
+                                    ComicCard(
+                                      comic: item.comic,
+                                      heroTagBase: heroTagBase,
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        ComicDetailPage.route(
+                                          pathWord: item.comic.pathWord,
+                                          initialComic: item.comic,
+                                          heroTagBase: heroTagBase,
+                                          lastBrowseId: item.lastBrowseId,
+                                          lastBrowseName: item.lastBrowseName,
                                         ),
-                                        decoration: BoxDecoration(
-                                          color: cs.error,
-                                          borderRadius: const BorderRadius.only(
-                                            topRight: Radius.circular(12),
-                                            bottomLeft: Radius.circular(10),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          '更新',
-                                          style: TextStyle(
-                                            color: cs.onError,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
+                                      ).then((_) => _load(silent: true)),
                                     ),
-                                ],
-                              );
-                            },
-                            childCount: _showUpdateOnly
-                                ? _items.where((e) => e.hasUpdate).length
-                                : _items.length,
-                          ),
-                          gridDelegate:
-                              const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 130,
-                                childAspectRatio: 0.55,
-                                mainAxisSpacing: 12,
-                                crossAxisSpacing: 12,
-                              ),
-                        ),
-                      ),
-                    if (_loadingMore)
-                      SliverPadding(
-                        padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
-                        sliver: SliverGrid(
-                          delegate: SliverChildBuilderDelegate(
-                            (_, _) => const ComicCardSkeleton(),
-                            childCount: 6,
-                          ),
-                          gridDelegate:
-                              const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 130,
-                                childAspectRatio: 0.55,
-                                mainAxisSpacing: 12,
-                                crossAxisSpacing: 12,
-                              ),
-                        ),
+                                    if (item.hasUpdate)
+                                      Positioned(
+                                        top: 0,
+                                        right: 0,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFFBA1A1A),
+                                            borderRadius: BorderRadius.only(
+                                              topRight: Radius.circular(12),
+                                              bottomLeft: Radius.circular(10),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            '更新',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              }, childCount: totalCount),
+                              gridDelegate:
+                                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent: 130,
+                                    childAspectRatio: 0.55,
+                                    mainAxisSpacing: 12,
+                                    crossAxisSpacing: 12,
+                                  ),
+                            ),
+                          );
+                        },
                       ),
                     const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
                   ],

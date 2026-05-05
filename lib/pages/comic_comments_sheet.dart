@@ -182,6 +182,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
               ),
             ]
           : data.list;
+
+      // 回复按时间正序（从旧到新）
+      mergedReplies.sort((a, b) => a.createAt.compareTo(b.createAt));
+
       final latestState = _replyStateOf(comment.id);
 
       setState(() {
@@ -402,70 +406,57 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
   ) {
     final replyState = _replyStateOf(comment.id);
     final canExpandReplies = comment.replyCount > 0;
-    final bodyStyle = tt.bodyMedium?.copyWith(
-      height: 1.48,
-      fontWeight: FontWeight.w500,
-    );
-    final metaStyle = tt.titleSmall?.copyWith(
-      color: cs.onSurface,
-      fontWeight: FontWeight.w500,
-    );
-    final timeStyle = tt.bodySmall?.copyWith(
+    final userStyle = tt.labelMedium?.copyWith(
       color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+      fontWeight: FontWeight.w500,
     );
+    final timeStyle = tt.labelSmall?.copyWith(
+      color: cs.onSurfaceVariant.withValues(alpha: 0.72),
+      fontWeight: FontWeight.w400,
+    );
+    final bodyStyle =
+        (tt.bodyLarge ?? tt.bodyMedium)?.copyWith(
+          height: 1.55,
+          fontWeight: FontWeight.w500,
+        );
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ComicCommentAvatar(imageUrl: comment.userAvatar, size: 30),
-              const SizedBox(width: 10),
+              _ComicCommentAvatar(imageUrl: comment.userAvatar, size: 28),
+              const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            comment.userName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: metaStyle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatRelativeTime(comment.createAt),
-                          style: timeStyle,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _buildCommentText(
-                      comment,
-                      cs,
-                      bodyStyle: bodyStyle,
-                    ),
-                    if (canExpandReplies) ...[
-                      const SizedBox(height: 12),
-                      _buildCommentActions(cs, tt, comment, replyState),
-                    ],
-                  ],
+                child: Text(
+                  comment.userName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: userStyle,
                 ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _formatRelativeTime(comment.createAt),
+                style: timeStyle,
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          _buildCommentText(
+            comment,
+            bodyStyle: bodyStyle,
+          ),
+          if (canExpandReplies) ...[
+            const SizedBox(height: 10),
+            _buildCommentActions(cs, tt, comment, replyState),
+          ],
           if (canExpandReplies && replyState.expanded)
             _buildReplySection(cs, tt, comment, replyState),
         ],
@@ -534,15 +525,6 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
 
     return Container(
       margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.only(left: 16),
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            color: cs.outlineVariant.withValues(alpha: 0.65),
-            width: 2,
-          ),
-        ),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -582,7 +564,7 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
           for (var i = 0; i < replies.length; i++)
             Padding(
               padding: EdgeInsets.only(bottom: i == replies.length - 1 ? 0 : 12),
-              child: _buildReplyItem(cs, tt, replies[i]),
+              child: _buildReplyItem(cs, tt, replies[i], comment),
             ),
           if (replyState.error != null && replies.isNotEmpty)
             Padding(
@@ -633,23 +615,36 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
     );
   }
 
-  Widget _buildReplyItem(ColorScheme cs, TextTheme tt, ComicComment reply) {
-    final metaStyle = tt.bodySmall?.copyWith(
-      color: cs.onSurface,
+  Widget _buildReplyItem(
+    ColorScheme cs,
+    TextTheme tt,
+    ComicComment reply,
+    ComicComment parentComment,
+  ) {
+    final isReplyToOp = _isReplyToOp(reply, parentComment);
+    final parentUserName = reply.parentUserName?.trim() ?? '';
+    final showReplyTarget = !isReplyToOp && parentUserName.isNotEmpty;
+    final userStyle = tt.labelSmall?.copyWith(
+      color: cs.onSurfaceVariant.withValues(alpha: 0.78),
       fontWeight: FontWeight.w500,
+    );
+    final replyTargetStyle = userStyle?.copyWith(
+      color: cs.primary.withValues(alpha: 0.9),
+      fontWeight: FontWeight.w600,
     );
     final timeStyle = tt.labelSmall?.copyWith(
       color: cs.onSurfaceVariant.withValues(alpha: 0.72),
+      fontWeight: FontWeight.w400,
     );
-    final bodyStyle = tt.bodySmall?.copyWith(
-      height: 1.5,
+    final bodyStyle = tt.bodyMedium?.copyWith(
+      height: 1.45,
       fontWeight: FontWeight.w500,
     );
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ComicCommentAvatar(imageUrl: reply.userAvatar, size: 24),
+        _ComicCommentAvatar(imageUrl: reply.userAvatar, size: 22),
         const SizedBox(width: 8),
         Expanded(
           child: Column(
@@ -657,12 +652,35 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
             children: [
               Row(
                 children: [
-                  Flexible(
-                    child: Text(
-                      reply.userName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: metaStyle,
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            reply.userName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: userStyle,
+                          ),
+                        ),
+                        if (showReplyTarget) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_right_alt_rounded,
+                            size: 14,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              parentUserName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: replyTargetStyle,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -670,7 +688,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                 ],
               ),
               const SizedBox(height: 4),
-              _buildCommentText(reply, cs, bodyStyle: bodyStyle),
+              _buildCommentText(
+                reply,
+                bodyStyle: bodyStyle,
+              ),
             ],
           ),
         ),
@@ -678,27 +699,28 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
     );
   }
 
+  bool _isReplyToOp(ComicComment reply, ComicComment parentComment) {
+    final replyParentUserId = reply.parentUserId?.trim() ?? '';
+    final opUserId = parentComment.userId.trim();
+    if (replyParentUserId.isNotEmpty && opUserId.isNotEmpty) {
+      return replyParentUserId == opUserId;
+    }
+    final replyParentUserName = reply.parentUserName?.trim() ?? '';
+    final opUserName = parentComment.userName.trim();
+    if (replyParentUserName.isNotEmpty && opUserName.isNotEmpty) {
+      return replyParentUserName == opUserName;
+    }
+    return false;
+  }
+
   Widget _buildCommentText(
-    ComicComment comment,
-    ColorScheme cs, {
+    ComicComment comment, {
     required TextStyle? bodyStyle,
   }) {
-    final parentUserName = comment.parentUserName?.trim() ?? '';
-
-    return SelectableText.rich(
-      TextSpan(
-        children: [
-          if (parentUserName.isNotEmpty)
-            TextSpan(
-              text: '@$parentUserName ',
-              style: bodyStyle?.copyWith(
-                color: cs.primary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          TextSpan(text: comment.comment, style: bodyStyle),
-        ],
-      ),
+    return _ExpandableCommentText(
+      key: ValueKey('comic-comment-text-${comment.id}'),
+      text: comment.comment,
+      style: bodyStyle,
     );
   }
 }
@@ -789,6 +811,100 @@ class _ComicCommentAvatar extends StatelessWidget {
   }
 }
 
+class _ExpandableCommentText extends StatefulWidget {
+  final String text;
+  final TextStyle? style;
+
+  const _ExpandableCommentText({
+    super.key,
+    required this.text,
+    required this.style,
+  });
+
+  @override
+  State<_ExpandableCommentText> createState() => _ExpandableCommentTextState();
+}
+
+class _ExpandableCommentTextState extends State<_ExpandableCommentText> {
+  static const _maxLines = 3;
+  bool _expanded = false;
+  bool _isOverflowing = false;
+  double _lastLayoutWidth = 0;
+
+  void _checkOverflow(double maxWidth) {
+    if (_expanded || _isOverflowing) return;
+    if (maxWidth <= 0) return;
+    if ((maxWidth - _lastLayoutWidth).abs() < 1) return;
+    _lastLayoutWidth = maxWidth;
+
+    final textPainter = TextPainter(
+      text: TextSpan(text: widget.text, style: widget.style),
+      textDirection: Directionality.of(context),
+      maxLines: _maxLines,
+    )..layout(maxWidth: maxWidth);
+    if (textPainter.didExceedMaxLines) {
+      setState(() => _isOverflowing = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _checkOverflow(constraints.maxWidth);
+        });
+
+        if (!_expanded && _isOverflowing) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(
+                widget.text,
+                maxLines: _maxLines,
+                style: widget.style,
+              ),
+              GestureDetector(
+                onTap: () => setState(() => _expanded = true),
+                child: Text(
+                  '展开全文',
+                  style: widget.style?.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        if (_expanded) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(widget.text, style: widget.style),
+              GestureDetector(
+                onTap: () => setState(() => _expanded = false),
+                child: Text(
+                  '收起',
+                  style: widget.style?.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        return SelectableText(widget.text, style: widget.style);
+      },
+    );
+  }
+}
+
 class _ComicCommentSkeleton extends StatelessWidget {
   const _ComicCommentSkeleton();
 
@@ -808,14 +924,14 @@ class _ComicCommentSkeleton extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 30,
-                height: 30,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
                   color: cs.onSurfaceVariant.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Container(
                   height: 14,
@@ -836,7 +952,7 @@ class _ComicCommentSkeleton extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Container(
             width: double.infinity,
             height: 14,
