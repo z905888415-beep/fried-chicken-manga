@@ -39,9 +39,7 @@ void main() {
     });
     await UserManager().init();
 
-    await tester.pumpWidget(
-      const MaterialApp(home: ProfilePage()),
-    );
+    await tester.pumpWidget(const MaterialApp(home: ProfilePage()));
     await tester.pumpAndSettle();
   }
 
@@ -57,5 +55,12 @@ void main() {
     expect(find.text('Bob'), findsOneWidget);
     expect(find.text('添加账号'), findsOneWidget);
     expect(find.byIcon(Icons.person_add_alt_1), findsOneWidget);
+  });
+
+  testWidgets('profile page shows general settings entry', (tester) async {
+    await pumpProfilePage(tester);
+
+    expect(find.text('通用'), findsOneWidget);
+    expect(find.text('自动登录、设置导入导出'), findsOneWidget);
   });
 }

@@ -1,0 +1,102 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:kira/utils/reading_history.dart';
+import 'package:kira/utils/settings_backup.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  test(
+    'exports persistent settings including reading history and excluding cache',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_token', 'token-1');
+      await prefs.setBool('auto_login', true);
+      await prefs.setString('cache_home', '{"stale":false}');
+      await ReadingHistory.save(
+        pathWord: 'comic-a',
+        group: ReadingHistory.defaultGroup,
+        chapterUuid: 'chapter-3',
+        chapterName: '第3话',
+        page: 5,
+        totalPage: 20,
+      );
+
+      final backup = await SettingsBackupService().exportPlainText();
+      final decoded = jsonDecode(backup) as Map<String, dynamic>;
+      final preferences = Map<String, dynamic>.from(
+        decoded['preferences'] as Map,
+      );
+
+      expect(preferences['user_token']?['value'], 'token-1');
+      expect(preferences['auto_login']?['value'], true);
+      expect(preferences.containsKey('reading_history_comic-a'), isTrue);
+      expect(preferences.containsKey('cache_home'), isFalse);
+    },
+  );
+
+  test('import overrides user settings and keeps cache untouched', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_token', 'old-token');
+    await prefs.setBool('auto_login', false);
+    await prefs.setString('cache_home', '{"stale":true}');
+
+    final backup = jsonEncode({
+      'app': 'kira',
+      'kind': 'settings_backup',
+      'version': 1,
+      'exported_at': '2026-05-06T10:00:00.000Z',
+      'preferences': {
+        'user_token': {'type': 'string', 'value': 'new-token'},
+        'auto_login': {'type': 'bool', 'value': true},
+        'reading_history_comic-b': {
+          'type': 'string',
+          'value': jsonEncode({
+            'chapterUuid': 'chapter-8',
+            'chapterName': '第8话',
+            'page': 9,
+            'totalPage': 30,
+          }),
+        },
+      },
+    });
+
+    final summary = await SettingsBackupService().importPlainText(backup);
+    final record = await ReadingHistory.get('comic-b');
+
+    expect(summary.preferenceCount, 3);
+    expect(prefs.getString('user_token'), 'new-token');
+    expect(prefs.getBool('auto_login'), isTrue);
+    expect(record?.chapterUuid, 'chapter-8');
+    expect(record?.page, 9);
+    expect(prefs.getString('cache_home'), '{"stale":true}');
+  });
+
+  test(
+    'clearAllPreferences removes settings, reading history, and cache',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_token', 'token-1');
+      await prefs.setString('cache_home', '{"stale":false}');
+      await ReadingHistory.save(
+        pathWord: 'comic-c',
+        chapterUuid: 'chapter-12',
+        chapterName: '第12话',
+        page: 4,
+        totalPage: 18,
+      );
+
+      final removedCount = await SettingsBackupService().clearAllPreferences();
+
+      expect(removedCount, 3);
+      expect(prefs.getKeys(), isEmpty);
+      expect(await ReadingHistory.get('comic-c'), isNull);
+    },
+  );
+}

@@ -10,6 +10,7 @@ import '../utils/app_update.dart';
 import '../utils/toast.dart';
 import 'appearance_page.dart';
 import 'browse_history_page.dart';
+import 'general_page.dart';
 import 'local_comics_page.dart';
 import 'network_page.dart';
 
@@ -68,9 +69,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   IconData _credentialTypeIcon(SavedCredential credential) {
-    return _isCopyCredential(credential)
-        ? Icons.language
-        : Icons.phone_android;
+    return _isCopyCredential(credential) ? Icons.language : Icons.phone_android;
   }
 
   void _goLogin() async {
@@ -112,10 +111,7 @@ class _ProfilePageState extends State<ProfilePage> {
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(
-                '切换账号',
-                style: Theme.of(ctx).textTheme.titleMedium,
-              ),
+              child: Text('切换账号', style: Theme.of(ctx).textTheme.titleMedium),
             ),
             const Divider(height: 1),
             ...otherAccounts.map((cred) {
@@ -126,9 +122,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 leading: CircleAvatar(
                   backgroundColor: cs.primaryContainer,
                   child: Text(
-                    displayName.isNotEmpty
-                        ? displayName[0].toUpperCase()
-                        : '?',
+                    displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                     style: TextStyle(color: cs.onPrimaryContainer),
                   ),
                 ),
@@ -150,10 +144,9 @@ class _ProfilePageState extends State<ProfilePage> {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color:
-                            _isCopyCredential(cred)
-                                ? cs.tertiaryContainer
-                                : cs.secondaryContainer,
+                        color: _isCopyCredential(cred)
+                            ? cs.tertiaryContainer
+                            : cs.secondaryContainer,
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Row(
@@ -162,19 +155,17 @@ class _ProfilePageState extends State<ProfilePage> {
                           Icon(
                             _credentialTypeIcon(cred),
                             size: 14,
-                            color:
-                                _isCopyCredential(cred)
-                                    ? cs.onTertiaryContainer
-                                    : cs.onSecondaryContainer,
+                            color: _isCopyCredential(cred)
+                                ? cs.onTertiaryContainer
+                                : cs.onSecondaryContainer,
                           ),
                           const SizedBox(width: 4),
                           Text(
                             _credentialTypeLabel(cred),
                             style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
-                              color:
-                                  _isCopyCredential(cred)
-                                      ? cs.onTertiaryContainer
-                                      : cs.onSecondaryContainer,
+                              color: _isCopyCredential(cred)
+                                  ? cs.onTertiaryContainer
+                                  : cs.onSecondaryContainer,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -193,10 +184,8 @@ class _ProfilePageState extends State<ProfilePage> {
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: () => Navigator.pop(
-                    ctx,
-                    _SwitchAccountSheetAction.addAccount,
-                  ),
+                  onPressed: () =>
+                      Navigator.pop(ctx, _SwitchAccountSheetAction.addAccount),
                   icon: const Icon(Icons.person_add_alt_1),
                   label: const Text('添加账号'),
                 ),
@@ -322,99 +311,132 @@ class _ProfilePageState extends State<ProfilePage> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Card(
-                color: cs.surfaceContainerLow,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Column(
-                    children: [
-                      ListTile(
-                        leading: const _SettingIcon(
-                          icon: Icons.palette_rounded,
-                          color: Color(0xFF7C8CFF),
-                        ),
-                        title: const Text('外观'),
-                        subtitle: Text(
-                          '${_user.themeOption.label} · ${_user.themeVariantOption.label} · ${_user.themeMode == ThemeMode.system ? '跟随系统' : _user.themeMode == ThemeMode.light ? '浅色' : '深色'}',
-                          style: tt.bodySmall,
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const AppearancePage(),
-                          ),
-                        ),
-                      ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      ListTile(
-                        leading: const _SettingIcon(
-                          icon: Icons.dns_rounded,
-                          color: Color(0xFF2BB8A5),
-                        ),
-                        title: const Text('网络'),
-                        subtitle: Text(
-                          'API 线路 ${_user.apiRoute + 1}',
-                          style: tt.bodySmall,
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const NetworkPage(),
-                          ),
-                        ),
-                      ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      if (_user.isLoggedIn &&
-                          _user.savedUsername != null &&
-                          _user.savedPassword != null)
-                        SwitchListTile(
-                          secondary: const _SettingIcon(
-                            icon: Icons.login_rounded,
-                            color: Color(0xFF68C46C),
-                          ),
-                          title: const Text('自动登录'),
-                          subtitle: const Text('登录过期时自动重新登录'),
-                          value: _user.autoLogin,
-                          onChanged: _user.setAutoLogin,
-                        ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      ListTile(
-                        leading: const _SettingIcon(
-                          icon: Icons.download_done_rounded,
-                          color: Color(0xFFFFA24C),
-                        ),
-                        title: const Text('本地漫画'),
-                        subtitle: const Text('查看和管理已下载的漫画章节'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const LocalComicsPage(),
-                          ),
-                        ),
-                      ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      ListTile(
-                        leading: const _SettingIcon(
-                          icon: Icons.history_rounded,
-                          color: Color(0xFF9B7BFF),
-                        ),
-                        title: const Text('浏览记录'),
-                        subtitle: const Text('查看最近浏览过的漫画'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BrowseHistoryPage(
-                              loginPageBuilder: (_) => const LoginPage(),
+              child: Column(
+                children: [
+                  Card(
+                    color: cs.surfaceContainerLow,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const _SettingIcon(
+                              icon: Icons.tune_rounded,
+                              color: Color(0xFF6E9D5B),
+                            ),
+                            title: const Text('通用'),
+                            subtitle: Text(
+                              _user.isLoggedIn &&
+                                      _user.savedUsername != null &&
+                                      _user.savedPassword != null
+                                  ? '自动登录、设置导入导出'
+                                  : '设置导入导出',
+                              style: tt.bodySmall,
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const GeneralPage(),
+                              ),
                             ),
                           ),
-                        ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          ListTile(
+                            leading: const _SettingIcon(
+                              icon: Icons.palette_rounded,
+                              color: Color(0xFF7C8CFF),
+                            ),
+                            title: const Text('外观'),
+                            subtitle: Text(
+                              '${_user.themeOption.label} · ${_user.themeVariantOption.label} · ${_user.themeMode == ThemeMode.system
+                                  ? '跟随系统'
+                                  : _user.themeMode == ThemeMode.light
+                                  ? '浅色'
+                                  : '深色'}',
+                              style: tt.bodySmall,
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const AppearancePage(),
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          ListTile(
+                            leading: const _SettingIcon(
+                              icon: Icons.dns_rounded,
+                              color: Color(0xFF2BB8A5),
+                            ),
+                            title: const Text('网络'),
+                            subtitle: Text(
+                              'API 线路 ${_user.apiRoute + 1}',
+                              style: tt.bodySmall,
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const NetworkPage(),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      ListTile(
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    color: cs.surfaceContainerLow,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const _SettingIcon(
+                              icon: Icons.download_done_rounded,
+                              color: Color(0xFFFFA24C),
+                            ),
+                            title: const Text('本地漫画'),
+                            subtitle: const Text('查看和管理已下载的漫画章节'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LocalComicsPage(),
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          ListTile(
+                            leading: const _SettingIcon(
+                              icon: Icons.history_rounded,
+                              color: Color(0xFF9B7BFF),
+                            ),
+                            title: const Text('浏览记录'),
+                            subtitle: const Text('查看最近浏览过的漫画'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => BrowseHistoryPage(
+                                  loginPageBuilder: (_) => const LoginPage(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    color: cs.surfaceContainerLow,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: ListTile(
                         leading: const _SettingIcon(
                           icon: Icons.info_rounded,
                           color: Color(0xFF4FA8FF),
@@ -426,9 +448,9 @@ class _ProfilePageState extends State<ProfilePage> {
                           MaterialPageRoute(builder: (_) => const AboutPage()),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -698,9 +720,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   IconData _credentialTypeIcon(SavedCredential credential) {
-    return _isCopyCredential(credential)
-        ? Icons.language
-        : Icons.phone_android;
+    return _isCopyCredential(credential) ? Icons.language : Icons.phone_android;
   }
 
   bool _isCredentialSelected(SavedCredential credential) {
@@ -749,27 +769,25 @@ class _LoginPageState extends State<LoginPage> {
     final isCopy = _isCopyCredential(credential);
     final isSelected = _isCredentialSelected(credential);
     final nickname = credential.nickname?.trim();
-    final typeBackgroundColor =
-        isCopy ? cs.tertiaryContainer : cs.secondaryContainer;
-    final typeForegroundColor =
-        isCopy ? cs.onTertiaryContainer : cs.onSecondaryContainer;
-    final initial =
-        credential.username.isNotEmpty
-            ? credential.username.substring(0, 1).toUpperCase()
-            : '?';
+    final typeBackgroundColor = isCopy
+        ? cs.tertiaryContainer
+        : cs.secondaryContainer;
+    final typeForegroundColor = isCopy
+        ? cs.onTertiaryContainer
+        : cs.onSecondaryContainer;
+    final initial = credential.username.isNotEmpty
+        ? credential.username.substring(0, 1).toUpperCase()
+        : '?';
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
-        color:
-            isSelected
-                ? cs.primaryContainer.withValues(alpha: 0.45)
-                : cs.surfaceContainerLow,
+        color: isSelected
+            ? cs.primaryContainer.withValues(alpha: 0.45)
+            : cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isSelected ? cs.primary : cs.outlineVariant,
-        ),
+        border: Border.all(color: isSelected ? cs.primary : cs.outlineVariant),
       ),
       child: Material(
         color: Colors.transparent,
@@ -782,13 +800,13 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor:
-                      isSelected ? cs.primary : cs.surfaceContainerHighest,
+                  backgroundColor: isSelected
+                      ? cs.primary
+                      : cs.surfaceContainerHighest,
                   child: Text(
                     initial,
                     style: tt.titleMedium?.copyWith(
-                      color:
-                          isSelected ? cs.onPrimary : cs.onSurfaceVariant,
+                      color: isSelected ? cs.onPrimary : cs.onSurfaceVariant,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -848,11 +866,7 @@ class _LoginPageState extends State<LoginPage> {
                   tooltip: '移除账号',
                   visualDensity: VisualDensity.compact,
                   onPressed: () => _removeSavedCredential(credential),
-                  icon: Icon(
-                    Icons.close,
-                    size: 18,
-                    color: cs.onSurfaceVariant,
-                  ),
+                  icon: Icon(Icons.close, size: 18, color: cs.onSurfaceVariant),
                 ),
               ],
             ),

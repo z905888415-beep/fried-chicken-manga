@@ -1,0 +1,41 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:kira/models/user_manager.dart';
+import 'package:kira/pages/general_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({
+      'user_token': 'token',
+      'saved_username': 'alice',
+      'saved_password': 'secret',
+      'auto_login': true,
+    });
+  });
+
+  testWidgets('reset app requires exact confirmation text', (tester) async {
+    await UserManager().init();
+
+    await tester.pumpWidget(const MaterialApp(home: GeneralPage()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('重置应用').last);
+    await tester.pumpAndSettle();
+
+    FilledButton button() =>
+        tester.widget<FilledButton>(find.widgetWithText(FilledButton, '确认重置'));
+
+    expect(button().onPressed, isNull);
+
+    await tester.enterText(find.byType(TextField).last, '重置');
+    await tester.pump();
+    expect(button().onPressed, isNull);
+
+    await tester.enterText(find.byType(TextField).last, '重置应用');
+    await tester.pump();
+    expect(button().onPressed, isNotNull);
+  });
+}
