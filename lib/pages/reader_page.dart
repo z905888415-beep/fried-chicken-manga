@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../api/api_client.dart';
 import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
@@ -56,7 +57,8 @@ class _ReaderPageState extends State<ReaderPage> {
   final _api = ApiClient();
   final _downloads = DownloadManager();
   final _user = UserManager();
-  final _scrollController = ScrollController();
+  final _itemScrollController = ItemScrollController();
+  final _itemPositionsListener = ItemPositionsListener.create();
   PageController _pageController = PageController();
   ChapterDetail? _detail;
   bool _loading = true;
@@ -78,11 +80,12 @@ class _ReaderPageState extends State<ReaderPage> {
 
   late String _currentUuid;
   int _currentPage = 1;
-  bool _jumpingScroll = false;
   bool _isDraggingSlider = false;
   bool _autoAdvancingChapter = false;
   double _pageModeChapterOverscroll = 0;
   bool _volumeChannelAvailable = true;
+  int _scrollModeInitialIndex = 0;
+  int _scrollWidgetVersion = 0;
   final Map<int, int> _imageReloadVersions = {};
   final Map<int, int> _imageRetryCounts = {};
   final Map<int, String> _imageRetryTokens = {};
@@ -152,6 +155,7 @@ class _ReaderPageState extends State<ReaderPage> {
   void initState() {
     super.initState();
     _currentUuid = widget.chapterUuid;
+    _itemPositionsListener.itemPositions.addListener(_onItemPositionsChanged);
     _loadChapter();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _volumeChannel.invokeMethod('enableImmersive').catchError((_) {});
@@ -164,7 +168,9 @@ class _ReaderPageState extends State<ReaderPage> {
     _setVolumeIntercept(false);
     _volumeChannel.invokeMethod('disableImmersive').catchError((_) {});
     _volumeChannel.setMethodCallHandler(null);
-    _scrollController.dispose();
+    _itemPositionsListener.itemPositions.removeListener(
+      _onItemPositionsChanged,
+    );
     _pageController.dispose();
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -214,11 +220,15 @@ class _ReaderPageState extends State<ReaderPage> {
           ? widget.initialPage.clamp(1, detail.contents.length)
           : 1;
       _isFirstLoad = false;
+      final hasHeader = detail.prev == null;
       setState(() {
         _detail = detail;
         _loading = false;
         _currentPage = startPage;
         _pageModeChapterOverscroll = 0;
+        _scrollModeInitialIndex =
+            (hasHeader ? 1 : 0) + (startPage - 1);
+        _scrollWidgetVersion++;
         _imageReloadVersions.clear();
         _imageRetryCounts.clear();
         _imageRetryTokens.clear();
@@ -226,18 +236,6 @@ class _ReaderPageState extends State<ReaderPage> {
       if (_isPageMode) {
         _pageController.dispose();
         _pageController = PageController(initialPage: startPage - 1);
-      } else {
-        if (startPage > 1) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _jumpToScrollPage(startPage, totalPages: detail.contents.length);
-          });
-        } else {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollController.hasClients) {
-              _scrollController.jumpTo(0);
-            }
-          });
-        }
       }
       _autoAdvancingChapter = false;
       _saveReadingHistory();
@@ -328,15 +326,16 @@ class _ReaderPageState extends State<ReaderPage> {
   void _onSettingsChanged() {
     final page = _currentPage;
     _updateVolumeIntercept();
-    setState(() {});
     if (_isPageMode) {
       _pageController.dispose();
       _pageController = PageController(initialPage: page - 1);
     } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _jumpToScrollPage(page);
-      });
+      // 滚动模式:让 ScrollablePositionedList 带新 initialScrollIndex 重建,保持当前页
+      final hasHeader = _detail?.prev == null;
+      _scrollModeInitialIndex = (hasHeader ? 1 : 0) + (page - 1);
+      _scrollWidgetVersion++;
     }
+    setState(() {});
   }
 
   void _showSettingsPanel() {
@@ -574,22 +573,49 @@ class _ReaderPageState extends State<ReaderPage> {
     return extent < 280 ? 280 : extent;
   }
 
-  double _scrollModeEffectiveMaxExtent(ScrollMetrics metrics) {
-    final effectiveMax =
-        metrics.maxScrollExtent - _scrollModeTailExtent(context);
-    return effectiveMax > 0 ? effectiveMax : metrics.maxScrollExtent;
-  }
-
   void _jumpToScrollPage(int page, {int? totalPages}) {
-    if (!_scrollController.hasClients) return;
+    if (!_itemScrollController.isAttached) return;
     final imageCount = totalPages ?? _detail?.contents.length ?? 0;
     if (imageCount <= 0) return;
+    final hasHeader = _detail?.prev == null;
+    final clampedPage = page.clamp(1, imageCount);
+    final targetIndex = (hasHeader ? 1 : 0) + (clampedPage - 1);
+    _itemScrollController.jumpTo(index: targetIndex);
+  }
 
-    final ratio = (page - 1) / imageCount;
-    final maxExtent = _scrollModeEffectiveMaxExtent(_scrollController.position);
-    _jumpingScroll = true;
-    _scrollController.jumpTo(ratio * maxExtent);
-    _jumpingScroll = false;
+  void _onItemPositionsChanged() {
+    if (!mounted || _detail == null || _isDraggingSlider) return;
+    if (_isPageMode) return;
+
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+
+    final hasHeader = _detail!.prev == null;
+    final imageStart = hasHeader ? 1 : 0;
+    final imageCount = _detail!.contents.length;
+
+    // 取在视口中可见面积最大的 image item 作为当前页
+    int? bestImageIndex;
+    double bestVisible = -1;
+    for (final p in positions) {
+      if (p.index < imageStart || p.index >= imageStart + imageCount) continue;
+      final top = p.itemLeadingEdge.clamp(0.0, 1.0);
+      final bottom = p.itemTrailingEdge.clamp(0.0, 1.0);
+      final visible = bottom - top;
+      if (visible > bestVisible) {
+        bestVisible = visible;
+        bestImageIndex = p.index - imageStart;
+      }
+    }
+
+    if (bestImageIndex == null) return;
+    final page = bestImageIndex + 1;
+    if (page < 1 || page > imageCount) return;
+    if (page == _currentPage) return;
+
+    setState(() => _currentPage = page);
+    _saveReadingHistory();
+    _preloadImages(page - 1);
   }
 
   bool _shouldAutoAdvanceScrollChapter(ScrollNotification notification) {
@@ -597,11 +623,24 @@ class _ReaderPageState extends State<ReaderPage> {
       return false;
     }
 
-    final reachedBottom =
-        notification.metrics.pixels >= notification.metrics.maxScrollExtent - 8;
-    if (!reachedBottom) return false;
+    // tail item(下一章按钮区)是否已部分进入视口
+    final hasHeader = _detail?.prev == null;
+    final tailIndex = (hasHeader ? 1 : 0) + (_detail?.contents.length ?? 0);
+    final positions = _itemPositionsListener.itemPositions.value;
+    var tailVisible = false;
+    var tailFullyVisible = false;
+    for (final p in positions) {
+      if (p.index != tailIndex) continue;
+      tailVisible = p.itemLeadingEdge < 1.0 && p.itemTrailingEdge > 0;
+      tailFullyVisible =
+          p.itemLeadingEdge >= -0.05 && p.itemTrailingEdge <= 1.05;
+      break;
+    }
+    if (!tailVisible) return false;
 
     if (notification is ScrollUpdateNotification) {
+      // 必须 tail 已完全在视口内,且仍在向下滑,才认为是"看完最后一张图"
+      if (!tailFullyVisible) return false;
       return (notification.scrollDelta ?? 0) > 0;
     }
     if (notification is OverscrollNotification) {
@@ -680,44 +719,34 @@ class _ReaderPageState extends State<ReaderPage> {
     final scrollDirection = _isHorizontalScrollMode
         ? Axis.horizontal
         : Axis.vertical;
+    final viewportSize = MediaQuery.sizeOf(context);
     return GestureDetector(
       onTap: () => _toggleToolbar(),
       child: NotificationListener<ScrollNotification>(
         onNotification: (n) {
-          if (_jumpingScroll || _isDraggingSlider) return false;
+          if (_isDraggingSlider) return false;
           if (n is ScrollUpdateNotification &&
               _showToolbar &&
               (n.scrollDelta ?? 0).abs() > 0) {
             SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
             setState(() => _showToolbar = false);
           }
-          if (n.metrics.pixels > 0 && n.metrics.maxScrollExtent > 0) {
-            final effectiveMax = _scrollModeEffectiveMaxExtent(n.metrics);
-            final effectivePixels = n.metrics.pixels
-                .clamp(0.0, effectiveMax)
-                .toDouble();
-            final page = (imageCount * effectivePixels / effectiveMax)
-                .ceil()
-                .clamp(1, imageCount);
-            if (page != _currentPage) {
-              setState(() => _currentPage = page);
-              _saveReadingHistory();
-              _preloadImages(page - 1);
-            }
-          }
           if (_shouldAutoAdvanceScrollChapter(n)) {
             _autoAdvanceToNextChapter();
           }
           return false;
         },
-        child: ListView.separated(
-          controller: _scrollController,
+        child: ScrollablePositionedList.separated(
+          key: ValueKey('$_currentUuid-$_scrollWidgetVersion'),
+          itemScrollController: _itemScrollController,
+          itemPositionsListener: _itemPositionsListener,
+          initialScrollIndex: _scrollModeInitialIndex,
           scrollDirection: scrollDirection,
-          padding: EdgeInsets.zero,
           reverse: _isReversedScrollMode,
-          cacheExtent: _isHorizontalScrollMode
-              ? MediaQuery.sizeOf(context).width
-              : MediaQuery.sizeOf(context).height,
+          padding: EdgeInsets.zero,
+          minCacheExtent: _isHorizontalScrollMode
+              ? viewportSize.width
+              : viewportSize.height,
           itemCount: totalItems,
           separatorBuilder: (_, i) {
             final imageStart = hasHeader ? 1 : 0;
@@ -735,7 +764,6 @@ class _ReaderPageState extends State<ReaderPage> {
             if (imageIndex < imageCount) {
               final image = _buildImage(imageIndex);
               if (_isHorizontalScrollMode) {
-                final viewportSize = MediaQuery.sizeOf(context);
                 return SizedBox(height: viewportSize.height, child: image);
               }
               return image;
@@ -1134,22 +1162,16 @@ class _ReaderPageState extends State<ReaderPage> {
                               max: total.toDouble(),
                               onChangeStart: (_) {
                                 _isDraggingSlider = true;
-                                _jumpingScroll = true;
                               },
                               onChangeEnd: (_) {
                                 _isDraggingSlider = false;
-                                // 延迟恢复，避免 jumpTo 后的惯性通知隐藏工具栏
-                                Future.delayed(
-                                  const Duration(milliseconds: 100),
-                                  () => _jumpingScroll = false,
-                                );
                               },
                               onChanged: (v) {
                                 final page = v.round();
                                 setState(() => _currentPage = page);
                                 if (_isPageMode) {
                                   _pageController.jumpToPage(page - 1);
-                                } else if (_scrollController.hasClients) {
+                                } else {
                                   _jumpToScrollPage(page, totalPages: total);
                                 }
                               },
