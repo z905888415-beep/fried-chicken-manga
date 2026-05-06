@@ -18,6 +18,7 @@ import 'chapter_comments_sheet.dart';
 
 class ReaderPage extends StatefulWidget {
   final String pathWord;
+  final String? group;
   final String chapterUuid;
   final String chapterName;
   final int initialPage;
@@ -25,6 +26,7 @@ class ReaderPage extends StatefulWidget {
   const ReaderPage({
     super.key,
     required this.pathWord,
+    this.group,
     required this.chapterUuid,
     required this.chapterName,
     this.initialPage = 1,
@@ -226,8 +228,7 @@ class _ReaderPageState extends State<ReaderPage> {
         _loading = false;
         _currentPage = startPage;
         _pageModeChapterOverscroll = 0;
-        _scrollModeInitialIndex =
-            (hasHeader ? 1 : 0) + (startPage - 1);
+        _scrollModeInitialIndex = (hasHeader ? 1 : 0) + (startPage - 1);
         _scrollWidgetVersion++;
         _imageReloadVersions.clear();
         _imageRetryCounts.clear();
@@ -252,6 +253,7 @@ class _ReaderPageState extends State<ReaderPage> {
   void _saveReadingHistory() {
     ReadingHistory.save(
       pathWord: widget.pathWord,
+      group: widget.group,
       chapterUuid: _currentUuid,
       chapterName: _detail?.name ?? widget.chapterName,
       page: _currentPage,
@@ -269,12 +271,7 @@ class _ReaderPageState extends State<ReaderPage> {
     try {
       final data = await _api.getChapterComments(chapterUuid, limit: 100);
       if (!mounted || _currentUuid != chapterUuid) return;
-      _updateCommentCache(
-        chapterUuid,
-        data.list,
-        data.total,
-        rebuild: true,
-      );
+      _updateCommentCache(chapterUuid, data.list, data.total, rebuild: true);
     } catch (_) {
       // 预加载失败不影响正常流程
     }

@@ -83,6 +83,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   String? _nextBrowseChapterSourceId;
   bool _loadingNextBrowseChapter = false;
   // 本地阅读记录（优先级高于书架传入的记录）
+  late final String? _officialLastBrowseId;
+  late final String? _officialLastBrowseName;
+  bool _usingLocalHistory = false;
   String? _lastBrowseId;
   String? _lastBrowseName;
   int _lastBrowsePage = 1;
@@ -95,6 +98,8 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     super.initState();
     _comic = widget.initialComic;
     _loadingComic = widget.initialComic == null;
+    _officialLastBrowseId = widget.lastBrowseId;
+    _officialLastBrowseName = widget.lastBrowseName;
     _lastBrowseId = widget.lastBrowseId;
     _lastBrowseName = widget.lastBrowseName;
     if (_lastBrowseId != null) _reversed = true;
@@ -109,11 +114,8 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   Future<void> _initializePage() async {
-    await Future.wait([
-      _downloads.init(),
-      _loadLocalHistory(),
-      _loadFromCache(),
-    ]);
+    await Future.wait([_downloads.init(), _loadFromCache()]);
+    await _loadLocalHistory();
     await _loadComic();
   }
 
@@ -121,18 +123,23 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _loadLocalHistory() async {
-    final record = await ReadingHistory.get(widget.pathWord);
-    if (record != null && mounted) {
-      setState(() {
-        _lastBrowseId = record.chapterUuid;
-        _lastBrowseName = record.chapterName;
-        _lastBrowsePage = record.page;
-        _lastBrowseTotalPage = record.totalPage;
-        _reversed = true;
-      });
-      await _syncNextBrowseChapter();
-    }
+  Future<void> _loadLocalHistory({String? group}) async {
+    final targetGroup = group ?? _selectedGroup;
+    final record = await ReadingHistory.get(
+      widget.pathWord,
+      group: targetGroup,
+    );
+    if (!mounted || targetGroup != _selectedGroup) return;
+
+    setState(() {
+      _usingLocalHistory = record != null;
+      _lastBrowseId = record?.chapterUuid ?? _officialLastBrowseId;
+      _lastBrowseName = record?.chapterName ?? _officialLastBrowseName;
+      _lastBrowsePage = record?.page ?? 1;
+      _lastBrowseTotalPage = record?.totalPage ?? 0;
+      if (_lastBrowseId != null) _reversed = true;
+    });
+    await _syncNextBrowseChapter();
   }
 
   Future<void> _loadFromCache() async {
@@ -217,6 +224,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         _selectedGroup = selectedGroup;
       });
 
+      await _loadLocalHistory(group: selectedGroup);
       await _saveCache();
       await _loadChapterPageForHistory(comic: comic, group: selectedGroup);
       await _loadCollectState();
@@ -288,6 +296,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         _chapters = result.list;
         _chapterTotal = result.total;
         _chapterPage = page;
+        _selectedGroup = targetGroup;
         _loadingChapters = false;
         _keepShowingCachedChapters = false;
       });
@@ -325,7 +334,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
 
   int _resolveHistoryChapterPage(int total) {
     if (_lastBrowseName == null || total <= _pageSize) return 0;
-    final match = RegExp(r'第(\d+)[话集章回]').firstMatch(_lastBrowseName!);
+    final match = RegExp(r'第(\d+)[话集章回卷]').firstMatch(_lastBrowseName!);
     if (match == null) return 0;
 
     final num = int.parse(match.group(1)!);
@@ -347,6 +356,12 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         ? 1
         : _lastBrowseTotalPage - 1;
     return _lastBrowsePage >= unreadThreshold;
+  }
+
+  bool get _canShowLastBrowseAction {
+    if (_lastBrowseId == null) return false;
+    if (_usingLocalHistory) return true;
+    return _chapterByUuid(_lastBrowseId) != null;
   }
 
   String _continueReadingLabel() {
@@ -589,6 +604,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       MaterialPageRoute(
         builder: (_) => ReaderPage(
           pathWord: widget.pathWord,
+          group: _selectedGroup,
           chapterUuid: chapter.uuid,
           chapterName: chapter.name,
         ),
@@ -631,7 +647,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           : Stack(
               children: [
                 _buildBody(cs, tt),
-                if (_lastBrowseId != null)
+                if (_canShowLastBrowseAction)
                   Positioned(
                     right: 16,
                     bottom: 16,
@@ -648,6 +664,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               MaterialPageRoute(
                                 builder: (_) => ReaderPage(
                                   pathWord: widget.pathWord,
+                                  group: _selectedGroup,
                                   chapterUuid: _nextBrowseChapter!.uuid,
                                   chapterName: _nextBrowseChapter!.name,
                                 ),
@@ -668,6 +685,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                             MaterialPageRoute(
                               builder: (_) => ReaderPage(
                                 pathWord: widget.pathWord,
+                                group: _selectedGroup,
                                 chapterUuid: _lastBrowseId!,
                                 chapterName: _lastBrowseName ?? '',
                                 initialPage: _lastBrowsePage,
@@ -1140,9 +1158,11 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       )
                       .toList(),
                   selected: {_selectedGroup},
-                  onSelectionChanged: (v) {
-                    setState(() => _selectedGroup = v.first);
-                    _loadChapterPage(0);
+                  onSelectionChanged: (v) async {
+                    final group = v.first;
+                    setState(() => _selectedGroup = group);
+                    await _loadLocalHistory(group: group);
+                    await _loadChapterPageForHistory(group: group);
                   },
                   style: ButtonStyle(
                     visualDensity: VisualDensity.compact,
@@ -1211,8 +1231,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: FilledButton.tonal(
-                      onPressed: () =>
-                          setState(() => _reversed = !_reversed),
+                      onPressed: () => setState(() => _reversed = !_reversed),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size(38, 38),
                         maximumSize: const Size(38, 38),
@@ -1228,9 +1247,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       child: Tooltip(
                         message: _reversed ? '逆序（新→旧）' : '正序（旧→新）',
                         child: Icon(
-                          _reversed
-                              ? Icons.arrow_downward
-                              : Icons.arrow_upward,
+                          _reversed ? Icons.arrow_downward : Icons.arrow_upward,
                           size: 20,
                         ),
                       ),
