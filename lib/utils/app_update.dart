@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -171,6 +172,70 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     Navigator.pop(context);
   }
 
+  Widget _buildReleaseNotes(String notes, ColorScheme cs, TextTheme tt) {
+    final lines = notes.split('\n');
+    final children = <Widget>[];
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+
+      if (trimmed.startsWith('## ')) {
+        if (children.isNotEmpty) children.add(const SizedBox(height: 10));
+        children.add(
+          Text(
+            trimmed.substring(3),
+            style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        );
+      } else if (trimmed.startsWith('- ')) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 8, top: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('• ', style: TextStyle(color: cs.onSurfaceVariant)),
+                Expanded(
+                  child: Text(
+                    trimmed
+                        .substring(2)
+                        .replaceFirst(RegExp(r'^\[.*?\]\s*'), '')
+                        .replaceFirst(RegExp(r'^\S+\s+\w+:\s*'), ''),
+                    style: TextStyle(color: cs.onSurfaceVariant, height: 1.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              trimmed,
+              style: TextStyle(color: cs.onSurfaceVariant, height: 1.5),
+            ),
+          ),
+        );
+      }
+    }
+
+    if (children.isEmpty) {
+      return Text(
+        '暂无更新说明',
+        style: TextStyle(color: cs.onSurfaceVariant, height: 1.5),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: children,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -181,63 +246,77 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      title: const Text('发现新版本'),
+      title: const Text('有更新'),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: cs.primaryContainer.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${widget.updateInfo.currentVersion} -> ${widget.updateInfo.latestVersion}',
-                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(height: 12),
             Text(widget.updateInfo.releaseName, style: tt.titleSmall),
             const SizedBox(height: 12),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 180),
+              constraints: const BoxConstraints(maxHeight: 240),
               child: SingleChildScrollView(
-                child: Text(
-                  notes,
-                  style: TextStyle(color: cs.onSurfaceVariant, height: 1.5),
-                ),
+                child: _buildReleaseNotes(notes, cs, tt),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '安装包：${widget.updateInfo.assetName}',
-              style: TextStyle(color: cs.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _submitting
-                    ? null
-                    : () => _openUrl(widget.updateInfo.downloadUrl),
-                icon: const Icon(Icons.download_rounded),
-                label: const Text('下载更新'),
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _submitting
-                    ? null
-                    : () => _openUrl(widget.updateInfo.mirrorDownloadUrl),
-                icon: const Icon(Icons.public),
-                label: const Text('镜像下载'),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _submitting
+                        ? null
+                        : () => _openUrl(widget.updateInfo.downloadUrl),
+                    icon: SvgPicture.asset(
+                      'assets/github.svg',
+                      width: 18,
+                      height: 18,
+                      colorFilter: ColorFilter.mode(
+                        cs.onPrimary,
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                    label: const Text('下载'),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _submitting
+                        ? null
+                        : () => _openUrl(widget.updateInfo.mirrorDownloadUrl),
+                    icon: const Icon(Icons.public),
+                    label: const Text('镜像'),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: _submitting
+                        ? null
+                        : () => _openUrl(widget.updateInfo.releasePageUrl),
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('发布'),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Wrap(
