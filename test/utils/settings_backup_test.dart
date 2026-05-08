@@ -18,6 +18,8 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_token', 'token-1');
       await prefs.setBool('auto_login', true);
+      await prefs.setBool('image_viewer_auto_rotate_landscape', true);
+      await prefs.setInt('image_viewer_landscape_rotation', -1);
       await prefs.setString('cache_home', '{"stale":false}');
       await ReadingHistory.save(
         pathWord: 'comic-a',
@@ -36,6 +38,8 @@ void main() {
 
       expect(preferences['user_token']?['value'], 'token-1');
       expect(preferences['auto_login']?['value'], true);
+      expect(preferences['image_viewer_auto_rotate_landscape']?['value'], true);
+      expect(preferences['image_viewer_landscape_rotation']?['value'], -1);
       expect(preferences.containsKey('reading_history_comic-a'), isTrue);
       expect(preferences.containsKey('cache_home'), isFalse);
     },
@@ -55,6 +59,8 @@ void main() {
       'preferences': {
         'user_token': {'type': 'string', 'value': 'new-token'},
         'auto_login': {'type': 'bool', 'value': true},
+        'image_viewer_auto_rotate_landscape': {'type': 'bool', 'value': true},
+        'image_viewer_landscape_rotation': {'type': 'int', 'value': -1},
         'reading_history_comic-b': {
           'type': 'string',
           'value': jsonEncode({
@@ -70,9 +76,11 @@ void main() {
     final summary = await SettingsBackupService().importPlainText(backup);
     final record = await ReadingHistory.get('comic-b');
 
-    expect(summary.preferenceCount, 3);
+    expect(summary.preferenceCount, 5);
     expect(prefs.getString('user_token'), 'new-token');
     expect(prefs.getBool('auto_login'), isTrue);
+    expect(prefs.getBool('image_viewer_auto_rotate_landscape'), isTrue);
+    expect(prefs.getInt('image_viewer_landscape_rotation'), -1);
     expect(record?.chapterUuid, 'chapter-8');
     expect(record?.page, 9);
     expect(prefs.getString('cache_home'), '{"stale":true}');

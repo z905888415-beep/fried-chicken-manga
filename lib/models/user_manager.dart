@@ -88,6 +88,10 @@ class UserManager extends ChangeNotifier {
   static const _keyReaderPageRTL = 'reader_page_rtl';
   static const _keyReaderPageVertical = 'reader_page_vertical';
   static const _keyReaderDimming = 'reader_dimming';
+  static const _keyImageViewerAutoRotateLandscape =
+      'image_viewer_auto_rotate_landscape';
+  static const _keyImageViewerLandscapeRotation =
+      'image_viewer_landscape_rotation';
   static const _keyImageLoadTimeout = 'image_load_timeout';
   static const _keyImageRetryCount = 'image_retry_count';
   static const _keyCommentCompactLayout = 'comment_compact_layout';
@@ -126,6 +130,8 @@ class UserManager extends ChangeNotifier {
   bool _readerPageRTL = false;
   bool _readerPageVertical = false;
   double _readerDimming = 0.3;
+  bool _imageViewerAutoRotateLandscape = false;
+  int _imageViewerLandscapeRotation = 1;
   int _imageLoadTimeout = 15; // 秒
   int _imageRetryCount = 1;
   bool _commentCompactLayout = true;
@@ -179,6 +185,8 @@ class UserManager extends ChangeNotifier {
   bool get readerPageRTL => _readerPageRTL;
   bool get readerPageVertical => _readerPageVertical;
   double get readerDimming => _readerDimming;
+  bool get imageViewerAutoRotateLandscape => _imageViewerAutoRotateLandscape;
+  int get imageViewerLandscapeRotation => _imageViewerLandscapeRotation;
   int get imageLoadTimeout => _imageLoadTimeout;
   int get imageRetryCount => _imageRetryCount;
   bool get commentCompactLayout => _commentCompactLayout;
@@ -257,6 +265,13 @@ class UserManager extends ChangeNotifier {
     _readerPageRTL = prefs.getBool(_keyReaderPageRTL) ?? false;
     _readerPageVertical = prefs.getBool(_keyReaderPageVertical) ?? false;
     _readerDimming = prefs.getDouble(_keyReaderDimming) ?? 0.3;
+    _imageViewerAutoRotateLandscape =
+        prefs.getBool(_keyImageViewerAutoRotateLandscape) ?? false;
+    final savedImageViewerLandscapeRotation =
+        prefs.getInt(_keyImageViewerLandscapeRotation) ?? 1;
+    _imageViewerLandscapeRotation = savedImageViewerLandscapeRotation < 0
+        ? -1
+        : 1;
     _imageLoadTimeout = prefs.getInt(_keyImageLoadTimeout) ?? 15;
     _imageRetryCount = prefs.getInt(_keyImageRetryCount) ?? 1;
     _commentCompactLayout = prefs.getBool(_keyCommentCompactLayout) ?? true;
@@ -540,6 +555,23 @@ class UserManager extends ChangeNotifier {
     _readerDimming = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyReaderDimming, value);
+    notifyListeners();
+  }
+
+  Future<void> setImageViewerAutoRotateLandscape(bool enabled) async {
+    if (_imageViewerAutoRotateLandscape == enabled) return;
+    _imageViewerAutoRotateLandscape = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyImageViewerAutoRotateLandscape, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setImageViewerLandscapeRotation(int rotation) async {
+    final nextRotation = rotation < 0 ? -1 : 1;
+    if (_imageViewerLandscapeRotation == nextRotation) return;
+    _imageViewerLandscapeRotation = nextRotation;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyImageViewerLandscapeRotation, nextRotation);
     notifyListeners();
   }
 
