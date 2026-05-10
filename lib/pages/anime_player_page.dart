@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -12,6 +13,7 @@ import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
 import '../utils/toast.dart';
+import 'profile_page.dart';
 
 class AnimePlayerPage extends StatefulWidget {
   final String pathWord;
@@ -38,10 +40,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       'Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36';
 
   final _api = ApiClient();
+  final _user = UserManager();
   final _hlsProxy = _HlsProxy(headers: _videoHttpHeaders);
   late final Player _player;
   late final VideoController _controller;
-  final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
+  StreamSubscription<bool>? _bufferingSubscription;
+  StreamSubscription<String>? _errorSubscription;
   AnimePlayback? _playback;
   late String _currentChapterUuid;
   late String _currentChapterName;
@@ -49,20 +53,17 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   String? _videoUrl;
   bool _loading = true;
   bool _buffering = false;
-  int _lastPositionLogSecond = -1;
+  bool _requiresLogin = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _player = Player(
-      configuration: const PlayerConfiguration(
-        bufferSize: 8 * 1024 * 1024,
-        logLevel: MPVLogLevel.debug,
-      ),
+      configuration: const PlayerConfiguration(bufferSize: 8 * 1024 * 1024),
     );
     _controller = VideoController(_player);
-    _listenPlayerDiagnostics();
+    _listenPlayerState();
     _currentChapterUuid = widget.chapterUuid;
     _currentChapterName = widget.chapterName;
     _line = widget.line;
@@ -71,74 +72,43 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   @override
   void dispose() {
-    for (final subscription in _playerSubscriptions) {
-      subscription.cancel();
-    }
+    _bufferingSubscription?.cancel();
+    _errorSubscription?.cancel();
     unawaited(_hlsProxy.close());
     _player.dispose();
     super.dispose();
   }
 
-  void _listenPlayerDiagnostics() {
-    _playerSubscriptions.addAll([
-      _player.stream.log.listen((log) {
-        debugPrint(
-          '[AnimePlayer][mpv][${log.level}][${log.prefix}] '
-          '${_compactLog(log.text)}',
-        );
-      }),
-      _player.stream.error.listen((message) {
-        debugPrint('[AnimePlayer][error] ${_compactLog(message)}');
-        if (!mounted) return;
-        setState(() {
-          _buffering = false;
-          _error = message;
-        });
-      }),
-      _player.stream.playing.listen((value) {
-        debugPrint('[AnimePlayer][playing] $value');
-      }),
-      _player.stream.buffering.listen((value) {
-        debugPrint('[AnimePlayer][buffering] $value');
-        if (mounted) setState(() => _buffering = value);
-      }),
-      _player.stream.bufferingPercentage.listen((value) {
-        debugPrint('[AnimePlayer][bufferingPercentage] $value');
-      }),
-      _player.stream.buffer.listen((value) {
-        debugPrint('[AnimePlayer][buffer] ${value.inMilliseconds}ms');
-      }),
-      _player.stream.duration.listen((value) {
-        debugPrint('[AnimePlayer][duration] ${value.inMilliseconds}ms');
-      }),
-      _player.stream.position.listen((value) {
-        final second = value.inSeconds;
-        if (second == _lastPositionLogSecond || second % 5 != 0) return;
-        _lastPositionLogSecond = second;
-        debugPrint('[AnimePlayer][position] ${value.inMilliseconds}ms');
-      }),
-      _player.stream.width.listen((value) {
-        debugPrint('[AnimePlayer][width] $value');
-      }),
-      _player.stream.height.listen((value) {
-        debugPrint('[AnimePlayer][height] $value');
-      }),
-    ]);
-  }
-
-  String _compactLog(String text) {
-    final normalized = text.trim().replaceAll('\n', r'\n');
-    if (normalized.length <= 700) return normalized;
-    return '${normalized.substring(0, 700)}...';
+  void _listenPlayerState() {
+    _bufferingSubscription = _player.stream.buffering.listen((value) {
+      if (mounted) setState(() => _buffering = value);
+    });
+    _errorSubscription = _player.stream.error.listen((message) {
+      if (!mounted) return;
+      setState(() {
+        _buffering = false;
+        _error = message;
+      });
+    });
   }
 
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _buffering = false;
+      _requiresLogin = false;
       _error = null;
       _videoUrl = null;
     });
+
+    if (!_user.isLoggedIn) {
+      setState(() {
+        _loading = false;
+        _requiresLogin = true;
+        _error = '登录后才能播放该视频';
+      });
+      return;
+    }
 
     try {
       final playback = await _api.getAnimePlayback(
@@ -165,20 +135,55 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     } catch (e) {
       debugPrint('AnimePlayerPage load error: $e');
       if (!mounted) return;
+      final requiresLogin = _isUnauthorized(e);
+      if (requiresLogin) {
+        await _user.logout();
+        if (!mounted) return;
+      }
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _requiresLogin = requiresLogin;
+        _error = requiresLogin ? '登录后才能播放该视频' : _formatLoadError(e);
       });
+    }
+  }
+
+  bool _isUnauthorized(Object error) =>
+      error is DioException && error.response?.statusCode == 401;
+
+  String _formatLoadError(Object error) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map) {
+        final message =
+            data['message']?.toString() ??
+            (data['results'] is Map
+                ? data['results']['detail']?.toString()
+                : null);
+        if (message != null && message.isNotEmpty) return message;
+      }
+      final statusCode = error.response?.statusCode;
+      if (statusCode != null) return '请求失败（$statusCode）';
+      final message = error.message;
+      if (message != null && message.isNotEmpty) return message;
+    }
+    return error.toString();
+  }
+
+  Future<void> _goLogin() async {
+    final loggedIn = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+    );
+    if (loggedIn == true && mounted) {
+      await _load();
     }
   }
 
   Future<void> _openMedia(String videoUrl) async {
     try {
       final playableUrl = await _hlsProxy.proxy(videoUrl);
-      debugPrint('[AnimePlayer][open] $videoUrl');
-      debugPrint('[AnimePlayer][proxy] $playableUrl');
       await _player.open(Media(playableUrl));
-      debugPrint('[AnimePlayer][open-complete]');
     } catch (e) {
       debugPrint('AnimePlayerPage open media error: $e');
       if (!mounted) return;
@@ -210,9 +215,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 
   Future<void> _openChapter(AnimeChapter chapter) async {
-    if (chapter.uuid == _currentChapterUuid || _loading) return;
-    final line = _resolveChapterLine(chapter);
-    if (line == null || line.isEmpty) {
+    if (chapter.uuid == _currentChapterUuid) return;
+    if (_loading) {
+      showToast(context, '视频加载中，请稍后再切换', isError: true);
+      return;
+    }
+    final line = _resolveChapterLine(chapter) ?? _line;
+    if (line.isEmpty) {
       showToast(context, '当前选集暂无可用线路', isError: true);
       return;
     }
@@ -223,6 +232,24 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       _line = line;
     });
     await _load();
+  }
+
+  int get _currentChapterIndex {
+    return _chapters.indexWhere(
+      (chapter) => chapter.uuid == _currentChapterUuid,
+    );
+  }
+
+  AnimeChapter? get _previousChapter {
+    final index = _currentChapterIndex;
+    if (index <= 0) return null;
+    return _chapters[index - 1];
+  }
+
+  AnimeChapter? get _nextChapter {
+    final index = _currentChapterIndex;
+    if (index < 0 || index >= _chapters.length - 1) return null;
+    return _chapters[index + 1];
   }
 
   String? _resolveChapterLine(AnimeChapter chapter) {
@@ -277,30 +304,66 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 
   Widget _buildVideoWithControls() {
-    final skipButton = Tooltip(
-      message: '快进 ${UserManager().animeSkipSeconds}秒',
-      child: MaterialCustomButton(
-        onPressed: _skipForward,
-        icon: const Icon(Icons.fast_forward),
-      ),
+    const controlButtonSize = 24.0;
+    const controlButtonExtent = 40.0;
+    final previousChapter = _previousChapter;
+    final nextChapter = _nextChapter;
+    final previousButton = _PlayerControlButton(
+      tooltip: '上一集',
+      icon: Icons.skip_previous,
+      iconSize: controlButtonSize,
+      extent: controlButtonExtent,
+      onPressed: previousChapter == null
+          ? null
+          : () => unawaited(_openChapter(previousChapter)),
     );
-    final settingsButton = Tooltip(
-      message: '设置跳转秒数',
-      child: MaterialCustomButton(
-        onPressed: _showSettingsPanel,
-        icon: const Icon(Icons.settings),
-      ),
+    final nextButton = _PlayerControlButton(
+      tooltip: '下一集',
+      icon: Icons.skip_next,
+      iconSize: controlButtonSize,
+      extent: controlButtonExtent,
+      onPressed: nextChapter == null
+          ? null
+          : () => unawaited(_openChapter(nextChapter)),
     );
+    final skipButton = _PlayerControlButton(
+      tooltip: '快进 ${UserManager().animeSkipSeconds}秒',
+      icon: Icons.fast_forward,
+      iconSize: controlButtonSize,
+      extent: controlButtonExtent,
+      onPressed: _skipForward,
+    );
+    final settingsButton = _PlayerControlButton(
+      tooltip: '设置跳转秒数',
+      icon: Icons.settings,
+      iconSize: controlButtonSize,
+      extent: controlButtonExtent,
+      onPressed: _showSettingsPanel,
+    );
+    final bottomButtonBar = [
+      const MaterialPositionIndicator(),
+      const Spacer(),
+      previousButton,
+      nextButton,
+      skipButton,
+      settingsButton,
+      const MaterialFullscreenButton(),
+    ];
     return MaterialVideoControlsTheme(
       normal: MaterialVideoControlsThemeData(
-        buttonBarButtonSize: 24.0,
+        buttonBarButtonSize: controlButtonSize,
         buttonBarButtonColor: Colors.white,
-        topButtonBar: [const Spacer(), skipButton, settingsButton],
+        bottomButtonBar: bottomButtonBar,
       ),
       fullscreen: MaterialVideoControlsThemeData(
-        buttonBarButtonSize: 24.0,
+        buttonBarButtonSize: controlButtonSize,
         buttonBarButtonColor: Colors.white,
-        topButtonBar: [const Spacer(), skipButton, settingsButton],
+        bottomButtonBar: bottomButtonBar,
+        bottomButtonBarMargin: const EdgeInsets.only(
+          left: 16.0,
+          right: 8.0,
+          bottom: 42.0,
+        ),
       ),
       child: Video(controller: _controller, controls: MaterialVideoControls),
     );
@@ -358,7 +421,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                     Center(
                       child: _error == null
                           ? _buildVideoWithControls()
-                          : _ErrorPanel(message: _error!, onRetry: _load),
+                          : _ErrorPanel(
+                              message: _error!,
+                              requiresLogin: _requiresLogin,
+                              onLogin: _goLogin,
+                              onRetry: _load,
+                            ),
                     ),
                     if (_showLoadingOverlay)
                       const ColoredBox(
@@ -420,9 +488,6 @@ class _HlsProxy {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
     unawaited(_serve(server));
-    debugPrint(
-      '[AnimePlayer][proxy-server] ${server.address.address}:${server.port}',
-    );
     return server;
   }
 
@@ -443,7 +508,6 @@ class _HlsProxy {
 
       final remoteUrl = utf8.decode(base64Url.decode(encodedUrl));
       final remoteUri = Uri.parse(remoteUrl);
-      debugPrint('[AnimePlayer][proxy-fetch] $remoteUrl');
 
       final range = request.headers.value(HttpHeaders.rangeHeader);
       final upstreamResponse = await _fetchUpstream(remoteUri, range);
@@ -493,7 +557,6 @@ class _HlsProxy {
       request.response.add(upstreamResponse.body);
       await request.response.close();
     } catch (e) {
-      debugPrint('[AnimePlayer][proxy-error] $e');
       try {
         request.response.statusCode = HttpStatus.badGateway;
         request.response.write(e.toString());
@@ -511,9 +574,6 @@ class _HlsProxy {
         return await _fetchUpstreamOnce(remoteUri, range);
       } catch (e) {
         lastError = e;
-        debugPrint(
-          '[AnimePlayer][proxy-retry] $attempt/3 ${remoteUri.toString()} $e',
-        );
         if (attempt < 3) {
           await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
         }
@@ -634,6 +694,39 @@ class _HlsProxyResponse {
     required this.contentRange,
     required this.body,
   });
+}
+
+class _PlayerControlButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final double iconSize;
+  final double extent;
+  final VoidCallback? onPressed;
+
+  const _PlayerControlButton({
+    required this.tooltip,
+    required this.icon,
+    required this.iconSize,
+    required this.extent,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: extent,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        iconSize: iconSize,
+        color: Colors.white,
+        disabledColor: Colors.white38,
+      ),
+    );
+  }
 }
 
 class _VideoTopBar extends StatelessWidget {
@@ -895,9 +988,16 @@ class _ChapterButton extends StatelessWidget {
 
 class _ErrorPanel extends StatelessWidget {
   final String message;
+  final bool requiresLogin;
+  final VoidCallback onLogin;
   final VoidCallback onRetry;
 
-  const _ErrorPanel({required this.message, required this.onRetry});
+  const _ErrorPanel({
+    required this.message,
+    required this.requiresLogin,
+    required this.onLogin,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -907,10 +1007,14 @@ class _ErrorPanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, color: Colors.white70, size: 40),
+            Icon(
+              requiresLogin ? Icons.lock_outline : Icons.cloud_off,
+              color: Colors.white70,
+              size: 40,
+            ),
             const SizedBox(height: 8),
             Text(
-              '播放失败',
+              requiresLogin ? '需要登录' : '播放失败',
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -927,7 +1031,14 @@ class _ErrorPanel extends StatelessWidget {
               ).textTheme.bodySmall?.copyWith(color: Colors.white70),
             ),
             const SizedBox(height: 10),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
+            if (requiresLogin)
+              FilledButton.icon(
+                onPressed: onLogin,
+                icon: const Icon(Icons.login),
+                label: const Text('去登录'),
+              )
+            else
+              FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
           ],
         ),
       ),
