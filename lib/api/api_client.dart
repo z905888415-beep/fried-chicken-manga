@@ -477,6 +477,30 @@ class ApiClient {
     return (list: list, total: data['total'] as int? ?? list.length);
   }
 
+  Future<({List<AnimeBrowseHistoryItem> list, int total})>
+  getAnimeBrowseHistory({int limit = 20, int offset = 0}) async {
+    final data = await _get(
+      '/api/v3/member/browse/cartoons',
+      params: {
+        'free_type': 1,
+        'offset': offset,
+        'limit': limit,
+        '_update': true,
+      },
+      host: _hostSd,
+    );
+    final list = (data['list'] as List? ?? const []).whereType<Map>().map((e) {
+      final item = Map<String, dynamic>.from(e);
+      return AnimeBrowseHistoryItem(
+        id: item['id'] as int? ?? 0,
+        lastBrowseId: item['last_chapter_id']?.toString(),
+        lastBrowseName: item['last_chapter_name']?.toString(),
+        anime: Anime.fromJson(Map<String, dynamic>.from(item['cartoon'] ?? {})),
+      );
+    }).toList();
+    return (list: list, total: data['total'] as int? ?? list.length);
+  }
+
   // ── 漫画相关 ──
 
   // 1. 热门搜索关键词

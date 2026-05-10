@@ -18,6 +18,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const _homeCacheKey = 'home_v2';
   static const _rankingOrdering = '-datetime_updated';
+  static const _cardWidth = 112.0;
 
   final _api = ApiClient();
   final _cache = DataCache();
@@ -38,11 +39,13 @@ class _HomePageState extends State<HomePage> {
     final cached = await _cache.get(_homeCacheKey);
     if (cached != null && _loading) {
       setState(() {
-        _recommendations = (cached['recommendations'] as List?)
+        _recommendations =
+            (cached['recommendations'] as List?)
                 ?.map((j) => Comic.fromJson(j))
                 .toList() ??
             [];
-        _rankingPreview = (cached['ranking'] as List?)
+        _rankingPreview =
+            (cached['ranking'] as List?)
                 ?.map((j) => Comic.fromJson(j))
                 .toList() ??
             [];
@@ -131,7 +134,9 @@ class _HomePageState extends State<HomePage> {
       onRefresh: _load,
       child: CustomScrollView(
         slivers: [
-          SliverToBoxAdapter(child: SizedBox(height: MediaQuery.of(context).padding.top)),
+          SliverToBoxAdapter(
+            child: SizedBox(height: MediaQuery.of(context).padding.top),
+          ),
           if (_refreshing)
             const SliverToBoxAdapter(
               child: LinearProgressIndicator(minHeight: 2),
@@ -150,7 +155,7 @@ class _HomePageState extends State<HomePage> {
             ),
             SliverToBoxAdapter(
               child: SizedBox(
-                height: 210,
+                height: 190,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: EdgeInsets.symmetric(horizontal: hp),
@@ -187,24 +192,21 @@ class _HomePageState extends State<HomePage> {
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: hp),
               sliver: SliverGrid(
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) {
-                    final comic = _rankingPreview[i];
-                    final heroTagBase = ComicHeroTags.base(
-                      scope: 'home-ranking',
-                      pathWord: comic.pathWord,
-                      index: i,
-                    );
-                    return ComicCard(
-                      comic: comic,
-                      heroTagBase: heroTagBase,
-                      onTap: () => _openComic(comic, heroTagBase),
-                    );
-                  },
-                  childCount: _rankingPreview.length,
-                ),
+                delegate: SliverChildBuilderDelegate((_, i) {
+                  final comic = _rankingPreview[i];
+                  final heroTagBase = ComicHeroTags.base(
+                    scope: 'home-ranking',
+                    pathWord: comic.pathWord,
+                    index: i,
+                  );
+                  return ComicCard(
+                    comic: comic,
+                    heroTagBase: heroTagBase,
+                    onTap: () => _openComic(comic, heroTagBase),
+                  );
+                }, childCount: _rankingPreview.length),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 130,
+                  maxCrossAxisExtent: _cardWidth,
                   childAspectRatio: 0.55,
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
@@ -239,13 +241,15 @@ class _SectionTitle extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     return SliverToBoxAdapter(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(hp, 20, hp - 8, 12),
+        padding: EdgeInsets.fromLTRB(hp, 0, hp - 8, 6),
         child: Row(
           children: [
             Icon(icon, size: 20, color: cs.primary),
             const SizedBox(width: 6),
-            Text(title,
-                style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             if (onMore != null)
               TextButton(
@@ -266,6 +270,8 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _RecommendCard extends StatelessWidget {
+  static const _cardWidth = _HomePageState._cardWidth;
+
   final Comic comic;
   final String? heroTagBase;
   final VoidCallback onTap;
@@ -288,16 +294,15 @@ class _RecommendCard extends StatelessWidget {
       comic.authors.map((a) => a.name).join(' / '),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: Theme.of(context)
-          .textTheme
-          .labelSmall
-          ?.copyWith(color: cs.onSurfaceVariant),
+      style: Theme.of(
+        context,
+      ).textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
     );
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 130,
+        width: _cardWidth,
         margin: const EdgeInsets.only(right: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,7 +316,7 @@ class _RecommendCard extends StatelessWidget {
                   child: CachedNetworkImage(
                     imageUrl: comic.cover,
                     fit: BoxFit.cover,
-                    width: 130,
+                    width: _cardWidth,
                     height: double.infinity,
                     fadeInDuration: Duration.zero,
                     fadeOutDuration: Duration.zero,
@@ -441,16 +446,24 @@ class ComicCard extends StatelessWidget {
               Icon(Icons.local_fire_department, size: 12, color: cs.primary),
               const SizedBox(width: 2),
               Flexible(
-                child: Text(formatPopular(comic.popular),
-                    overflow: TextOverflow.ellipsis,
-                    style: tt.labelSmall
-                        ?.copyWith(color: cs.onSurfaceVariant, fontSize: 10)),
+                child: Text(
+                  formatPopular(comic.popular),
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                ),
               ),
               if (comic.datetimeUpdated != null) ...[
                 const SizedBox(width: 4),
-                Text(formatRelativeTime(comic.datetimeUpdated!),
-                    style: tt.labelSmall
-                        ?.copyWith(color: cs.onSurfaceVariant, fontSize: 10)),
+                Text(
+                  formatRelativeTime(comic.datetimeUpdated!),
+                  style: tt.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                ),
               ],
             ],
           ),

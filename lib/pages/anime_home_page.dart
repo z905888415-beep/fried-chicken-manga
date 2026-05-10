@@ -18,6 +18,8 @@ class AnimeHomePage extends StatefulWidget {
   State<AnimeHomePage> createState() => _AnimeHomePageState();
 }
 
+const _animeHomeCardWidth = 112.0;
+
 class _AnimeHomePageState extends State<AnimeHomePage> {
   static const _cacheKey = 'anime_home_v1';
 
@@ -197,7 +199,6 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
       ),
     );
   }
-
 }
 
 class _AnimeBannerItem {
@@ -397,7 +398,7 @@ class _AnimeSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(hp, 20, hp, 12),
+            padding: EdgeInsets.fromLTRB(hp, 0, hp, 6),
             child: Row(
               children: [
                 Icon(icon, size: 20, color: cs.primary),
@@ -519,7 +520,7 @@ class _AnimeHorizontalList extends StatelessWidget {
     final hp = (screenWidth - contentWidth) / 2 + 16;
 
     return SizedBox(
-      height: 224,
+      height: 198,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.symmetric(horizontal: hp),
@@ -551,10 +552,10 @@ class _AnimeUpdateGrid extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: hp),
       itemCount: items.length,
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 130,
+        maxCrossAxisExtent: _animeHomeCardWidth,
         childAspectRatio: 0.5,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
+        mainAxisSpacing: 4,
+        crossAxisSpacing: 4,
       ),
       itemBuilder: (_, i) {
         final anime = items[i].anime;
@@ -581,7 +582,7 @@ class _AnimeCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 130,
+        width: _animeHomeCardWidth,
         margin: const EdgeInsets.only(right: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -168,6 +168,20 @@ class AnimeBookshelfItem {
   });
 }
 
+class AnimeBrowseHistoryItem {
+  final int id;
+  final Anime anime;
+  final String? lastBrowseId;
+  final String? lastBrowseName;
+
+  const AnimeBrowseHistoryItem({
+    required this.id,
+    required this.anime,
+    this.lastBrowseId,
+    this.lastBrowseName,
+  });
+}
+
 class AnimeChapterLine {
   final String name;
   final String pathWord;

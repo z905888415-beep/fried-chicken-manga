@@ -283,8 +283,8 @@ class _MainPageState extends State<MainPage> {
     await AppUpdateService.checkAndPrompt(context, auto: true);
   }
 
-  // 未登录时 tabs: [漫画(0), 动漫(1), 发现(2), 我的(3)]
-  // 登录后 tabs: [漫画(0), 动漫(1), 发现(2), 书架(3), 我的(4)]
+  // 未登录时 tabs: [漫画(0), 动漫(1), 搜索(2), 我的(3)]
+  // 登录后 tabs: [漫画(0), 动漫(1), 搜索(2), 书架(3), 我的(4)]
   int get _pageIndex {
     if (_user.isLoggedIn) return _index;
     const map = [0, 1, 2, 4]; // tab index → page index
@@ -304,8 +304,8 @@ class _MainPageState extends State<MainPage> {
             : NavigationDestinationLabelBehavior.alwaysHide,
         destinations: [
           const NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
+            icon: Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book),
             label: '漫画',
           ),
           const NavigationDestination(
@@ -314,9 +314,9 @@ class _MainPageState extends State<MainPage> {
             label: '动漫',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.explore_outlined),
-            selectedIcon: Icon(Icons.explore),
-            label: '发现',
+            icon: Icon(Icons.search_outlined),
+            selectedIcon: Icon(Icons.search),
+            label: '搜索',
           ),
           if (_user.isLoggedIn)
             const NavigationDestination(
