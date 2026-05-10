@@ -156,6 +156,18 @@ class AnimeQuery {
   );
 }
 
+class AnimeBookshelfItem {
+  final Anime anime;
+  final String? lastBrowseId;
+  final String? lastBrowseName;
+
+  const AnimeBookshelfItem({
+    required this.anime,
+    this.lastBrowseId,
+    this.lastBrowseName,
+  });
+}
+
 class AnimeChapterLine {
   final String name;
   final String pathWord;

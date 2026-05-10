@@ -685,6 +685,38 @@ class ApiClient {
     return (list: list, total: data['total'] as int);
   }
 
+  Future<({List<AnimeBookshelfItem> list, int total})> getAnimeBookshelf({
+    int limit = 30,
+    int offset = 0,
+    String ordering = '-datetime_modifier',
+  }) async {
+    final data = await _get(
+      '/api/v3/member/collect/cartoons',
+      params: {
+        'free_type': 1,
+        'limit': limit,
+        'offset': offset,
+        'ordering': ordering,
+        '_update': true,
+      },
+      host: _hostSd,
+    );
+    final list = (data['list'] as List? ?? const []).whereType<Map>().map((e) {
+      final item = Map<String, dynamic>.from(e);
+      final browse = item['last_browse'];
+      return AnimeBookshelfItem(
+        anime: Anime.fromJson(Map<String, dynamic>.from(item['cartoon'] ?? {})),
+        lastBrowseId: browse is Map
+            ? browse['last_chapter_id']?.toString()
+            : null,
+        lastBrowseName: browse is Map
+            ? browse['last_chapter_name']?.toString()
+            : null,
+      );
+    }).toList();
+    return (list: list, total: data['total'] as int? ?? list.length);
+  }
+
   // 11. 收藏/取消收藏漫画
   Future<void> toggleCollect(String comicId, {required bool collect}) async {
     final host = collect ? _hostSg : _hostSd;
