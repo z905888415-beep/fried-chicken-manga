@@ -7,7 +7,6 @@ import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
 import '../utils/data_cache.dart';
-import '../utils/toast.dart';
 import 'anime_detail_page.dart';
 import 'anime_list_page.dart';
 import 'home_page.dart';
@@ -100,15 +99,6 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
     );
   }
 
-  void _openBanner(AnimeBanner banner) {
-    final anime = banner.anime;
-    if (anime == null || anime.pathWord.isEmpty) {
-      showToast(context, '当前推荐暂时无法打开', isError: true);
-      return;
-    }
-    _openAnime(anime);
-  }
-
   void _openList(AnimeListType type) {
     Navigator.push(
       context,
@@ -190,7 +180,7 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
                 collapsed: _user.animeHomeBannerCollapsed,
                 onPageChanged: (page) => setState(() => _bannerPage = page),
                 onToggleCollapsed: _toggleBannerCollapsed,
-                onTap: _openBanner,
+                onTap: _openAnime,
               ),
             ),
           if (home != null && home.recommendations.isNotEmpty)
@@ -246,7 +236,7 @@ class _AnimeBannerCarousel extends StatelessWidget {
   final bool collapsed;
   final ValueChanged<int> onPageChanged;
   final VoidCallback onToggleCollapsed;
-  final ValueChanged<AnimeBanner> onTap;
+  final ValueChanged<Anime> onTap;
 
   const _AnimeBannerCarousel({
     required this.banners,
@@ -318,7 +308,9 @@ class _AnimeBannerCarousel extends StatelessWidget {
               ),
               child: _AnimeBannerCard(
                 banner: banners[i],
-                onTap: () => onTap(banners[i]),
+                onTap: banners[i].anime == null
+                    ? null
+                    : () => onTap(banners[i].anime!),
               ),
             ),
           ),
@@ -407,7 +399,7 @@ class _AnimeSection extends StatelessWidget {
 
 class _AnimeBannerCard extends StatelessWidget {
   final AnimeBanner banner;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   const _AnimeBannerCard({required this.banner, required this.onTap});
 
@@ -418,6 +410,7 @@ class _AnimeBannerCard extends StatelessWidget {
     final title = banner.anime?.name ?? banner.brief;
 
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Card(
         clipBehavior: Clip.antiAlias,

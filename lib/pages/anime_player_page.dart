@@ -1,13 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
@@ -41,11 +38,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   final _api = ApiClient();
   final _user = UserManager();
-  final _hlsProxy = _HlsProxy(headers: _videoHttpHeaders);
-  late final Player _player;
-  late final VideoController _controller;
-  StreamSubscription<bool>? _bufferingSubscription;
-  StreamSubscription<String>? _errorSubscription;
+  VideoPlayerController? _videoController;
   AnimePlayback? _playback;
   late String _currentChapterUuid;
   late String _currentChapterName;
@@ -54,16 +47,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   bool _loading = true;
   bool _buffering = false;
   bool _requiresLogin = false;
+  int _openMediaSerial = 0;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _player = Player(
-      configuration: const PlayerConfiguration(bufferSize: 8 * 1024 * 1024),
-    );
-    _controller = VideoController(_player);
-    _listenPlayerState();
     _currentChapterUuid = widget.chapterUuid;
     _currentChapterName = widget.chapterName;
     _line = widget.line;
@@ -72,23 +61,24 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   @override
   void dispose() {
-    _bufferingSubscription?.cancel();
-    _errorSubscription?.cancel();
-    unawaited(_hlsProxy.close());
-    _player.dispose();
+    _videoController?.removeListener(_onVideoStateChanged);
+    _videoController?.dispose();
     super.dispose();
   }
 
-  void _listenPlayerState() {
-    _bufferingSubscription = _player.stream.buffering.listen((value) {
-      if (mounted) setState(() => _buffering = value);
-    });
-    _errorSubscription = _player.stream.error.listen((message) {
-      if (!mounted) return;
-      setState(() {
-        _buffering = false;
-        _error = message;
-      });
+  void _onVideoStateChanged() {
+    final controller = _videoController;
+    if (!mounted || controller == null) return;
+    final value = controller.value;
+    final nextError = value.hasError
+        ? _formatPlayerError(value.errorDescription ?? '')
+        : null;
+    if (_buffering == value.isBuffering && _error == nextError) {
+      return;
+    }
+    setState(() {
+      _buffering = value.isBuffering;
+      _error = nextError;
     });
   }
 
@@ -170,6 +160,16 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     return error.toString();
   }
 
+  String _formatPlayerError(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('127.0.0.1') ||
+        lower.contains('localhost') ||
+        lower.contains('failed to open')) {
+      return '视频加载失败，请重试';
+    }
+    return message;
+  }
+
   Future<void> _goLogin() async {
     final loggedIn = await Navigator.push<bool>(
       context,
@@ -181,15 +181,40 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 
   Future<void> _openMedia(String videoUrl) async {
+    final serial = ++_openMediaSerial;
+    _videoController?.removeListener(_onVideoStateChanged);
+    final oldController = _videoController;
+    _videoController = null;
+    unawaited(oldController?.dispose());
+    if (mounted) {
+      setState(() {
+        _buffering = true;
+        _error = null;
+      });
+    }
+
     try {
-      final playableUrl = await _hlsProxy.proxy(videoUrl);
-      await _player.open(Media(playableUrl));
-    } catch (e) {
-      debugPrint('AnimePlayerPage open media error: $e');
-      if (!mounted) return;
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(videoUrl),
+        httpHeaders: _videoHttpHeaders,
+      );
+      controller.addListener(_onVideoStateChanged);
+      if (!mounted || serial != _openMediaSerial) return;
+      _videoController = controller;
+      await controller.initialize();
+      if (!mounted || serial != _openMediaSerial) return;
+      await controller.play();
+      if (!mounted || serial != _openMediaSerial) return;
       setState(() {
         _buffering = false;
-        _error = e.toString();
+        _error = null;
+      });
+    } catch (e) {
+      debugPrint('AnimePlayerPage open media error: $e');
+      if (!mounted || serial != _openMediaSerial) return;
+      setState(() {
+        _buffering = false;
+        _error = '视频加载失败，请重试';
       });
     }
   }
@@ -292,81 +317,77 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       : _currentChapterName;
 
   void _skipForward() {
-    final duration = _player.state.duration;
-    final position = _player.state.position;
+    final controller = _videoController;
+    if (controller == null || !controller.value.isInitialized) return;
+    final duration = controller.value.duration;
+    final position = controller.value.position;
     final newPosition =
         position + Duration(seconds: UserManager().animeSkipSeconds);
     if (newPosition < duration) {
-      _player.seek(newPosition);
+      controller.seekTo(newPosition);
     } else {
-      _player.seek(duration);
+      controller.seekTo(duration);
     }
   }
 
   Widget _buildVideoWithControls() {
-    const controlButtonSize = 24.0;
-    const controlButtonExtent = 40.0;
+    final controller = _videoController;
+    if (controller == null) {
+      return const ColoredBox(color: Colors.black);
+    }
+    return _buildVideoSurface(controller, fullscreen: false);
+  }
+
+  Widget _buildVideoSurface(
+    VideoPlayerController controller, {
+    required bool fullscreen,
+  }) {
     final previousChapter = _previousChapter;
     final nextChapter = _nextChapter;
-    final previousButton = _PlayerControlButton(
-      tooltip: '上一集',
-      icon: Icons.skip_previous,
-      iconSize: controlButtonSize,
-      extent: controlButtonExtent,
-      onPressed: previousChapter == null
+    return _VideoPlayerSurface(
+      controller: controller,
+      fullscreen: fullscreen,
+      onPrevious: previousChapter == null
           ? null
           : () => unawaited(_openChapter(previousChapter)),
-    );
-    final nextButton = _PlayerControlButton(
-      tooltip: '下一集',
-      icon: Icons.skip_next,
-      iconSize: controlButtonSize,
-      extent: controlButtonExtent,
-      onPressed: nextChapter == null
+      onNext: nextChapter == null
           ? null
           : () => unawaited(_openChapter(nextChapter)),
+      onSkipForward: _skipForward,
+      onSettings: _showSettingsPanel,
+      onFullscreen: fullscreen
+          ? () => Navigator.maybePop(context)
+          : _fullscreen,
     );
-    final skipButton = _PlayerControlButton(
-      tooltip: '快进 ${UserManager().animeSkipSeconds}秒',
-      icon: Icons.fast_forward,
-      iconSize: controlButtonSize,
-      extent: controlButtonExtent,
-      onPressed: _skipForward,
-    );
-    final settingsButton = _PlayerControlButton(
-      tooltip: '设置跳转秒数',
-      icon: Icons.settings,
-      iconSize: controlButtonSize,
-      extent: controlButtonExtent,
-      onPressed: _showSettingsPanel,
-    );
-    final bottomButtonBar = [
-      const MaterialPositionIndicator(),
-      const Spacer(),
-      previousButton,
-      nextButton,
-      skipButton,
-      settingsButton,
-      const MaterialFullscreenButton(),
-    ];
-    return MaterialVideoControlsTheme(
-      normal: MaterialVideoControlsThemeData(
-        buttonBarButtonSize: controlButtonSize,
-        buttonBarButtonColor: Colors.white,
-        bottomButtonBar: bottomButtonBar,
-      ),
-      fullscreen: MaterialVideoControlsThemeData(
-        buttonBarButtonSize: controlButtonSize,
-        buttonBarButtonColor: Colors.white,
-        bottomButtonBar: bottomButtonBar,
-        bottomButtonBarMargin: const EdgeInsets.only(
-          left: 16.0,
-          right: 8.0,
-          bottom: 42.0,
+  }
+
+  Future<void> _fullscreen() async {
+    final controller = _videoController;
+    if (controller == null) return;
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    if (!mounted) return;
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Scaffold(
+            backgroundColor: Colors.black,
+            body: SafeArea(
+              child: Center(
+                child: _buildVideoSurface(controller, fullscreen: true),
+              ),
+            ),
+          ),
         ),
-      ),
-      child: Video(controller: _controller, controls: MaterialVideoControls),
-    );
+      );
+    } finally {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    }
   }
 
   void _showSettingsPanel() {
@@ -399,7 +420,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     final cs = Theme.of(context).colorScheme;
     return PopScope(
       onPopInvokedWithResult: (_, _) {
-        _player.pause();
+        _videoController?.pause();
       },
       child: Scaffold(
         body: Column(
@@ -465,237 +486,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 }
 
-class _HlsProxy {
-  static const _channel = MethodChannel('io.github.caolib.kira/hls');
-
-  final Map<String, String> headers;
-  HttpServer? _server;
-  late final HttpClient _client;
-
-  _HlsProxy({required this.headers}) {
-    _client = HttpClient()..autoUncompress = false;
-  }
-
-  Future<String> proxy(String remoteUrl) async {
-    final server = await _ensureServer();
-    return _localUrl(server.port, remoteUrl);
-  }
-
-  Future<HttpServer> _ensureServer() async {
-    final current = _server;
-    if (current != null) return current;
-
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    _server = server;
-    unawaited(_serve(server));
-    return server;
-  }
-
-  Future<void> _serve(HttpServer server) async {
-    await for (final request in server) {
-      unawaited(_handle(request));
-    }
-  }
-
-  Future<void> _handle(HttpRequest request) async {
-    try {
-      final encodedUrl = request.uri.queryParameters['u'];
-      if (encodedUrl == null || encodedUrl.isEmpty) {
-        request.response.statusCode = HttpStatus.badRequest;
-        await request.response.close();
-        return;
-      }
-
-      final remoteUrl = utf8.decode(base64Url.decode(encodedUrl));
-      final remoteUri = Uri.parse(remoteUrl);
-
-      final range = request.headers.value(HttpHeaders.rangeHeader);
-      final upstreamResponse = await _fetchUpstream(remoteUri, range);
-      final contentType = upstreamResponse.contentType == null
-          ? null
-          : ContentType.parse(upstreamResponse.contentType!);
-      final isPlaylist =
-          remoteUri.path.toLowerCase().endsWith('.m3u8') ||
-          contentType?.mimeType.contains('mpegurl') == true;
-
-      request.response.statusCode = upstreamResponse.statusCode;
-      if (isPlaylist) {
-        final text = utf8.decode(upstreamResponse.body);
-        final rewritten = _rewritePlaylist(text, remoteUri);
-        request.response.headers.contentType = ContentType(
-          'application',
-          'vnd.apple.mpegurl',
-          charset: 'utf-8',
-        );
-        request.response.write(rewritten);
-        await request.response.close();
-        return;
-      }
-
-      final responseContentType = contentType;
-      if (responseContentType != null) {
-        request.response.headers.contentType = responseContentType;
-      }
-      final contentLength = upstreamResponse.contentLength;
-      if (contentLength >= 0) {
-        request.response.contentLength = contentLength;
-      }
-      final acceptRanges = upstreamResponse.acceptRanges;
-      if (acceptRanges != null) {
-        request.response.headers.set(
-          HttpHeaders.acceptRangesHeader,
-          acceptRanges,
-        );
-      }
-      final contentRange = upstreamResponse.contentRange;
-      if (contentRange != null) {
-        request.response.headers.set(
-          HttpHeaders.contentRangeHeader,
-          contentRange,
-        );
-      }
-      request.response.add(upstreamResponse.body);
-      await request.response.close();
-    } catch (e) {
-      try {
-        request.response.statusCode = HttpStatus.badGateway;
-        request.response.write(e.toString());
-        await request.response.close();
-      } catch (_) {
-        // The response may already be in the middle of streaming to mpv.
-      }
-    }
-  }
-
-  Future<_HlsProxyResponse> _fetchUpstream(Uri remoteUri, String? range) async {
-    Object? lastError;
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      try {
-        return await _fetchUpstreamOnce(remoteUri, range);
-      } catch (e) {
-        lastError = e;
-        if (attempt < 3) {
-          await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
-        }
-      }
-    }
-    throw lastError ?? StateError('HLS fetch failed');
-  }
-
-  Future<_HlsProxyResponse> _fetchUpstreamOnce(
-    Uri remoteUri,
-    String? range,
-  ) async {
-    if (Platform.isAndroid) {
-      final response = await _channel.invokeMapMethod<String, dynamic>(
-        'fetch',
-        {'url': remoteUri.toString(), 'headers': headers, 'range': range},
-      );
-      if (response == null) {
-        throw StateError('Android HLS fetch returned empty response');
-      }
-      final body = response['body'];
-      return _HlsProxyResponse(
-        statusCode: response['statusCode'] as int? ?? HttpStatus.badGateway,
-        contentType: response['contentType'] as String?,
-        contentLength: response['contentLength'] as int? ?? -1,
-        acceptRanges: response['acceptRanges'] as String?,
-        contentRange: response['contentRange'] as String?,
-        body: body is Uint8List ? body : Uint8List(0),
-      );
-    }
-
-    final upstreamRequest = await _client.getUrl(remoteUri);
-    for (final entry in headers.entries) {
-      upstreamRequest.headers.set(entry.key, entry.value);
-    }
-    if (range != null && range.isNotEmpty) {
-      upstreamRequest.headers.set(HttpHeaders.rangeHeader, range);
-    }
-    final upstreamResponse = await upstreamRequest.close();
-    final chunks = <int>[];
-    await for (final chunk in upstreamResponse) {
-      chunks.addAll(chunk);
-    }
-    return _HlsProxyResponse(
-      statusCode: upstreamResponse.statusCode,
-      contentType: upstreamResponse.headers.contentType?.toString(),
-      contentLength: chunks.length,
-      acceptRanges: upstreamResponse.headers.value(
-        HttpHeaders.acceptRangesHeader,
-      ),
-      contentRange: upstreamResponse.headers.value(
-        HttpHeaders.contentRangeHeader,
-      ),
-      body: Uint8List.fromList(chunks),
-    );
-  }
-
-  String _rewritePlaylist(String text, Uri playlistUri) {
-    return const LineSplitter()
-        .convert(text)
-        .map((line) => _rewritePlaylistLine(line, playlistUri))
-        .join('\n');
-  }
-
-  String _rewritePlaylistLine(String line, Uri playlistUri) {
-    final trimmed = line.trim();
-    if (trimmed.isEmpty) return line;
-    if (trimmed.startsWith('#')) {
-      return _rewriteTagUri(line, playlistUri);
-    }
-
-    final resolved = playlistUri.resolve(trimmed).toString();
-    return _localUrl(_server!.port, resolved);
-  }
-
-  String _rewriteTagUri(String line, Uri playlistUri) {
-    return line.replaceAllMapped(RegExp(r'URI="([^"]+)"'), (match) {
-      final uri = match.group(1);
-      if (uri == null || uri.isEmpty || uri.startsWith('data:')) {
-        return match.group(0)!;
-      }
-      final resolved = playlistUri.resolve(uri).toString();
-      return 'URI="${_localUrl(_server!.port, resolved)}"';
-    });
-  }
-
-  String _localUrl(int port, String remoteUrl) {
-    final encoded = base64Url.encode(utf8.encode(remoteUrl));
-    return Uri(
-      scheme: 'http',
-      host: InternetAddress.loopbackIPv4.address,
-      port: port,
-      path: '/hls',
-      queryParameters: {'u': encoded},
-    ).toString();
-  }
-
-  Future<void> close() async {
-    _client.close(force: true);
-    await _server?.close(force: true);
-    _server = null;
-  }
-}
-
-class _HlsProxyResponse {
-  final int statusCode;
-  final String? contentType;
-  final int contentLength;
-  final String? acceptRanges;
-  final String? contentRange;
-  final Uint8List body;
-
-  const _HlsProxyResponse({
-    required this.statusCode,
-    required this.contentType,
-    required this.contentLength,
-    required this.acceptRanges,
-    required this.contentRange,
-    required this.body,
-  });
-}
-
 class _PlayerControlButton extends StatelessWidget {
   final String tooltip;
   final IconData icon;
@@ -727,6 +517,213 @@ class _PlayerControlButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _VideoPlayerSurface extends StatelessWidget {
+  final VideoPlayerController controller;
+  final bool fullscreen;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+  final VoidCallback onSkipForward;
+  final VoidCallback onSettings;
+  final VoidCallback onFullscreen;
+
+  const _VideoPlayerSurface({
+    required this.controller,
+    required this.fullscreen,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onSkipForward,
+    required this.onSettings,
+    required this.onFullscreen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const controlButtonSize = 24.0;
+    const controlButtonExtent = 40.0;
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        final initialized = value.isInitialized;
+        final duration = initialized ? value.duration : Duration.zero;
+        final position = initialized ? value.position : Duration.zero;
+        final progress = duration.inMilliseconds <= 0
+            ? 0.0
+            : (position.inMilliseconds / duration.inMilliseconds).clamp(
+                0.0,
+                1.0,
+              );
+
+        return ColoredBox(
+          color: Colors.black,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Center(
+                child: initialized
+                    ? AspectRatio(
+                        aspectRatio: value.aspectRatio,
+                        child: VideoPlayer(controller),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: initialized ? _togglePlay : null,
+                ),
+              ),
+              if (initialized && !value.isPlaying)
+                Center(
+                  child: IconButton.filledTonal(
+                    onPressed: _togglePlay,
+                    icon: const Icon(Icons.play_arrow),
+                    iconSize: fullscreen ? 56 : 44,
+                    style: IconButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.black54,
+                    ),
+                  ),
+                ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black87],
+                    ),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(8, 22, 8, fullscreen ? 16 : 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 2.4,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 6,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 12,
+                            ),
+                          ),
+                          child: Slider(
+                            value: progress,
+                            onChanged: initialized
+                                ? (v) => controller.seekTo(
+                                    Duration(
+                                      milliseconds:
+                                          (duration.inMilliseconds * v).round(),
+                                    ),
+                                  )
+                                : null,
+                            activeColor: Colors.red,
+                            inactiveColor: Colors.white38,
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: fullscreen ? 132 : 104,
+                              child: Text(
+                                '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: fullscreen ? 14 : 12,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            _PlayerControlButton(
+                              tooltip: value.isPlaying ? '暂停' : '播放',
+                              icon: value.isPlaying
+                                  ? Icons.pause
+                                  : Icons.play_arrow,
+                              iconSize: controlButtonSize,
+                              extent: controlButtonExtent,
+                              onPressed: initialized ? _togglePlay : null,
+                            ),
+                            _PlayerControlButton(
+                              tooltip: '上一集',
+                              icon: Icons.skip_previous,
+                              iconSize: controlButtonSize,
+                              extent: controlButtonExtent,
+                              onPressed: onPrevious,
+                            ),
+                            _PlayerControlButton(
+                              tooltip: '下一集',
+                              icon: Icons.skip_next,
+                              iconSize: controlButtonSize,
+                              extent: controlButtonExtent,
+                              onPressed: onNext,
+                            ),
+                            _PlayerControlButton(
+                              tooltip: '快进 ${UserManager().animeSkipSeconds}秒',
+                              icon: Icons.fast_forward,
+                              iconSize: controlButtonSize,
+                              extent: controlButtonExtent,
+                              onPressed: initialized ? onSkipForward : null,
+                            ),
+                            _PlayerControlButton(
+                              tooltip: '设置跳转秒数',
+                              icon: Icons.settings,
+                              iconSize: controlButtonSize,
+                              extent: controlButtonExtent,
+                              onPressed: onSettings,
+                            ),
+                            _PlayerControlButton(
+                              tooltip: fullscreen ? '退出全屏' : '全屏',
+                              icon: fullscreen
+                                  ? Icons.fullscreen_exit
+                                  : Icons.fullscreen,
+                              iconSize: controlButtonSize,
+                              extent: controlButtonExtent,
+                              onPressed: onFullscreen,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _togglePlay() {
+    if (controller.value.isPlaying) {
+      controller.pause();
+      return;
+    }
+    if (controller.value.position >= controller.value.duration &&
+        controller.value.duration > Duration.zero) {
+      controller.seekTo(Duration.zero);
+    }
+    controller.play();
+  }
+}
+
+String _formatDuration(Duration duration) {
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  if (hours > 0) return '$hours:$minutes:$seconds';
+  return '${duration.inMinutes}:$seconds';
 }
 
 class _VideoTopBar extends StatelessWidget {
