@@ -519,7 +519,7 @@ class _PlayerControlButton extends StatelessWidget {
   }
 }
 
-class _VideoPlayerSurface extends StatelessWidget {
+class _VideoPlayerSurface extends StatefulWidget {
   final VideoPlayerController controller;
   final bool fullscreen;
   final VoidCallback? onPrevious;
@@ -537,6 +537,81 @@ class _VideoPlayerSurface extends StatelessWidget {
     required this.onSettings,
     required this.onFullscreen,
   });
+
+  @override
+  State<_VideoPlayerSurface> createState() => _VideoPlayerSurfaceState();
+}
+
+class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
+  static const _controlsAutoHideDelay = Duration(seconds: 3);
+
+  bool _controlsVisible = true;
+  Timer? _hideControlsTimer;
+
+  VideoPlayerController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller.addListener(_syncControlsAutoHide);
+    _syncControlsAutoHide();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoPlayerSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.removeListener(_syncControlsAutoHide);
+    controller.addListener(_syncControlsAutoHide);
+    setState(() => _controlsVisible = true);
+    _syncControlsAutoHide();
+  }
+
+  @override
+  void dispose() {
+    _hideControlsTimer?.cancel();
+    controller.removeListener(_syncControlsAutoHide);
+    super.dispose();
+  }
+
+  void _syncControlsAutoHide() {
+    final value = controller.value;
+    if (!value.isInitialized || !value.isPlaying || !_controlsVisible) {
+      _hideControlsTimer?.cancel();
+      _hideControlsTimer = null;
+      return;
+    }
+    if (_hideControlsTimer?.isActive == true) return;
+    _startControlsAutoHideTimer();
+  }
+
+  void _startControlsAutoHideTimer() {
+    _hideControlsTimer?.cancel();
+    _hideControlsTimer = Timer(_controlsAutoHideDelay, () {
+      if (!mounted || !controller.value.isPlaying) return;
+      setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _toggleControls() {
+    if (!controller.value.isInitialized) return;
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (!_controlsVisible || !controller.value.isPlaying) {
+      _hideControlsTimer?.cancel();
+      _hideControlsTimer = null;
+      return;
+    }
+    _startControlsAutoHideTimer();
+  }
+
+  void _showControls() {
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+    }
+    if (controller.value.isPlaying) {
+      _startControlsAutoHideTimer();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -571,15 +646,16 @@ class _VideoPlayerSurface extends StatelessWidget {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: initialized ? _togglePlay : null,
+                  onTap: initialized ? _toggleControls : null,
+                  onDoubleTap: initialized ? _togglePlay : null,
                 ),
               ),
-              if (initialized && !value.isPlaying)
+              if (initialized && !value.isPlaying && _controlsVisible)
                 Center(
                   child: IconButton.filledTonal(
                     onPressed: _togglePlay,
                     icon: const Icon(Icons.play_arrow),
-                    iconSize: fullscreen ? 56 : 44,
+                    iconSize: widget.fullscreen ? 56 : 44,
                     style: IconButton.styleFrom(
                       foregroundColor: Colors.white,
                       backgroundColor: Colors.black54,
@@ -590,110 +666,130 @@ class _VideoPlayerSurface extends StatelessWidget {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black87],
-                    ),
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(8, 22, 8, fullscreen ? 16 : 4),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 2.4,
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 6,
-                            ),
-                            overlayShape: const RoundSliderOverlayShape(
-                              overlayRadius: 12,
-                            ),
-                          ),
-                          child: Slider(
-                            value: progress,
-                            onChanged: initialized
-                                ? (v) => controller.seekTo(
-                                    Duration(
-                                      milliseconds:
-                                          (duration.inMilliseconds * v).round(),
-                                    ),
-                                  )
-                                : null,
-                            activeColor: Colors.red,
-                            inactiveColor: Colors.white38,
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: AnimatedOpacity(
+                    opacity: _controlsVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Listener(
+                      onPointerDown: (_) => _showControls(),
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black87],
                           ),
                         ),
-                        Row(
-                          children: [
-                            SizedBox(
-                              width: fullscreen ? 132 : 104,
-                              child: Text(
-                                '${_formatDuration(position)} / ${_formatDuration(duration)}',
-                                maxLines: 1,
-                                overflow: TextOverflow.clip,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: fullscreen ? 14 : 12,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            8,
+                            22,
+                            8,
+                            widget.fullscreen ? 16 : 4,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 2.4,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 6,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 12,
+                                  ),
+                                ),
+                                child: Slider(
+                                  value: progress,
+                                  onChanged: initialized
+                                      ? (v) => controller.seekTo(
+                                            Duration(
+                                              milliseconds:
+                                                  (duration.inMilliseconds * v)
+                                                      .round(),
+                                            ),
+                                          )
+                                      : null,
+                                  activeColor: Colors.red,
+                                  inactiveColor: Colors.white38,
                                 ),
                               ),
-                            ),
-                            const Spacer(),
-                            _PlayerControlButton(
-                              tooltip: value.isPlaying ? '暂停' : '播放',
-                              icon: value.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              iconSize: controlButtonSize,
-                              extent: controlButtonExtent,
-                              onPressed: initialized ? _togglePlay : null,
-                            ),
-                            _PlayerControlButton(
-                              tooltip: '上一集',
-                              icon: Icons.skip_previous,
-                              iconSize: controlButtonSize,
-                              extent: controlButtonExtent,
-                              onPressed: onPrevious,
-                            ),
-                            _PlayerControlButton(
-                              tooltip: '下一集',
-                              icon: Icons.skip_next,
-                              iconSize: controlButtonSize,
-                              extent: controlButtonExtent,
-                              onPressed: onNext,
-                            ),
-                            _PlayerControlButton(
-                              tooltip: '快进 ${UserManager().animeSkipSeconds}秒',
-                              icon: Icons.fast_forward,
-                              iconSize: controlButtonSize,
-                              extent: controlButtonExtent,
-                              onPressed: initialized ? onSkipForward : null,
-                            ),
-                            _PlayerControlButton(
-                              tooltip: '设置跳转秒数',
-                              icon: Icons.settings,
-                              iconSize: controlButtonSize,
-                              extent: controlButtonExtent,
-                              onPressed: onSettings,
-                            ),
-                            _PlayerControlButton(
-                              tooltip: fullscreen ? '退出全屏' : '全屏',
-                              icon: fullscreen
-                                  ? Icons.fullscreen_exit
-                                  : Icons.fullscreen,
-                              iconSize: controlButtonSize,
-                              extent: controlButtonExtent,
-                              onPressed: onFullscreen,
-                            ),
-                          ],
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: widget.fullscreen ? 132 : 104,
+                                    child: Text(
+                                      '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.clip,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: widget.fullscreen ? 14 : 12,
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures(),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  _PlayerControlButton(
+                                    tooltip: '上一集',
+                                    icon: Icons.skip_previous,
+                                    iconSize: controlButtonSize,
+                                    extent: controlButtonExtent,
+                                    onPressed: widget.onPrevious,
+                                  ),
+                                  _PlayerControlButton(
+                                    tooltip: value.isPlaying ? '暂停' : '播放',
+                                    icon: value.isPlaying
+                                        ? Icons.pause
+                                        : Icons.play_arrow,
+                                    iconSize: controlButtonSize,
+                                    extent: controlButtonExtent,
+                                    onPressed: initialized ? _togglePlay : null,
+                                  ),
+                                  _PlayerControlButton(
+                                    tooltip: '下一集',
+                                    icon: Icons.skip_next,
+                                    iconSize: controlButtonSize,
+                                    extent: controlButtonExtent,
+                                    onPressed: widget.onNext,
+                                  ),
+                                  _PlayerControlButton(
+                                    tooltip:
+                                        '快进 ${UserManager().animeSkipSeconds}秒',
+                                    icon: Icons.fast_forward,
+                                    iconSize: controlButtonSize,
+                                    extent: controlButtonExtent,
+                                    onPressed: initialized
+                                        ? widget.onSkipForward
+                                        : null,
+                                  ),
+                                  _PlayerControlButton(
+                                    tooltip: '设置跳转秒数',
+                                    icon: Icons.settings,
+                                    iconSize: controlButtonSize,
+                                    extent: controlButtonExtent,
+                                    onPressed: widget.onSettings,
+                                  ),
+                                  _PlayerControlButton(
+                                    tooltip:
+                                        widget.fullscreen ? '退出全屏' : '全屏',
+                                    icon: widget.fullscreen
+                                        ? Icons.fullscreen_exit
+                                        : Icons.fullscreen,
+                                    iconSize: controlButtonSize,
+                                    extent: controlButtonExtent,
+                                    onPressed: widget.onFullscreen,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -706,6 +802,7 @@ class _VideoPlayerSurface extends StatelessWidget {
   }
 
   void _togglePlay() {
+    _showControls();
     if (controller.value.isPlaying) {
       controller.pause();
       return;
