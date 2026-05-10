@@ -1,8 +1,10 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'models/user_manager.dart';
+import 'pages/anime_home_page.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
 import 'pages/bookshelf_page.dart';
@@ -11,6 +13,7 @@ import 'utils/app_update.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   await UserManager().init();
   SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.manual,
@@ -208,6 +211,7 @@ class _MainPageState extends State<MainPage> {
 
   static const _allPages = [
     HomePage(),
+    AnimeHomePage(),
     SearchPage(),
     BookshelfPage(),
     ProfilePage(),
@@ -270,7 +274,7 @@ class _MainPageState extends State<MainPage> {
   void _onUserChanged() {
     if (!mounted) return;
     setState(() {
-      final maxIndex = _user.isLoggedIn ? 3 : 2;
+      final maxIndex = _user.isLoggedIn ? 4 : 3;
       if (_index > maxIndex) _index = 0;
     });
   }
@@ -281,12 +285,12 @@ class _MainPageState extends State<MainPage> {
     await AppUpdateService.checkAndPrompt(context, auto: true);
   }
 
-  // 未登录时 tabs: [首页(0), 发现(1), 我的(2)]
-  // 登录后 tabs: [首页(0), 发现(1), 书架(2), 我的(3)]
+  // 未登录时 tabs: [漫画(0), 动漫(1), 发现(2), 我的(3)]
+  // 登录后 tabs: [漫画(0), 动漫(1), 发现(2), 书架(3), 我的(4)]
   int get _pageIndex {
     if (_user.isLoggedIn) return _index;
-    const map = [0, 1, 3]; // tab index → page index
-    return map[_index.clamp(0, 2)];
+    const map = [0, 1, 2, 4]; // tab index → page index
+    return map[_index.clamp(0, 3)];
   }
 
   @override
@@ -304,7 +308,12 @@ class _MainPageState extends State<MainPage> {
           const NavigationDestination(
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home),
-            label: '首页',
+            label: '漫画',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.movie_outlined),
+            selectedIcon: Icon(Icons.movie),
+            label: '动漫',
           ),
           const NavigationDestination(
             icon: Icon(Icons.explore_outlined),

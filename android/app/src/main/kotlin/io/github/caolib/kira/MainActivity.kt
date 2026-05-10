@@ -7,9 +7,14 @@ import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.GZIPInputStream
 
 class MainActivity : FlutterActivity() {
     private var volumeChannel: MethodChannel? = null
+    private var hlsChannel: MethodChannel? = null
     private var interceptVolume = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +63,115 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        hlsChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "io.github.caolib.kira/hls"
+        )
+        hlsChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "fetch" -> {
+                    val url = call.argument<String>("url")
+                    val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+                    val range = call.argument<String>("range")
+                    if (url.isNullOrEmpty()) {
+                        result.error("bad_request", "Missing url", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val response = fetchHlsWithRetry(url, headers, range)
+                            runOnUiThread { result.success(response) }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result.error(
+                                    "fetch_failed",
+                                    "${e.javaClass.simpleName}: ${e.message}",
+                                    null
+                                )
+                            }
+                        }
+                    }.start()
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun fetchHlsWithRetry(
+        url: String,
+        headers: Map<String, String>,
+        range: String?
+    ): Map<String, Any?> {
+        var lastError: Exception? = null
+        for (attempt in 1..3) {
+            try {
+                return fetchHls(url, headers, range)
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < 3) {
+                    Thread.sleep((250L * attempt))
+                }
+            }
+        }
+        throw lastError ?: IllegalStateException("HLS fetch failed")
+    }
+
+    private fun fetchHls(
+        url: String,
+        headers: Map<String, String>,
+        range: String?
+    ): Map<String, Any?> {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 20000
+            instanceFollowRedirects = true
+            useCaches = false
+            headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            if (!range.isNullOrEmpty()) {
+                setRequestProperty("Range", range)
+            }
+        }
+
+        try {
+            val statusCode = connection.responseCode
+            val rawStream = if (statusCode >= 400) {
+                connection.errorStream
+            } else {
+                connection.inputStream
+            }
+            val body = if (rawStream == null) {
+                ByteArray(0)
+            } else {
+                val inputStream = if (connection.contentEncoding.equals("gzip", ignoreCase = true)) {
+                    GZIPInputStream(rawStream)
+                } else {
+                    rawStream
+                }
+                inputStream.use { stream ->
+                    val buffer = ByteArray(64 * 1024)
+                    val output = ByteArrayOutputStream()
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                    }
+                    output.toByteArray()
+                }
+            }
+
+            return mapOf(
+                "statusCode" to statusCode,
+                "contentType" to connection.contentType,
+                "contentLength" to body.size,
+                "acceptRanges" to connection.getHeaderField("Accept-Ranges"),
+                "contentRange" to connection.getHeaderField("Content-Range"),
+                "body" to body
+            )
+        } finally {
+            connection.disconnect()
         }
     }
 

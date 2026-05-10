@@ -4,7 +4,9 @@
       "Bash(flutter analyze:*)",
       "Bash(flutter pub:*)",
       "Bash(flutter clean:*)",
-      "Bash(flutter --version)"
+      "Bash(flutter --version)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs"
     ]
   }
 }

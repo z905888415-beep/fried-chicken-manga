@@ -107,6 +107,8 @@ class UserManager extends ChangeNotifier {
   static const _keyDisclaimerAccepted = 'disclaimer_accepted';
   static const _keyLoginSource = 'login_source';
   static const _keyApiRoute = 'api_route';
+  static const _keyAnimeHomeBannerCollapsed = 'anime_home_banner_collapsed';
+  static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
 
   String? _token;
   String? _username;
@@ -147,6 +149,8 @@ class UserManager extends ChangeNotifier {
   bool _disclaimerAccepted = false;
   String _loginSource = 'hotmanga';
   int _apiRoute = 0; // 0=线路1(默认), 1=线路2
+  bool _animeHomeBannerCollapsed = false;
+  int _animeSkipSeconds = 86;
 
   String? get token => _token;
   String? get username => _username;
@@ -202,6 +206,8 @@ class UserManager extends ChangeNotifier {
   bool get disclaimerAccepted => _disclaimerAccepted;
   String get loginSource => _loginSource;
   int get apiRoute => _apiRoute;
+  bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
+  int get animeSkipSeconds => _animeSkipSeconds;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
   Future<void> init() async {
@@ -287,6 +293,9 @@ class UserManager extends ChangeNotifier {
     _disclaimerAccepted = prefs.getBool(_keyDisclaimerAccepted) ?? false;
     _loginSource = prefs.getString(_keyLoginSource) ?? 'hotmanga';
     _apiRoute = prefs.getInt(_keyApiRoute) ?? 0;
+    _animeHomeBannerCollapsed =
+        prefs.getBool(_keyAnimeHomeBannerCollapsed) ?? false;
+    _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
     notifyListeners();
   }
 
@@ -680,6 +689,22 @@ class UserManager extends ChangeNotifier {
     _apiRoute = route;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyApiRoute, route);
+    notifyListeners();
+  }
+
+  Future<void> setAnimeHomeBannerCollapsed(bool collapsed) async {
+    if (_animeHomeBannerCollapsed == collapsed) return;
+    _animeHomeBannerCollapsed = collapsed;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAnimeHomeBannerCollapsed, collapsed);
+    notifyListeners();
+  }
+
+  Future<void> setAnimeSkipSeconds(int seconds) async {
+    if (_animeSkipSeconds == seconds) return;
+    _animeSkipSeconds = seconds;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyAnimeSkipSeconds, seconds);
     notifyListeners();
   }
 

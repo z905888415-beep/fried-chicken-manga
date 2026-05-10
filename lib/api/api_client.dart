@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
+import '../models/anime.dart';
 import '../models/comic.dart';
 import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
@@ -692,6 +693,111 @@ class ApiClient {
       data: 'comic_id=$comicId&is_collect=${collect ? 1 : 0}',
       options: Options(contentType: 'application/x-www-form-urlencoded'),
     );
+  }
+
+  // ── 动漫相关 ──
+
+  /// 动漫首页
+  Future<AnimeHome> getAnimeHome() async {
+    final data = await _get('/api/v3/h5/homeIndex/cartoonsfree', host: _hostSd);
+    return AnimeHome.fromJson(data);
+  }
+
+  Future<({List<Anime> list, int total})> getAnimeRecommendations({
+    required int pos,
+    int limit = 24,
+    int offset = 0,
+  }) async {
+    final data = await _get(
+      '/api/v3/recs',
+      params: {'pos': pos, 'limit': limit, 'offset': offset},
+      host: _hostSg,
+    );
+    final rawList = data['list'] as List? ?? const [];
+    final list = rawList
+        .where((e) => e is Map && e['comic'] is Map)
+        .map(
+          (e) => Anime.fromJson(Map<String, dynamic>.from((e as Map)['comic'])),
+        )
+        .toList();
+    return (list: list, total: data['total'] as int? ?? list.length);
+  }
+
+  Future<({List<AnimeUpdate> list, int total})> getAnimeUpdates({
+    int limit = 21,
+    int offset = 0,
+  }) async {
+    final data = await _get(
+      '/api/v3/updates',
+      params: {'date': 'weekly-cartoon-free', 'limit': limit, 'offset': offset},
+      host: _hostSd,
+    );
+    final rawList = data['list'] as List? ?? const [];
+    final list = rawList
+        .where((e) => e is Map && e['cartoon'] is Map)
+        .map((e) => AnimeUpdate.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+    return (list: list, total: data['total'] as int? ?? list.length);
+  }
+
+  Future<Anime> getAnimeDetail(String pathWord) async {
+    final data = await _get(
+      '/api/v3/cartoon2/$pathWord',
+      params: {'platform': 3, '_update': true},
+      host: _hostSg,
+    );
+    return Anime.fromDetailJson(data);
+  }
+
+  Future<AnimeQuery> getAnimeQuery(String pathWord) async {
+    final data = await _get(
+      '/api/v3/cartoon2/$pathWord/query',
+      params: {'platform': 3, '_update': true},
+      host: _hostSg,
+    );
+    return AnimeQuery.fromJson(data);
+  }
+
+  Future<({List<AnimeChapter> list, int total})> getAnimeChapters(
+    String pathWord, {
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final data = await _get(
+      '/api/v3/cartoon/$pathWord/chapters2',
+      params: {'limit': limit, 'offset': offset, '_update': true},
+      host: _hostSd,
+    );
+    final rawList = data['list'] as List? ?? const [];
+    final list = rawList
+        .whereType<Map>()
+        .map((e) => AnimeChapter.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return (list: list, total: data['total'] as int? ?? list.length);
+  }
+
+  Future<void> toggleAnimeCollect(
+    String cartoonId, {
+    required bool collect,
+  }) async {
+    await _dio.post(
+      _url('/api/v3/member/collect/cartoon', _hostSg),
+      data: 'cartoon_id=$cartoonId&is_collect=${collect ? 1 : 0}',
+      options: Options(contentType: 'application/x-www-form-urlencoded'),
+    );
+  }
+
+  Future<AnimePlayback> getAnimePlayback(
+    String pathWord,
+    String chapterUuid, {
+    required String line,
+  }) async {
+    final data = await _get(
+      '/api/v3/cartoon/$pathWord/chapter/$chapterUuid',
+      params: {'platform': 3, 'line': line},
+      host: _hostSg,
+    );
+    return AnimePlayback.fromJson(data);
   }
 
   // ── 线路延迟测试 ──

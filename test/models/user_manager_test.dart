@@ -34,4 +34,16 @@ void main() {
     await user.setImageViewerLandscapeRotation(-90);
     expect(user.imageViewerLandscapeRotation, -1);
   });
+
+  test('anime home banner collapsed setting persists', () async {
+    final user = UserManager();
+    await user.init();
+
+    expect(user.animeHomeBannerCollapsed, isFalse);
+
+    await user.setAnimeHomeBannerCollapsed(true);
+    await user.init();
+
+    expect(user.animeHomeBannerCollapsed, isTrue);
+  });
 }

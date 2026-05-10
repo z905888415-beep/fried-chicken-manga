@@ -8,7 +8,13 @@
             "name": "kira (Android Emulator)",
             "request": "launch",
             "type": "dart",
-            "deviceId": "emulator-5554"
+            "deviceId": "emulator"
+        },
+        {
+            "name": "kira (Android MuMu)",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "127.0.0.1:16384"
         },
         {
             "name": "kira (Windows)",
