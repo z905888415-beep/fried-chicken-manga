@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
-import '../models/user_manager.dart';
 import '../utils/data_cache.dart';
+import '../utils/toast.dart';
 import 'anime_detail_page.dart';
 import 'anime_list_page.dart';
 import 'home_page.dart';
@@ -23,14 +23,10 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
 
   final _api = ApiClient();
   final _cache = DataCache();
-  final _user = UserManager();
-  final _bannerController = PageController(viewportFraction: 0.92);
-  Timer? _bannerTimer;
   AnimeHome? _home;
   bool _loading = true;
   bool _refreshing = false;
   String? _error;
-  int _bannerPage = 0;
 
   @override
   void initState() {
@@ -41,8 +37,6 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
 
   @override
   void dispose() {
-    _bannerTimer?.cancel();
-    _bannerController.dispose();
     super.dispose();
   }
 
@@ -53,7 +47,6 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
       _home = AnimeHome.fromJson(Map<String, dynamic>.from(cached));
       _loading = false;
     });
-    _restartBannerTimer();
   }
 
   Future<void> _load() async {
@@ -74,10 +67,8 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
         _home = home;
         _loading = false;
         _refreshing = false;
-        if (_bannerPage >= home.banners.length) _bannerPage = 0;
       });
       _cache.put(_cacheKey, home.toJson());
-      _restartBannerTimer();
     } catch (e) {
       debugPrint('AnimeHomePage load error: $e');
       if (!mounted) return;
@@ -90,11 +81,17 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
   }
 
   void _openAnime(Anime anime) {
+    if (anime.pathWord.isEmpty) {
+      showToast(context, '当前动漫暂时无法打开', isError: true);
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            AnimeDetailPage(pathWord: anime.pathWord, initialAnime: anime),
+        builder: (_) => AnimeDetailPage(
+          pathWord: anime.pathWord,
+          initialAnime: anime.cover.isEmpty ? null : anime,
+        ),
       ),
     );
   }
@@ -106,33 +103,6 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
     );
   }
 
-  void _restartBannerTimer() {
-    _bannerTimer?.cancel();
-    final count = _home?.banners.length ?? 0;
-    if (count <= 1 || _user.animeHomeBannerCollapsed) return;
-
-    _bannerTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || !_bannerController.hasClients) return;
-      final nextPage = (_bannerPage + 1) % count;
-      _bannerController.animateToPage(
-        nextPage,
-        duration: const Duration(milliseconds: 420),
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
-  void _toggleBannerCollapsed() {
-    final next = !_user.animeHomeBannerCollapsed;
-    _user.setAnimeHomeBannerCollapsed(next);
-    setState(() {});
-    if (next) {
-      _bannerTimer?.cancel();
-    } else {
-      _restartBannerTimer();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -141,6 +111,12 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
     final contentWidth = screenWidth < 900 ? screenWidth : 900.0;
     final hp = (screenWidth - contentWidth) / 2 + 16;
     final home = _home;
+    final bannerItems = home == null
+        ? const <_AnimeBannerItem>[]
+        : home.banners
+              .map(_AnimeBannerItem.fromBanner)
+              .where((item) => item.cover.isNotEmpty)
+              .toList();
 
     if (_loading) return const Center(child: CircularProgressIndicator());
 
@@ -170,16 +146,11 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
             const SliverToBoxAdapter(
               child: LinearProgressIndicator(minHeight: 2),
             ),
-          if (home != null && home.banners.isNotEmpty)
+          if (bannerItems.isNotEmpty)
             SliverToBoxAdapter(
               child: _AnimeBannerCarousel(
-                banners: home.banners,
-                controller: _bannerController,
-                currentPage: _bannerPage,
+                items: bannerItems,
                 hp: hp,
-                collapsed: _user.animeHomeBannerCollapsed,
-                onPageChanged: (page) => setState(() => _bannerPage = page),
-                onToggleCollapsed: _toggleBannerCollapsed,
                 onTap: _openAnime,
               ),
             ),
@@ -226,109 +197,169 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
       ),
     );
   }
+
 }
 
-class _AnimeBannerCarousel extends StatelessWidget {
-  final List<AnimeBanner> banners;
-  final PageController controller;
-  final int currentPage;
+class _AnimeBannerItem {
+  final String cover;
+  final String title;
+  final String brief;
+  final Anime? anime;
+
+  const _AnimeBannerItem({
+    required this.cover,
+    required this.title,
+    required this.brief,
+    this.anime,
+  });
+
+  factory _AnimeBannerItem.fromBanner(AnimeBanner banner) {
+    final anime = banner.anime;
+    final title = anime != null && anime.name.isNotEmpty
+        ? anime.name
+        : banner.brief;
+    return _AnimeBannerItem(
+      cover: banner.cover.isNotEmpty ? banner.cover : (anime?.cover ?? ''),
+      title: title,
+      brief: banner.brief,
+      anime: anime,
+    );
+  }
+}
+
+class _AnimeBannerCarousel extends StatefulWidget {
+  final List<_AnimeBannerItem> items;
   final double hp;
-  final bool collapsed;
-  final ValueChanged<int> onPageChanged;
-  final VoidCallback onToggleCollapsed;
   final ValueChanged<Anime> onTap;
 
   const _AnimeBannerCarousel({
-    required this.banners,
-    required this.controller,
-    required this.currentPage,
+    required this.items,
     required this.hp,
-    required this.collapsed,
-    required this.onPageChanged,
-    required this.onToggleCollapsed,
     required this.onTap,
   });
 
   @override
+  State<_AnimeBannerCarousel> createState() => _AnimeBannerCarouselState();
+}
+
+class _AnimeBannerCarouselState extends State<_AnimeBannerCarousel> {
+  late final PageController _controller;
+  Timer? _timer;
+  late int _page;
+
+  @override
+  void initState() {
+    super.initState();
+    _page = _initialPage(widget.items.length);
+    _controller = PageController(initialPage: _page);
+    _restartTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimeBannerCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items.length != widget.items.length) {
+      _page = _initialPage(widget.items.length);
+      if (_controller.hasClients) {
+        _controller.jumpToPage(_page);
+      }
+    }
+    if (oldWidget.items.length != widget.items.length) {
+      _restartTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _restartTimer() {
+    _timer?.cancel();
+    if (widget.items.length <= 1) return;
+    _timer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _nextPage(restartTimer: false),
+    );
+  }
+
+  int _initialPage(int count) {
+    return count > 1 ? count * 1000 : 0;
+  }
+
+  void _nextPage({bool restartTimer = true}) {
+    if (!mounted || widget.items.length <= 1) return;
+    if (!_controller.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _nextPage(restartTimer: restartTimer),
+      );
+      return;
+    }
+    _animateToPage(_page + 1, restartTimer: restartTimer);
+  }
+
+  void _animateToPage(int page, {bool restartTimer = true}) {
+    _controller.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+    );
+    if (restartTimer) {
+      _restartTimer();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    if (collapsed) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
-        child: Row(
-          children: [
-            Icon(Icons.movie_filter_outlined, size: 20, color: cs.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '轮播图',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ),
-            IconButton(
-              tooltip: '展开',
-              onPressed: onToggleCollapsed,
-              icon: const Icon(Icons.keyboard_arrow_down),
-            ),
-          ],
-        ),
-      );
-    }
 
     return Column(
       children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(hp, 8, hp, 0),
-          child: Row(
+        SizedBox(
+          height: 176,
+          child: Stack(
             children: [
-              const Spacer(),
-              IconButton(
-                tooltip: '折叠',
-                onPressed: onToggleCollapsed,
-                icon: const Icon(Icons.keyboard_arrow_up),
+              PageView.builder(
+                controller: _controller,
+                physics: const PageScrollPhysics(),
+                itemCount: widget.items.length > 1 ? null : widget.items.length,
+                onPageChanged: (page) => setState(() => _page = page),
+                itemBuilder: (_, i) {
+                  final item = widget.items[i % widget.items.length];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      left: widget.hp,
+                      right: widget.hp,
+                      bottom: 8,
+                    ),
+                    child: _AnimeBannerCard(
+                      item: item,
+                      onTap: item.anime == null
+                          ? null
+                          : () => widget.onTap(item.anime!),
+                    ),
+                  );
+                },
               ),
             ],
           ),
         ),
-        SizedBox(
-          height: 176,
-          child: PageView.builder(
-            controller: controller,
-            itemCount: banners.length,
-            onPageChanged: onPageChanged,
-            itemBuilder: (_, i) => Padding(
-              padding: EdgeInsets.only(
-                left: i == 0 ? hp - 16 : 6,
-                right: i == banners.length - 1 ? hp - 16 : 6,
-                bottom: 8,
-              ),
-              child: _AnimeBannerCard(
-                banner: banners[i],
-                onTap: banners[i].anime == null
-                    ? null
-                    : () => onTap(banners[i].anime!),
-              ),
-            ),
-          ),
-        ),
-        if (banners.length > 1)
+        if (widget.items.length > 1)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                for (var i = 0; i < banners.length; i++)
+                for (var i = 0; i < widget.items.length; i++)
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
-                    width: i == currentPage ? 16 : 6,
+                    width: i == _page % widget.items.length ? 16 : 6,
                     height: 6,
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     decoration: BoxDecoration(
-                      color: i == currentPage
+                      color: i == _page % widget.items.length
                           ? cs.primary
                           : cs.onSurfaceVariant.withValues(alpha: 0.35),
                       borderRadius: BorderRadius.circular(999),
@@ -398,16 +429,15 @@ class _AnimeSection extends StatelessWidget {
 }
 
 class _AnimeBannerCard extends StatelessWidget {
-  final AnimeBanner banner;
+  final _AnimeBannerItem item;
   final VoidCallback? onTap;
 
-  const _AnimeBannerCard({required this.banner, required this.onTap});
+  const _AnimeBannerCard({required this.item, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final title = banner.anime?.name ?? banner.brief;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -419,7 +449,7 @@ class _AnimeBannerCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             CachedNetworkImage(
-              imageUrl: banner.cover,
+              imageUrl: item.cover,
               fit: BoxFit.cover,
               fadeInDuration: Duration.zero,
               fadeOutDuration: Duration.zero,
@@ -447,9 +477,9 @@ class _AnimeBannerCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (title.isNotEmpty)
+                  if (item.title.isNotEmpty)
                     Text(
-                      title,
+                      item.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: tt.titleMedium?.copyWith(
@@ -457,10 +487,10 @@ class _AnimeBannerCard extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  if (banner.brief.isNotEmpty && banner.brief != title) ...[
+                  if (item.brief.isNotEmpty && item.brief != item.title) ...[
                     const SizedBox(height: 2),
                     Text(
-                      banner.brief,
+                      item.brief,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: tt.bodySmall?.copyWith(color: cs.surface),
