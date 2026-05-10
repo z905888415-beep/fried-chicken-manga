@@ -588,6 +588,29 @@ class ApiClient {
     return (list: list, total: data['total'] as int);
   }
 
+  Future<({List<Anime> list, int total})> searchAnimes(
+    String query, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final data = await _get(
+      '/api/v3/search/cartoon',
+      params: {
+        'platform': 3,
+        'q': query,
+        'limit': limit,
+        'offset': offset,
+        'free_type': 1,
+        '_update': true,
+      },
+      host: _hostSd,
+    );
+    final list = (data['list'] as List)
+        .map((e) => Anime.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return (list: list, total: data['total'] as int);
+  }
+
   // 9. 章节详情
   Future<ChapterDetail> getChapterDetail(
     String pathWord,

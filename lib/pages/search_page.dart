@@ -1,12 +1,17 @@
-import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+
 import '../api/api_client.dart';
+import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/comic.dart' as m;
-import '../utils/comic_hero_tags.dart';
 import '../utils/comic_card_skeleton.dart';
+import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
+import 'anime_detail_page.dart';
 import 'comic_detail_page.dart';
+
+enum _SearchMode { comic, anime }
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -21,19 +26,27 @@ class _SearchPageState extends State<SearchPage> {
   static const _tagSpacing = 8.0;
 
   final _api = ApiClient();
+  final _cache = DataCache();
   final _searchController = TextEditingController();
+
   List<String> _keywords = [];
   List<m.Theme> _tags = [];
+  List<Comic> _comics = [];
+  List<Anime> _animes = [];
+
+  _SearchMode _mode = _SearchMode.comic;
   String? _selectedTag;
   String _ordering = '-popular';
-  List<Comic> _comics = [];
   bool _loading = true;
-  int _offset = 0;
-  int _total = 0;
   bool _loadingMore = false;
   bool _searching = false;
+  int _offset = 0;
+  int _total = 0;
   String? _searchQuery;
-  final _cache = DataCache();
+
+  bool get _isAnimeMode => _mode == _SearchMode.anime;
+  String get _modeLabel => _isAnimeMode ? '动漫' : '漫画';
+  bool get _hasResults => _comics.isNotEmpty || _animes.isNotEmpty;
 
   @override
   void initState() {
@@ -85,32 +98,53 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _doSearch(String query) async {
-    if (query.trim().isEmpty) return;
+    final keyword = query.trim();
+    if (keyword.isEmpty) return;
+    final mode = _mode;
     setState(() {
       _searching = true;
-      _searchQuery = query.trim();
+      _searchQuery = keyword;
       _comics = [];
+      _animes = [];
       _offset = 0;
+      _total = 0;
       _selectedTag = null;
     });
+
     try {
-      final result = await _api.searchComics(_searchQuery!);
-      setState(() {
-        _comics = result.list;
-        _total = result.total;
-        _offset = result.list.length;
-        _searching = false;
-      });
-    } catch (_) {
-      setState(() => _searching = false);
+      if (mode == _SearchMode.anime) {
+        final result = await _api.searchAnimes(keyword);
+        if (!mounted || _mode != mode || _searchQuery != keyword) return;
+        setState(() {
+          _animes = result.list;
+          _total = result.total;
+          _offset = result.list.length;
+          _searching = false;
+        });
+      } else {
+        final result = await _api.searchComics(keyword);
+        if (!mounted || _mode != mode || _searchQuery != keyword) return;
+        setState(() {
+          _comics = result.list;
+          _total = result.total;
+          _offset = result.list.length;
+          _searching = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('SearchPage search error: $e');
+      if (mounted) setState(() => _searching = false);
     }
   }
 
   Future<void> _loadComics({bool reset = true}) async {
     if (reset) {
       setState(() {
+        _mode = _SearchMode.comic;
         _offset = 0;
+        _total = 0;
         _comics = [];
+        _animes = [];
         _searchQuery = null;
       });
     }
@@ -120,6 +154,7 @@ class _SearchPageState extends State<SearchPage> {
         offset: _offset,
         theme: _selectedTag,
       );
+      if (!mounted) return;
       setState(() {
         if (reset) {
           _comics = result.list;
@@ -129,44 +164,80 @@ class _SearchPageState extends State<SearchPage> {
         _total = result.total;
         _offset = _comics.length;
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SearchPage loadComics error: $e');
+    }
   }
 
   Future<void> _loadMore() async {
     if (_loadingMore || _offset >= _total) return;
     setState(() => _loadingMore = true);
-    if (_searchQuery != null) {
-      try {
-        final result = await _api.searchComics(_searchQuery!, offset: _offset);
-        if (mounted) {
+    try {
+      if (_searchQuery != null) {
+        if (_isAnimeMode) {
+          final result = await _api.searchAnimes(
+            _searchQuery!,
+            offset: _offset,
+          );
+          if (!mounted) return;
+          setState(() {
+            _animes.addAll(result.list);
+            _offset = _animes.length;
+          });
+        } else {
+          final result = await _api.searchComics(
+            _searchQuery!,
+            offset: _offset,
+          );
+          if (!mounted) return;
           setState(() {
             _comics.addAll(result.list);
             _offset = _comics.length;
           });
         }
-      } catch (_) {}
-    } else {
-      await _loadComics(reset: false);
+      } else if (!_isAnimeMode) {
+        await _loadComics(reset: false);
+      }
+    } catch (e) {
+      debugPrint('SearchPage loadMore error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _loadingMore = false);
+      } else {
+        _loadingMore = false;
+      }
     }
-    if (mounted) {
-      setState(() => _loadingMore = false);
-    } else {
-      _loadingMore = false;
+  }
+
+  void _setMode(_SearchMode mode) {
+    if (_mode == mode) return;
+    final keyword = _searchController.text.trim();
+    setState(() {
+      _mode = mode;
+      _selectedTag = null;
+      _comics = [];
+      _animes = [];
+      _offset = 0;
+      _total = 0;
+      _searchQuery = keyword.isEmpty ? null : keyword;
+    });
+    if (keyword.isNotEmpty) {
+      _doSearch(keyword);
     }
   }
 
   void _selectTag(String? tagPathWord) {
     _searchController.clear();
-    // 再次点击已选中的标签：清除搜索状态
-    final isToggleOff =
-        tagPathWord != null && _selectedTag == tagPathWord;
+    final isToggleOff = tagPathWord != null && _selectedTag == tagPathWord;
     final next = isToggleOff ? null : tagPathWord;
     setState(() {
+      _mode = _SearchMode.comic;
       _selectedTag = next;
       _searchQuery = null;
       _offset = 0;
       _total = 0;
       _comics = [];
+      _animes = [];
     });
     if (next != null) {
       _loadComics();
@@ -178,6 +249,7 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       _searchQuery = null;
       _comics = [];
+      _animes = [];
       _offset = 0;
       _total = 0;
     });
@@ -186,6 +258,17 @@ class _SearchPageState extends State<SearchPage> {
   void _onKeywordTap(String keyword) {
     _searchController.text = keyword;
     _doSearch(keyword);
+  }
+
+  void _openAnime(Anime anime) {
+    if (anime.pathWord.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            AnimeDetailPage(pathWord: anime.pathWord, initialAnime: anime),
+      ),
+    );
   }
 
   @override
@@ -200,8 +283,7 @@ class _SearchPageState extends State<SearchPage> {
 
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
-        if (_comics.isNotEmpty &&
-            n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
+        if (_hasResults && n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
           _loadMore();
         }
         return false;
@@ -211,13 +293,12 @@ class _SearchPageState extends State<SearchPage> {
           SliverToBoxAdapter(
             child: SizedBox(height: MediaQuery.of(context).padding.top),
           ),
-          // 搜索框
           SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
               child: SearchBar(
                 controller: _searchController,
-                hintText: '搜索漫画...',
+                hintText: '搜索$_modeLabel...',
                 leading: const Padding(
                   padding: EdgeInsets.only(left: 8),
                   child: Icon(Icons.search),
@@ -234,12 +315,32 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(hp, 0, hp, 8),
+              child: SegmentedButton<_SearchMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: _SearchMode.comic,
+                    label: Text('漫画'),
+                    icon: Icon(Icons.menu_book_outlined),
+                  ),
+                  ButtonSegment(
+                    value: _SearchMode.anime,
+                    label: Text('动漫'),
+                    icon: Icon(Icons.movie_outlined),
+                  ),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (v) => _setMode(v.first),
+              ),
+            ),
+          ),
           if (_searching)
             const SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),
             ),
-          // 热门关键词
-          if (_keywords.isNotEmpty && _comics.isEmpty && !_searching)
+          if (_keywords.isNotEmpty && !_hasResults && !_searching)
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(hp, 8, hp, 4),
@@ -285,8 +386,10 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ),
             ),
-          // 全部标签
-          if (_tags.isNotEmpty && _searchQuery == null && !_searching)
+          if (!_isAnimeMode &&
+              _tags.isNotEmpty &&
+              _searchQuery == null &&
+              !_searching)
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(hp, 0, hp, 4),
@@ -357,54 +460,181 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ),
             ),
-          // 搜索结果提示
-          if (_searchQuery != null && _comics.isNotEmpty)
+          if (_searchQuery != null && _hasResults)
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(hp, 4, hp, 12),
                 child: Text(
-                  '搜索 "$_searchQuery" 找到 $_total 个结果',
+                  '搜索 "$_searchQuery" 找到 $_total 个$_modeLabel结果',
                   style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
             ),
-          // 漫画网格
-          if (_comics.isNotEmpty)
-            SliverPadding(
-              padding: EdgeInsets.symmetric(horizontal: hp),
-              sliver: SliverGrid(
-                delegate: SliverChildBuilderDelegate((_, i) {
-                  if (i >= _comics.length) {
-                    return const ComicCardSkeleton();
-                  }
-                  final c = _comics[i];
-                  final heroTagBase = ComicHeroTags.base(
-                    scope: 'search',
-                    pathWord: c.pathWord,
-                    index: i,
-                  );
-                  return _ComicGridItem(
-                    comic: c,
-                    heroTagBase: heroTagBase,
-                    onTap: () => Navigator.push(
-                      context,
-                      ComicDetailPage.route(
-                        pathWord: c.pathWord,
-                        initialComic: c,
-                        heroTagBase: heroTagBase,
-                      ),
-                    ),
-                  );
-                }, childCount: _comics.length + (_loadingMore ? 6 : 0)),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 130,
-                  childAspectRatio: 0.55,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
+          if (!_isAnimeMode && _comics.isNotEmpty)
+            _ComicGrid(
+              comics: _comics,
+              hp: hp,
+              loadingMore: _loadingMore,
+              onOpen: (comic, heroTagBase) => Navigator.push(
+                context,
+                ComicDetailPage.route(
+                  pathWord: comic.pathWord,
+                  initialComic: comic,
+                  heroTagBase: heroTagBase,
                 ),
               ),
             ),
+          if (_isAnimeMode && _animes.isNotEmpty)
+            _AnimeGrid(
+              animes: _animes,
+              hp: hp,
+              loadingMore: _loadingMore,
+              onOpen: _openAnime,
+            ),
           const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComicGrid extends StatelessWidget {
+  final List<Comic> comics;
+  final double hp;
+  final bool loadingMore;
+  final void Function(Comic comic, String heroTagBase) onOpen;
+
+  const _ComicGrid({
+    required this.comics,
+    required this.hp,
+    required this.loadingMore,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverPadding(
+      padding: EdgeInsets.symmetric(horizontal: hp),
+      sliver: SliverGrid(
+        delegate: SliverChildBuilderDelegate((_, i) {
+          if (i >= comics.length) {
+            return const ComicCardSkeleton();
+          }
+          final comic = comics[i];
+          final heroTagBase = ComicHeroTags.base(
+            scope: 'search',
+            pathWord: comic.pathWord,
+            index: i,
+          );
+          return _ComicGridItem(
+            comic: comic,
+            heroTagBase: heroTagBase,
+            onTap: () => onOpen(comic, heroTagBase),
+          );
+        }, childCount: comics.length + (loadingMore ? 6 : 0)),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 130,
+          childAspectRatio: 0.55,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimeGrid extends StatelessWidget {
+  final List<Anime> animes;
+  final double hp;
+  final bool loadingMore;
+  final ValueChanged<Anime> onOpen;
+
+  const _AnimeGrid({
+    required this.animes,
+    required this.hp,
+    required this.loadingMore,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverPadding(
+      padding: EdgeInsets.symmetric(horizontal: hp),
+      sliver: SliverGrid(
+        delegate: SliverChildBuilderDelegate((_, i) {
+          if (i >= animes.length) {
+            return const ComicCardSkeleton();
+          }
+          final anime = animes[i];
+          return _AnimeGridItem(anime: anime, onTap: () => onOpen(anime));
+        }, childCount: animes.length + (loadingMore ? 6 : 0)),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 130,
+          childAspectRatio: 0.55,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimeGridItem extends StatelessWidget {
+  final Anime anime;
+  final VoidCallback onTap;
+
+  const _AnimeGridItem({required this.anime, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              margin: EdgeInsets.zero,
+              child: CachedNetworkImage(
+                imageUrl: anime.cover,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
+                placeholder: (_, _) => Container(
+                  color: cs.surfaceContainerHighest,
+                  child: Center(
+                    child: Icon(
+                      Icons.movie_outlined,
+                      color: cs.onSurfaceVariant,
+                      size: 32,
+                    ),
+                  ),
+                ),
+                errorWidget: (_, _, _) => Container(
+                  color: cs.surfaceContainerHighest,
+                  child: Center(
+                    child: Icon(
+                      Icons.broken_image,
+                      color: cs.onSurfaceVariant,
+                      size: 32,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            anime.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ],
       ),
     );
@@ -415,6 +645,7 @@ class _ComicGridItem extends StatelessWidget {
   final Comic comic;
   final String? heroTagBase;
   final VoidCallback onTap;
+
   const _ComicGridItem({
     required this.comic,
     this.heroTagBase,
