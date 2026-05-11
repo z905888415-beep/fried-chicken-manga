@@ -5,14 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
+import 'package:lpinyin/lpinyin.dart';
+import 'package:canvas_danmaku/canvas_danmaku.dart';
 
 import '../api/api_client.dart';
+import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
 import '../utils/toast.dart';
 import 'profile_page.dart';
 
 class AnimePlayerPage extends StatefulWidget {
+  final String animeName;
   final String pathWord;
   final String chapterUuid;
   final String chapterName;
@@ -21,6 +25,7 @@ class AnimePlayerPage extends StatefulWidget {
 
   const AnimePlayerPage({
     super.key,
+    required this.animeName,
     required this.pathWord,
     required this.chapterUuid,
     required this.chapterName,
@@ -50,6 +55,18 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   int _openMediaSerial = 0;
   String? _error;
 
+  DanmakuController? _danmakuController;
+  Map<int, List<DanmakuContentItem>> _danmakuItems = {};
+  int _lastDanmakuSec = -1;
+  bool _danmakuVisible = true;
+
+  // 内联搜索
+  List<String> _searchSegments = [];
+  Set<int> _selectedSegmentIndices = {};
+  final _searchController = TextEditingController();
+  List<DandanplayEpisode> _inlineResults = [];
+  bool _inlineSearching = false;
+
   @override
   void initState() {
     super.initState();
@@ -61,8 +78,11 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   @override
   void dispose() {
+    _openMediaSerial++; // 阻止正在进行的媒体加载
     _videoController?.removeListener(_onVideoStateChanged);
     _videoController?.dispose();
+    _videoController = null;
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -70,6 +90,27 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     final controller = _videoController;
     if (!mounted || controller == null) return;
     final value = controller.value;
+
+    if (value.isPlaying && _danmakuVisible) {
+      if (_danmakuController?.running == false) {
+        _danmakuController?.resume();
+      }
+      final sec = value.position.inSeconds;
+      if (sec != _lastDanmakuSec) {
+        if ((sec - _lastDanmakuSec).abs() > 2) {
+          _danmakuController?.clear();
+        }
+        _lastDanmakuSec = sec;
+        if (_danmakuItems.containsKey(sec)) {
+          for (final item in _danmakuItems[sec]!) {
+            _danmakuController?.addDanmaku(item);
+          }
+        }
+      }
+    } else if (!value.isPlaying && _danmakuController?.running == true) {
+      _danmakuController?.pause();
+    }
+
     final nextError = value.hasError
         ? _formatPlayerError(value.errorDescription ?? '')
         : null;
@@ -122,6 +163,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         _buffering = true;
       });
       unawaited(_openMedia(videoUrl));
+      unawaited(_autoMatchDanmaku());
     } catch (e) {
       debugPrint('AnimePlayerPage load error: $e');
       if (!mounted) return;
@@ -233,6 +275,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     return '';
   }
 
+  String _removeParentheses(String text) =>
+      text.replaceAll(RegExp(r'\([^)]*\)'), '').trim();
+
   Future<void> _switchLine(String line) async {
     if (line == _line || _loading) return;
     setState(() => _line = line);
@@ -257,24 +302,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       _line = line;
     });
     await _load();
-  }
-
-  int get _currentChapterIndex {
-    return _chapters.indexWhere(
-      (chapter) => chapter.uuid == _currentChapterUuid,
-    );
-  }
-
-  AnimeChapter? get _previousChapter {
-    final index = _currentChapterIndex;
-    if (index <= 0) return null;
-    return _chapters[index - 1];
-  }
-
-  AnimeChapter? get _nextChapter {
-    final index = _currentChapterIndex;
-    if (index < 0 || index >= _chapters.length - 1) return null;
-    return _chapters[index + 1];
   }
 
   String? _resolveChapterLine(AnimeChapter chapter) {
@@ -338,21 +365,185 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     return _buildVideoSurface(controller, fullscreen: false);
   }
 
+  List<DandanplayEpisode> _matchCandidates = [];
+  bool _isAutoMatched = false;
+
+  Future<void> _autoMatchDanmaku() async {
+    String animeName = widget.animeName;
+    try {
+      animeName = ChineseHelper.convertToSimplifiedChinese(widget.animeName);
+    } catch (_) {}
+    final chapterName = _removeParentheses(_currentChapterName);
+    _setupSearchSegments(animeName, chapterName);
+
+    if (!_user.isAutoMatchDanmaku) return;
+    try {
+      if (!mounted) return;
+      setState(() {
+        _matchCandidates = [];
+        _isAutoMatched = false;
+      });
+
+      final fileName = '$animeName $chapterName';
+
+      if (!mounted) return;
+      final response = await DandanplayApi().getRawMatch(fileName);
+      if (!mounted) return;
+
+      if (response == null || response['success'] != true) return;
+
+      final matches = (response['matches'] as List)
+          .map(
+            (ep) => DandanplayEpisode(
+              episodeId: ep['episodeId'] as int,
+              animeTitle: ep['animeTitle'] as String,
+              episodeTitle: ep['episodeTitle'] as String,
+            ),
+          )
+          .toList();
+
+      if (!mounted) return;
+
+      if (matches.isEmpty || response['isMatched'] != true) return;
+
+      await _loadDanmakuForEpisode(matches.first.episodeId);
+      if (!mounted) return;
+      setState(() {
+        _isAutoMatched = true;
+        _matchCandidates = [matches.first];
+      });
+    } catch (e) {
+      debugPrint('AutoMatchDanmaku error: $e');
+    }
+  }
+
+  void _setupSearchSegments(String animeName, String chapterName) {
+    _searchSegments = animeName
+        .split(RegExp(r'\s+'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (chapterName.isNotEmpty) _searchSegments.add(chapterName);
+    _selectedSegmentIndices = Set.from(
+      List.generate(_searchSegments.length, (i) => i),
+    );
+    _inlineResults = [];
+    _syncSearchText();
+  }
+
+  void _syncSearchText() {
+    final parts = _selectedSegmentIndices
+        .map((i) => _searchSegments[i])
+        .toList();
+    _searchController.text = parts.join(' ');
+  }
+
+  Future<void> _matchDanmaku() async {
+    String animeName = widget.animeName;
+    try {
+      animeName = ChineseHelper.convertToSimplifiedChinese(widget.animeName);
+    } catch (_) {}
+    final chapterName = _removeParentheses(_currentChapterName);
+    _setupSearchSegments(animeName, chapterName);
+  }
+
+  void _toggleSearchSegment(int index) {
+    setState(() {
+      if (_selectedSegmentIndices.contains(index)) {
+        if (_selectedSegmentIndices.length > 1)
+          _selectedSegmentIndices.remove(index);
+      } else {
+        _selectedSegmentIndices.add(index);
+      }
+    });
+    _syncSearchText();
+  }
+
+  Future<void> _doInlineSearch() async {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return;
+
+    setState(() => _inlineSearching = true);
+    try {
+      final results = await DandanplayApi().search(query);
+      if (mounted) {
+        setState(() {
+          _inlineResults = results;
+          _inlineSearching = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _inlineSearching = false);
+        showToast(context, '搜索失败: $e', isError: true);
+      }
+    }
+  }
+
+  Future<void> _loadDanmakuForEpisode(int episodeId) async {
+    try {
+      final comments = await DandanplayApi().getComments(episodeId);
+      if (!mounted) return;
+      final items = <DanmakuContentItem>[];
+      for (final c in comments) {
+        DanmakuItemType mode = DanmakuItemType.scroll;
+        if (c.mode == 5) mode = DanmakuItemType.top;
+        if (c.mode == 4) mode = DanmakuItemType.bottom;
+        final colorStr = c.color.toRadixString(16).padLeft(6, '0');
+        items.add(
+          DanmakuContentItem(
+            c.text,
+            type: mode,
+            color: Color(int.parse("FF$colorStr", radix: 16)),
+          ),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _danmakuItems = {};
+        for (int i = 0; i < items.length; i++) {
+          final time = comments[i].time.toInt();
+          _danmakuItems.putIfAbsent(time, () => []).add(items[i]);
+        }
+      });
+      showToast(context, '共加载了 ${items.length} 条弹幕');
+    } catch (e) {
+      debugPrint('LoadDanmaku error: $e');
+    }
+  }
+
+  void _toggleDanmaku() {
+    if (_danmakuVisible) {
+      _danmakuController?.clear();
+    }
+    setState(() {
+      _danmakuVisible = !_danmakuVisible;
+    });
+    if (_danmakuVisible) {
+      _lastDanmakuSec = -1;
+    }
+  }
+
   Widget _buildVideoSurface(
     VideoPlayerController controller, {
     required bool fullscreen,
   }) {
-    final previousChapter = _previousChapter;
-    final nextChapter = _nextChapter;
+    Widget? danmakuView;
+    if (_danmakuVisible) {
+      danmakuView = DanmakuScreen(
+        createdController: (c) {
+          _danmakuController = c;
+        },
+        option: DanmakuOption(fontSize: 16, duration: 8, opacity: 1.0),
+      );
+    }
+
     return _VideoPlayerSurface(
       controller: controller,
       fullscreen: fullscreen,
-      onPrevious: previousChapter == null
-          ? null
-          : () => unawaited(_openChapter(previousChapter)),
-      onNext: nextChapter == null
-          ? null
-          : () => unawaited(_openChapter(nextChapter)),
+      danmakuView: danmakuView,
+      danmakuVisible: _danmakuVisible,
+      onMatchDanmaku: _matchDanmaku,
+      onToggleDanmaku: _toggleDanmaku,
       onSkipForward: _skipForward,
       onSettings: _showSettingsPanel,
       onFullscreen: fullscreen
@@ -462,6 +653,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 children: [
+                  _ChapterSelector(
+                    chapters: _chapters,
+                    currentChapterUuid: _currentChapterUuid,
+                    onSelected: _openChapter,
+                  ),
+                  const SizedBox(height: 24),
                   _VideoLinkPanel(
                     videoUrl: _videoUrl,
                     lines: _playback?.chapter.lines ?? const {},
@@ -471,10 +668,22 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                     onLineSelected: _switchLine,
                   ),
                   const SizedBox(height: 24),
-                  _ChapterSelector(
-                    chapters: _chapters,
-                    currentChapterUuid: _currentChapterUuid,
-                    onSelected: _openChapter,
+                  _DanmakuMatchPanel(
+                    isAutoMatched: _isAutoMatched,
+                    candidates: _matchCandidates,
+                    onSelect: _loadDanmakuForEpisode,
+                  ),
+                  const SizedBox(height: 12),
+                  _InlineSearchPanel(
+                    segments: _searchSegments,
+                    selectedIndices: _selectedSegmentIndices,
+                    searchController: _searchController,
+                    results: _inlineResults,
+                    searching: _inlineSearching,
+                    onToggleSegment: _toggleSearchSegment,
+                    onSearch: _doInlineSearch,
+                    onSelectResult: (ep) =>
+                        _loadDanmakuForEpisode(ep.episodeId),
                   ),
                 ],
               ),
@@ -522,20 +731,24 @@ class _PlayerControlButton extends StatelessWidget {
 class _VideoPlayerSurface extends StatefulWidget {
   final VideoPlayerController controller;
   final bool fullscreen;
-  final VoidCallback? onPrevious;
-  final VoidCallback? onNext;
   final VoidCallback onSkipForward;
   final VoidCallback onSettings;
   final VoidCallback onFullscreen;
+  final VoidCallback onMatchDanmaku;
+  final VoidCallback onToggleDanmaku;
+  final bool danmakuVisible;
+  final Widget? danmakuView;
 
   const _VideoPlayerSurface({
     required this.controller,
     required this.fullscreen,
-    required this.onPrevious,
-    required this.onNext,
     required this.onSkipForward,
     required this.onSettings,
     required this.onFullscreen,
+    required this.onMatchDanmaku,
+    required this.onToggleDanmaku,
+    required this.danmakuVisible,
+    this.danmakuView,
   });
 
   @override
@@ -643,6 +856,10 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                       )
                     : const SizedBox.shrink(),
               ),
+              if (widget.danmakuView != null)
+                Positioned.fill(
+                  child: IgnorePointer(child: widget.danmakuView),
+                ),
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
@@ -705,12 +922,12 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                   value: progress,
                                   onChanged: initialized
                                       ? (v) => controller.seekTo(
-                                            Duration(
-                                              milliseconds:
-                                                  (duration.inMilliseconds * v)
-                                                      .round(),
-                                            ),
-                                          )
+                                          Duration(
+                                            milliseconds:
+                                                (duration.inMilliseconds * v)
+                                                    .round(),
+                                          ),
+                                        )
                                       : null,
                                   activeColor: Colors.red,
                                   inactiveColor: Colors.white38,
@@ -733,56 +950,68 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                       ),
                                     ),
                                   ),
-                                  const Spacer(),
-                                  _PlayerControlButton(
-                                    tooltip: '上一集',
-                                    icon: Icons.skip_previous,
-                                    iconSize: controlButtonSize,
-                                    extent: controlButtonExtent,
-                                    onPressed: widget.onPrevious,
-                                  ),
-                                  _PlayerControlButton(
-                                    tooltip: value.isPlaying ? '暂停' : '播放',
-                                    icon: value.isPlaying
-                                        ? Icons.pause
-                                        : Icons.play_arrow,
-                                    iconSize: controlButtonSize,
-                                    extent: controlButtonExtent,
-                                    onPressed: initialized ? _togglePlay : null,
-                                  ),
-                                  _PlayerControlButton(
-                                    tooltip: '下一集',
-                                    icon: Icons.skip_next,
-                                    iconSize: controlButtonSize,
-                                    extent: controlButtonExtent,
-                                    onPressed: widget.onNext,
-                                  ),
-                                  _PlayerControlButton(
-                                    tooltip:
-                                        '快进 ${UserManager().animeSkipSeconds}秒',
-                                    icon: Icons.fast_forward,
-                                    iconSize: controlButtonSize,
-                                    extent: controlButtonExtent,
-                                    onPressed: initialized
-                                        ? widget.onSkipForward
-                                        : null,
-                                  ),
-                                  _PlayerControlButton(
-                                    tooltip: '设置跳转秒数',
-                                    icon: Icons.settings,
-                                    iconSize: controlButtonSize,
-                                    extent: controlButtonExtent,
-                                    onPressed: widget.onSettings,
-                                  ),
-                                  _PlayerControlButton(
-                                    tooltip:
-                                        widget.fullscreen ? '退出全屏' : '全屏',
-                                    icon: widget.fullscreen
-                                        ? Icons.fullscreen_exit
-                                        : Icons.fullscreen,
-                                    iconSize: controlButtonSize,
-                                    extent: controlButtonExtent,
-                                    onPressed: widget.onFullscreen,
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      reverse: true,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _PlayerControlButton(
+                                            tooltip: value.isPlaying
+                                                ? '暂停'
+                                                : '播放',
+                                            icon: value.isPlaying
+                                                ? Icons.pause
+                                                : Icons.play_arrow,
+                                            iconSize: controlButtonSize,
+                                            extent: controlButtonExtent,
+                                            onPressed: initialized
+                                                ? _togglePlay
+                                                : null,
+                                          ),
+                                          _PlayerControlButton(
+                                            tooltip:
+                                                '快进 ${UserManager().animeSkipSeconds}秒',
+                                            icon: Icons.fast_forward,
+                                            iconSize: controlButtonSize,
+                                            extent: controlButtonExtent,
+                                            onPressed: initialized
+                                                ? widget.onSkipForward
+                                                : null,
+                                          ),
+                                          _PlayerControlButton(
+                                            tooltip: widget.danmakuVisible
+                                                ? '隐藏弹幕'
+                                                : '显示弹幕',
+                                            icon: widget.danmakuVisible
+                                                ? Icons.subtitles
+                                                : Icons.subtitles_off,
+                                            iconSize: controlButtonSize,
+                                            extent: controlButtonExtent,
+                                            onPressed: widget.onToggleDanmaku,
+                                          ),
+                                          _PlayerControlButton(
+                                            tooltip: '设置跳转秒数',
+                                            icon: Icons.settings,
+                                            iconSize: controlButtonSize,
+                                            extent: controlButtonExtent,
+                                            onPressed: widget.onSettings,
+                                          ),
+                                          _PlayerControlButton(
+                                            tooltip: widget.fullscreen
+                                                ? '退出全屏'
+                                                : '全屏',
+                                            icon: widget.fullscreen
+                                                ? Icons.fullscreen_exit
+                                                : Icons.fullscreen,
+                                            iconSize: controlButtonSize,
+                                            extent: controlButtonExtent,
+                                            onPressed: widget.onFullscreen,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -992,6 +1221,212 @@ class _VideoLinkPanelState extends State<_VideoLinkPanel> {
   }
 }
 
+class _DanmakuMatchPanel extends StatelessWidget {
+  final bool isAutoMatched;
+  final List<DandanplayEpisode> candidates;
+  final ValueChanged<int> onSelect;
+
+  const _DanmakuMatchPanel({
+    required this.isAutoMatched,
+    required this.candidates,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.subtitles_outlined, color: cs.primary),
+            const SizedBox(width: 6),
+            Text(
+              '弹幕搜索',
+              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        if (candidates.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final ep in candidates)
+                ActionChip(
+                  avatar: isAutoMatched && candidates.indexOf(ep) == 0
+                      ? const Icon(Icons.auto_awesome, size: 16)
+                      : null,
+                  label: Text(
+                    '${ep.animeTitle} - ${ep.episodeTitle}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isAutoMatched && candidates.indexOf(ep) == 0
+                          ? cs.onPrimaryContainer
+                          : null,
+                    ),
+                  ),
+                  backgroundColor: isAutoMatched && candidates.indexOf(ep) == 0
+                      ? cs.primaryContainer
+                      : null,
+                  onPressed: () => onSelect(ep.episodeId),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _InlineSearchPanel extends StatelessWidget {
+  final List<String> segments;
+  final Set<int> selectedIndices;
+  final TextEditingController searchController;
+  final List<DandanplayEpisode> results;
+  final bool searching;
+  final ValueChanged<int> onToggleSegment;
+  final VoidCallback onSearch;
+  final ValueChanged<DandanplayEpisode> onSelectResult;
+
+  const _InlineSearchPanel({
+    required this.segments,
+    required this.selectedIndices,
+    required this.searchController,
+    required this.results,
+    required this.searching,
+    required this.onToggleSegment,
+    required this.onSearch,
+    required this.onSelectResult,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final hasResults = results.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (segments.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (int i = 0; i < segments.length; i++)
+                FilterChip(
+                  label: Text(segments[i]),
+                  selected: selectedIndices.contains(i),
+                  onSelected: (_) => onToggleSegment(i),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
+        TextField(
+          controller: searchController,
+          decoration: InputDecoration(
+            hintText: '输入搜索关键词',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            isDense: true,
+            suffixIcon: IconButton(
+              icon: searching
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.search),
+              onPressed: searching ? null : onSearch,
+            ),
+          ),
+          onSubmitted: (_) => onSearch(),
+        ),
+        const SizedBox(height: 12),
+        if (searching)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (hasResults)
+          _buildGroupedResults(cs, tt)
+        else
+          Text(
+            '请选择分段或输入搜索词后点击搜索',
+            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildGroupedResults(ColorScheme cs, TextTheme tt) {
+    // 按动漫名称分组
+    final grouped = <String, List<DandanplayEpisode>>{};
+    for (final ep in results) {
+      grouped.putIfAbsent(ep.animeTitle, () => []).add(ep);
+    }
+    final animeTitles = grouped.keys.toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '共找到 ${results.length} 条结果',
+          style: tt.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: 8),
+        for (final title in animeTitles) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final ep in grouped[title]!)
+                      ActionChip(
+                        label: Text(
+                          ep.episodeTitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: cs.onSecondaryContainer,
+                          ),
+                        ),
+                        backgroundColor: cs.secondaryContainer,
+                        onPressed: () => onSelectResult(ep),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
 class _ChapterSelector extends StatelessWidget {
   final List<AnimeChapter> chapters;
   final String currentChapterUuid;
@@ -1191,6 +1626,24 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                '自动匹配弹幕',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '播放时自动通过文件名匹配弹幕',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+              value: _user.isAutoMatchDanmaku,
+              onChanged: (v) {
+                _user.setAutoMatchDanmaku(v);
+                widget.onChanged();
+                setState(() {});
+              },
+            ),
+            const SizedBox(height: 16),
             Text(
               '快进秒数',
               style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),

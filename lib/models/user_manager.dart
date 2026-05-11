@@ -109,6 +109,7 @@ class UserManager extends ChangeNotifier {
   static const _keyApiRoute = 'api_route';
   static const _keyAnimeHomeBannerCollapsed = 'anime_home_banner_collapsed';
   static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
+  static const _keyAutoMatchDanmaku = 'auto_match_danmaku';
 
   String? _token;
   String? _username;
@@ -151,6 +152,7 @@ class UserManager extends ChangeNotifier {
   int _apiRoute = 0; // 0=线路1(默认), 1=线路2
   bool _animeHomeBannerCollapsed = false;
   int _animeSkipSeconds = 86;
+  bool _autoMatchDanmaku = false;
 
   String? get token => _token;
   String? get username => _username;
@@ -208,6 +210,7 @@ class UserManager extends ChangeNotifier {
   int get apiRoute => _apiRoute;
   bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
   int get animeSkipSeconds => _animeSkipSeconds;
+  bool get isAutoMatchDanmaku => _autoMatchDanmaku;
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
   Future<void> init() async {
@@ -296,6 +299,7 @@ class UserManager extends ChangeNotifier {
     _animeHomeBannerCollapsed =
         prefs.getBool(_keyAnimeHomeBannerCollapsed) ?? false;
     _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
+    _autoMatchDanmaku = prefs.getBool(_keyAutoMatchDanmaku) ?? false;
     notifyListeners();
   }
 
@@ -705,6 +709,14 @@ class UserManager extends ChangeNotifier {
     _animeSkipSeconds = seconds;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyAnimeSkipSeconds, seconds);
+    notifyListeners();
+  }
+
+  Future<void> setAutoMatchDanmaku(bool value) async {
+    if (_autoMatchDanmaku == value) return;
+    _autoMatchDanmaku = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoMatchDanmaku, value);
     notifyListeners();
   }
 

@@ -8,19 +8,28 @@
             "name": "kira (Android Emulator)",
             "request": "launch",
             "type": "dart",
-            "deviceId": "emulator"
+            "deviceId": "emulator",
+            "toolArgs": [
+                "--dart-define-from-file=.env"
+            ]
         },
         {
             "name": "kira (Android MuMu)",
             "request": "launch",
             "type": "dart",
-            "deviceId": "127.0.0.1:16384"
+            "deviceId": "127.0.0.1:16384",
+            "toolArgs": [
+                "--dart-define-from-file=.env"
+            ]
         },
         {
             "name": "kira (Windows)",
             "request": "launch",
             "type": "dart",
-            "deviceId": "windows"
+            "deviceId": "windows",
+            "toolArgs": [
+                "--dart-define-from-file=.env"
+            ]
         }
     ]
 }

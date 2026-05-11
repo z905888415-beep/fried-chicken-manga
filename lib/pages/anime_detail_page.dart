@@ -145,6 +145,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
       context,
       MaterialPageRoute(
         builder: (_) => AnimePlayerPage(
+          animeName:
+              widget.initialAnime?.name ?? _anime?.name ?? widget.pathWord,
           pathWord: widget.pathWord,
           chapterUuid: chapter.uuid,
           chapterName: chapter.name,
