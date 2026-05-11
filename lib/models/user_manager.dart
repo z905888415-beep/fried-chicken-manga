@@ -110,6 +110,14 @@ class UserManager extends ChangeNotifier {
   static const _keyAnimeHomeBannerCollapsed = 'anime_home_banner_collapsed';
   static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
   static const _keyAutoMatchDanmaku = 'auto_match_danmaku';
+  static const _keyDanmakuEnabled = 'danmaku_enabled';
+  static const _keyDanmakuFontSize = 'danmaku_font_size';
+  static const _keyDanmakuArea = 'danmaku_area';
+  static const _keyDanmakuOpacity = 'danmaku_opacity';
+  static const _keyDanmakuHideScroll = 'danmaku_hide_scroll';
+  static const _keyDanmakuHideTop = 'danmaku_hide_top';
+  static const _keyDanmakuHideBottom = 'danmaku_hide_bottom';
+  static const _keyDanmakuBlocklist = 'danmaku_blocklist';
 
   String? _token;
   String? _username;
@@ -153,6 +161,14 @@ class UserManager extends ChangeNotifier {
   bool _animeHomeBannerCollapsed = false;
   int _animeSkipSeconds = 86;
   bool _autoMatchDanmaku = false;
+  bool _danmakuEnabled = true;
+  double _danmakuFontSize = 16;
+  double _danmakuArea = 0.25;
+  double _danmakuOpacity = 1.0;
+  bool _danmakuHideScroll = false;
+  bool _danmakuHideTop = false;
+  bool _danmakuHideBottom = false;
+  List<String> _danmakuBlocklist = [];
 
   String? get token => _token;
   String? get username => _username;
@@ -211,6 +227,14 @@ class UserManager extends ChangeNotifier {
   bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
   int get animeSkipSeconds => _animeSkipSeconds;
   bool get isAutoMatchDanmaku => _autoMatchDanmaku;
+  bool get danmakuEnabled => _danmakuEnabled;
+  double get danmakuFontSize => _danmakuFontSize;
+  double get danmakuArea => _danmakuArea;
+  double get danmakuOpacity => _danmakuOpacity;
+  bool get danmakuHideScroll => _danmakuHideScroll;
+  bool get danmakuHideTop => _danmakuHideTop;
+  bool get danmakuHideBottom => _danmakuHideBottom;
+  List<String> get danmakuBlocklist => List.unmodifiable(_danmakuBlocklist);
   bool get isLoggedIn => _token != null && _token!.isNotEmpty;
 
   Future<void> init() async {
@@ -300,6 +324,14 @@ class UserManager extends ChangeNotifier {
         prefs.getBool(_keyAnimeHomeBannerCollapsed) ?? false;
     _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
     _autoMatchDanmaku = prefs.getBool(_keyAutoMatchDanmaku) ?? false;
+    _danmakuEnabled = prefs.getBool(_keyDanmakuEnabled) ?? true;
+    _danmakuFontSize = prefs.getDouble(_keyDanmakuFontSize) ?? 16;
+    _danmakuArea = prefs.getDouble(_keyDanmakuArea) ?? 0.25;
+    _danmakuOpacity = prefs.getDouble(_keyDanmakuOpacity) ?? 1.0;
+    _danmakuHideScroll = prefs.getBool(_keyDanmakuHideScroll) ?? false;
+    _danmakuHideTop = prefs.getBool(_keyDanmakuHideTop) ?? false;
+    _danmakuHideBottom = prefs.getBool(_keyDanmakuHideBottom) ?? false;
+    _danmakuBlocklist = prefs.getStringList(_keyDanmakuBlocklist) ?? [];
     notifyListeners();
   }
 
@@ -717,6 +749,69 @@ class UserManager extends ChangeNotifier {
     _autoMatchDanmaku = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAutoMatchDanmaku, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuEnabled(bool value) async {
+    if (_danmakuEnabled == value) return;
+    _danmakuEnabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyDanmakuEnabled, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuFontSize(double value) async {
+    if (_danmakuFontSize == value) return;
+    _danmakuFontSize = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyDanmakuFontSize, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuArea(double value) async {
+    if (_danmakuArea == value) return;
+    _danmakuArea = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyDanmakuArea, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuOpacity(double value) async {
+    if (_danmakuOpacity == value) return;
+    _danmakuOpacity = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyDanmakuOpacity, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuHideScroll(bool value) async {
+    if (_danmakuHideScroll == value) return;
+    _danmakuHideScroll = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyDanmakuHideScroll, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuHideTop(bool value) async {
+    if (_danmakuHideTop == value) return;
+    _danmakuHideTop = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyDanmakuHideTop, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuHideBottom(bool value) async {
+    if (_danmakuHideBottom == value) return;
+    _danmakuHideBottom = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyDanmakuHideBottom, value);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuBlocklist(List<String> list) async {
+    _danmakuBlocklist = List.from(list);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyDanmakuBlocklist, list);
     notifyListeners();
   }
 

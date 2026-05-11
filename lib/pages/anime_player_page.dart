@@ -5,13 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
-import 'package:lpinyin/lpinyin.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 
 import '../api/api_client.dart';
 import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
+import '../utils/chinese_converter.dart';
 import '../utils/toast.dart';
 import 'profile_page.dart';
 
@@ -73,6 +73,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     _currentChapterUuid = widget.chapterUuid;
     _currentChapterName = widget.chapterName;
     _line = widget.line;
+    _danmakuVisible = _user.danmakuEnabled;
     _load();
   }
 
@@ -114,6 +115,8 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     final nextError = value.hasError
         ? _formatPlayerError(value.errorDescription ?? '')
         : null;
+
+    // 优化：当正在缓冲且原本在播放时，保持 buffering 状态直到数据足够
     if (_buffering == value.isBuffering && _error == nextError) {
       return;
     }
@@ -371,7 +374,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   Future<void> _autoMatchDanmaku() async {
     String animeName = widget.animeName;
     try {
-      animeName = ChineseHelper.convertToSimplifiedChinese(widget.animeName);
+      animeName = await ChineseConverter.convertToSimplifiedChinese(
+        widget.animeName,
+      );
     } catch (_) {}
     final chapterName = _removeParentheses(_currentChapterName);
     _setupSearchSegments(animeName, chapterName);
@@ -406,7 +411,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
       if (matches.isEmpty || response['isMatched'] != true) return;
 
-      await _loadDanmakuForEpisode(matches.first.episodeId);
+      await _loadDanmakuForEpisode(matches.first.episodeId, silent: true);
       if (!mounted) return;
       setState(() {
         _isAutoMatched = true;
@@ -441,7 +446,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   Future<void> _matchDanmaku() async {
     String animeName = widget.animeName;
     try {
-      animeName = ChineseHelper.convertToSimplifiedChinese(widget.animeName);
+      animeName = await ChineseConverter.convertToSimplifiedChinese(
+        widget.animeName,
+      );
     } catch (_) {}
     final chapterName = _removeParentheses(_currentChapterName);
     _setupSearchSegments(animeName, chapterName);
@@ -450,8 +457,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   void _toggleSearchSegment(int index) {
     setState(() {
       if (_selectedSegmentIndices.contains(index)) {
-        if (_selectedSegmentIndices.length > 1)
+        if (_selectedSegmentIndices.length > 1) {
           _selectedSegmentIndices.remove(index);
+        }
       } else {
         _selectedSegmentIndices.add(index);
       }
@@ -488,12 +496,18 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     _doInlineSearch();
   }
 
-  Future<void> _loadDanmakuForEpisode(int episodeId) async {
+  Future<void> _loadDanmakuForEpisode(
+    int episodeId, {
+    bool silent = false,
+  }) async {
     try {
       final comments = await DandanplayApi().getComments(episodeId);
       if (!mounted) return;
+      final blocklist = _user.danmakuBlocklist;
       final items = <DanmakuContentItem>[];
+      final filteredComments = <dynamic>[];
       for (final c in comments) {
+        if (blocklist.any((w) => c.text.contains(w))) continue;
         DanmakuItemType mode = DanmakuItemType.scroll;
         if (c.mode == 5) mode = DanmakuItemType.top;
         if (c.mode == 4) mode = DanmakuItemType.bottom;
@@ -505,18 +519,21 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
             color: Color(int.parse("FF$colorStr", radix: 16)),
           ),
         );
+        filteredComments.add(c);
       }
       if (!mounted) return;
       setState(() {
         _danmakuItems = {};
         for (int i = 0; i < items.length; i++) {
-          final time = comments[i].time.toInt();
+          final time = filteredComments[i].time.toInt();
           _danmakuItems.putIfAbsent(time, () => []).add(items[i]);
         }
       });
-      showToast(context, '共加载了 ${items.length} 条弹幕');
+      _lastDanmakuSec = -1;
+      if (!silent) showToast(context, '共加载了 ${items.length} 条弹幕');
     } catch (e) {
       debugPrint('LoadDanmaku error: $e');
+      if (!silent) showToast(context, '加载弹幕失败: $e', isError: true);
     }
   }
 
@@ -527,6 +544,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     setState(() {
       _danmakuVisible = !_danmakuVisible;
     });
+    _user.setDanmakuEnabled(_danmakuVisible);
     if (_danmakuVisible) {
       _lastDanmakuSec = -1;
     }
@@ -542,7 +560,15 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         createdController: (c) {
           _danmakuController = c;
         },
-        option: DanmakuOption(fontSize: 16, duration: 8, opacity: 1.0),
+        option: DanmakuOption(
+          fontSize: _user.danmakuFontSize,
+          duration: 8,
+          opacity: _user.danmakuOpacity,
+          area: _user.danmakuArea,
+          hideScroll: _user.danmakuHideScroll,
+          hideTop: _user.danmakuHideTop,
+          hideBottom: _user.danmakuHideBottom,
+        ),
       );
     }
 
@@ -598,7 +624,16 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * 0.85,
       ),
-      builder: (_) => _PlayerSettingsPanel(onChanged: () => setState(() {})),
+      builder: (_) => _PlayerSettingsPanel(
+        onChanged: () => setState(() {}),
+        danmakuController: _danmakuController,
+        danmakuVisible: _danmakuVisible,
+        onDanmakuVisibleChanged: (v) {
+          setState(() => _danmakuVisible = v);
+          _user.setDanmakuEnabled(v);
+          if (v) _lastDanmakuSec = -1;
+        },
+      ),
     );
   }
 
@@ -650,9 +685,34 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                             ),
                     ),
                     if (_showLoadingOverlay)
-                      const ColoredBox(
-                        color: Color(0x66000000),
-                        child: Center(child: CircularProgressIndicator()),
+                      ColoredBox(
+                        color: const Color(0x66000000),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(),
+                              if (_buffering && !_loading) ...[
+                                const SizedBox(height: 12),
+                                const Text(
+                                  '正在缓冲...',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '如果网络卡顿，建议开启代理访问',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.7),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -666,15 +726,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                     chapters: _chapters,
                     currentChapterUuid: _currentChapterUuid,
                     onSelected: _openChapter,
-                  ),
-                  const SizedBox(height: 24),
-                  _VideoLinkPanel(
-                    videoUrl: _videoUrl,
-                    lines: _playback?.chapter.lines ?? const {},
-                    currentLine: _line,
-                    onCopy: _copyVideoUrl,
-                    onOpen: _openVideoUrl,
-                    onLineSelected: _switchLine,
                   ),
                   const SizedBox(height: 24),
                   _DanmakuMatchPanel(
@@ -694,6 +745,15 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                     onRefresh: _forceRefreshSearch,
                     onSelectResult: (ep) =>
                         _loadDanmakuForEpisode(ep.episodeId),
+                  ),
+                  const SizedBox(height: 24),
+                  _VideoLinkPanel(
+                    videoUrl: _videoUrl,
+                    lines: _playback?.chapter.lines ?? const {},
+                    currentLine: _line,
+                    onCopy: _copyVideoUrl,
+                    onOpen: _openVideoUrl,
+                    onLineSelected: _switchLine,
                   ),
                 ],
               ),
@@ -1599,8 +1659,16 @@ class _ErrorPanel extends StatelessWidget {
 
 class _PlayerSettingsPanel extends StatefulWidget {
   final VoidCallback onChanged;
+  final DanmakuController? danmakuController;
+  final bool danmakuVisible;
+  final ValueChanged<bool> onDanmakuVisibleChanged;
 
-  const _PlayerSettingsPanel({required this.onChanged});
+  const _PlayerSettingsPanel({
+    required this.onChanged,
+    this.danmakuController,
+    required this.danmakuVisible,
+    required this.onDanmakuVisibleChanged,
+  });
 
   @override
   State<_PlayerSettingsPanel> createState() => _PlayerSettingsPanelState();
@@ -1609,11 +1677,44 @@ class _PlayerSettingsPanel extends StatefulWidget {
 class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
   final _user = UserManager();
   late int _skipSeconds;
+  late double _fontSize;
+  late double _area;
+  late double _opacity;
+  late bool _hideScroll;
+  late bool _hideTop;
+  late bool _hideBottom;
 
   @override
   void initState() {
     super.initState();
     _skipSeconds = _user.animeSkipSeconds;
+    _fontSize = _user.danmakuFontSize;
+    _area = _user.danmakuArea;
+    _opacity = _user.danmakuOpacity;
+    _hideScroll = _user.danmakuHideScroll;
+    _hideTop = _user.danmakuHideTop;
+    _hideBottom = _user.danmakuHideBottom;
+  }
+
+  void _updateDanmakuOption() {
+    widget.danmakuController?.updateOption(
+      DanmakuOption(
+        fontSize: _fontSize,
+        duration: 8,
+        opacity: _opacity,
+        area: _area,
+        hideScroll: _hideScroll,
+        hideTop: _hideTop,
+        hideBottom: _hideBottom,
+      ),
+    );
+    _user.setDanmakuFontSize(_fontSize);
+    _user.setDanmakuArea(_area);
+    _user.setDanmakuOpacity(_opacity);
+    _user.setDanmakuHideScroll(_hideScroll);
+    _user.setDanmakuHideTop(_hideTop);
+    _user.setDanmakuHideBottom(_hideBottom);
+    widget.onChanged();
   }
 
   @override
@@ -1643,27 +1744,11 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
               ),
             ),
             const SizedBox(height: 16),
+
+            // ===== 播放设置区域 =====
             Text(
               '播放设置',
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                '自动匹配弹幕',
-                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                '播放时自动通过文件名匹配弹幕',
-                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-              ),
-              value: _user.isAutoMatchDanmaku,
-              onChanged: (v) {
-                _user.setAutoMatchDanmaku(v);
-                widget.onChanged();
-                setState(() {});
-              },
             ),
             const SizedBox(height: 16),
             Text(
@@ -1693,9 +1778,289 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
                 }
               },
             ),
+
+            const Divider(height: 32),
+
+            // ===== 弹幕设置区域 =====
+            Text(
+              '弹幕设置',
+              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+
+            // 弹幕开关
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                '显示弹幕',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              value: widget.danmakuVisible,
+              onChanged: (v) {
+                widget.onDanmakuVisibleChanged(v);
+                setState(() {});
+              },
+            ),
+
+            // 自动匹配弹幕
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                '自动匹配弹幕',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '播放时自动通过文件名匹配弹幕',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+              value: _user.isAutoMatchDanmaku,
+              onChanged: (v) {
+                _user.setAutoMatchDanmaku(v);
+                widget.onChanged();
+                setState(() {});
+              },
+            ),
+
+            // 弹幕详细设置（弹幕开启时显示）
+            if (widget.danmakuVisible) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Text(
+                    '字体大小',
+                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const Spacer(),
+                  Text(
+                    _fontSize.toStringAsFixed(0),
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+              Slider(
+                value: _fontSize,
+                min: 10,
+                max: 30,
+                divisions: 20,
+                label: _fontSize.toStringAsFixed(0),
+                onChanged: (v) => setState(() => _fontSize = v),
+                onChangeEnd: (v) => _updateDanmakuOption(),
+              ),
+
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Text(
+                    '显示区域',
+                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${(_area * 100).toStringAsFixed(0)}%',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+              Slider(
+                value: _area,
+                min: 0.1,
+                max: 1.0,
+                divisions: 9,
+                label: '${(_area * 100).toStringAsFixed(0)}%',
+                onChanged: (v) => setState(() => _area = v),
+                onChangeEnd: (v) => _updateDanmakuOption(),
+              ),
+
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Text(
+                    '透明度',
+                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${(_opacity * 100).toStringAsFixed(0)}%',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+              Slider(
+                value: _opacity,
+                min: 0.1,
+                max: 1.0,
+                divisions: 9,
+                label: '${(_opacity * 100).toStringAsFixed(0)}%',
+                onChanged: (v) => setState(() => _opacity = v),
+                onChangeEnd: (v) => _updateDanmakuOption(),
+              ),
+
+              const SizedBox(height: 4),
+              Text(
+                '弹幕类型',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('滚动弹幕', style: tt.bodyMedium),
+                value: !_hideScroll,
+                onChanged: (v) {
+                  setState(() => _hideScroll = !v);
+                  _updateDanmakuOption();
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('顶部弹幕', style: tt.bodyMedium),
+                value: !_hideTop,
+                onChanged: (v) {
+                  setState(() => _hideTop = !v);
+                  _updateDanmakuOption();
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('底部弹幕', style: tt.bodyMedium),
+                value: !_hideBottom,
+                onChanged: (v) {
+                  setState(() => _hideBottom = !v);
+                  _updateDanmakuOption();
+                },
+              ),
+
+              // 屏蔽词设置
+              const SizedBox(height: 8),
+              _DanmakuBlocklistEditor(
+                blocklist: _user.danmakuBlocklist,
+                onChanged: (list) {
+                  _user.setDanmakuBlocklist(list);
+                  widget.onChanged();
+                },
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DanmakuBlocklistEditor extends StatefulWidget {
+  final List<String> blocklist;
+  final ValueChanged<List<String>> onChanged;
+
+  const _DanmakuBlocklistEditor({
+    required this.blocklist,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DanmakuBlocklistEditor> createState() =>
+      _DanmakuBlocklistEditorState();
+}
+
+class _DanmakuBlocklistEditorState extends State<_DanmakuBlocklistEditor> {
+  late List<String> _words;
+  final _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _words = List.from(widget.blocklist);
+  }
+
+  void _addWord() {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _words.contains(text)) return;
+    setState(() {
+      _words.add(text);
+      _controller.clear();
+    });
+    widget.onChanged(List.from(_words));
+  }
+
+  Future<void> _convertSimplifiedTraditional() async {
+    final text = _controller.text;
+    if (text.isEmpty) return;
+    try {
+      final converted = await ChineseConverter.convertToSimplifiedChinese(text);
+      if (converted == text) {
+        _controller.text = await ChineseConverter.convertToTraditionalChinese(
+          text,
+        );
+      } else {
+        _controller.text = converted;
+      }
+    } catch (_) {}
+  }
+
+  void _removeWord(int index) {
+    setState(() => _words.removeAt(index));
+    widget.onChanged(List.from(_words));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '屏蔽词',
+          style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '包含屏蔽词的弹幕将被自动过滤',
+          style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: '输入屏蔽词',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    onPressed: _convertSimplifiedTraditional,
+                    icon: const Icon(Icons.translate, size: 20),
+                    tooltip: '简繁转换',
+                  ),
+                ),
+                onSubmitted: (_) => _addWord(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filled(onPressed: _addWord, icon: const Icon(Icons.add)),
+          ],
+        ),
+        if (_words.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < _words.length; i++)
+                Chip(
+                  label: Text(_words[i]),
+                  onDeleted: () => _removeWord(i),
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
