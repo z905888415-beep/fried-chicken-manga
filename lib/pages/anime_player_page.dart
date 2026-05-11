@@ -426,8 +426,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     _selectedSegmentIndices = Set.from(
       List.generate(_searchSegments.length, (i) => i),
     );
-    _inlineResults = [];
     _syncSearchText();
+    // 如果有缓存，直接显示
+    _doInlineSearch(showLoading: false);
   }
 
   void _syncSearchText() {
@@ -458,11 +459,11 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     _syncSearchText();
   }
 
-  Future<void> _doInlineSearch() async {
+  Future<void> _doInlineSearch({bool showLoading = true}) async {
     final query = _searchController.text.trim();
     if (query.isEmpty) return;
 
-    setState(() => _inlineSearching = true);
+    if (showLoading) setState(() => _inlineSearching = true);
     try {
       final results = await DandanplayApi().search(query);
       if (mounted) {
@@ -474,9 +475,17 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _inlineSearching = false);
-        showToast(context, '搜索失败: $e', isError: true);
+        if (showLoading) showToast(context, '搜索失败: $e', isError: true);
       }
     }
+  }
+
+  void _forceRefreshSearch() {
+    if (!DandanplayApi().clearCache()) {
+      showToast(context, '不要频繁刷新！', isError: true);
+      return;
+    }
+    _doInlineSearch();
   }
 
   Future<void> _loadDanmakuForEpisode(int episodeId) async {
@@ -682,6 +691,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                     searching: _inlineSearching,
                     onToggleSegment: _toggleSearchSegment,
                     onSearch: _doInlineSearch,
+                    onRefresh: _forceRefreshSearch,
                     onSelectResult: (ep) =>
                         _loadDanmakuForEpisode(ep.episodeId),
                   ),
@@ -1291,6 +1301,7 @@ class _InlineSearchPanel extends StatelessWidget {
   final bool searching;
   final ValueChanged<int> onToggleSegment;
   final VoidCallback onSearch;
+  final VoidCallback onRefresh;
   final ValueChanged<DandanplayEpisode> onSelectResult;
 
   const _InlineSearchPanel({
@@ -1301,6 +1312,7 @@ class _InlineSearchPanel extends StatelessWidget {
     required this.searching,
     required this.onToggleSegment,
     required this.onSearch,
+    required this.onRefresh,
     required this.onSelectResult,
   });
 
@@ -1335,15 +1347,25 @@ class _InlineSearchPanel extends StatelessWidget {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             contentPadding: const EdgeInsets.symmetric(horizontal: 12),
             isDense: true,
-            suffixIcon: IconButton(
-              icon: searching
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.search),
-              onPressed: searching ? null : onSearch,
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: searching ? null : onRefresh,
+                  tooltip: '强制刷新',
+                ),
+                IconButton(
+                  icon: searching
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.search),
+                  onPressed: searching ? null : onSearch,
+                ),
+              ],
             ),
           ),
           onSubmitted: (_) => onSearch(),
