@@ -17,6 +17,12 @@ void main() async {
     SystemUiMode.manual,
     overlays: SystemUiOverlay.values,
   );
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      systemStatusBarContrastEnforced: false,
+    ),
+  );
   runApp(const KiraApp());
 }
 
