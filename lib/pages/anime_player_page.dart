@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
@@ -68,6 +70,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   final _searchController = TextEditingController();
   List<DandanplayEpisode> _inlineResults = [];
   bool _inlineSearching = false;
+  bool _hasSearched = false;
 
   @override
   void initState() {
@@ -79,6 +82,11 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
     _player.stream.playing.listen((playing) {
       if (!mounted) return;
+      if (playing) {
+        WakelockPlus.enable();
+      } else {
+        WakelockPlus.disable();
+      }
       if (playing && _danmakuVisible) {
         _danmakuController?.resume();
       } else {
@@ -121,6 +129,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   void dispose() {
     _openMediaSerial++; // 阻止正在进行的媒体加载
     _player.dispose();
+    WakelockPlus.disable();
     _searchController.dispose();
     super.dispose();
   }
@@ -235,10 +244,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
     try {
       await _player.open(
-        Media(
-          videoUrl,
-          httpHeaders: _videoHttpHeaders,
-        ),
+        Media(videoUrl, httpHeaders: _videoHttpHeaders),
         play: true,
       );
       if (!mounted || serial != _openMediaSerial) return;
@@ -410,7 +416,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   void _setupSearchSegments(String animeName, String chapterName) {
     _searchSegments = animeName
-        .split(RegExp(r'\s+'))
+        .split(RegExp(r'[\s\p{P}]+', unicode: true))
         .where((s) => s.isNotEmpty)
         .toList();
     if (chapterName.isNotEmpty) _searchSegments.add(chapterName);
@@ -464,11 +470,15 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         setState(() {
           _inlineResults = results;
           _inlineSearching = false;
+          _hasSearched = true;
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _inlineSearching = false);
+        setState(() {
+          _inlineSearching = false;
+          _hasSearched = true;
+        });
         if (showLoading) showToast(context, '搜索失败: $e', isError: true);
       }
     }
@@ -606,7 +616,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.5,
       ),
       builder: (_) => _PlayerSettingsPanel(
         onChanged: () => setState(() {}),
@@ -706,29 +716,35 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 children: [
+                  if (_danmakuVisible) ...[
+                    _DanmakuMatchPanel(
+                      isAutoMatched: _isAutoMatched,
+                      candidates: _matchCandidates,
+                      onSelect: _loadDanmakuForEpisode,
+                      danmakuVisible: _danmakuVisible,
+                      hasDanmaku: _danmakuItems.isNotEmpty,
+                    ),
+                    const SizedBox(height: 12),
+                    _InlineSearchPanel(
+                      segments: _searchSegments,
+                      selectedIndices: _selectedSegmentIndices,
+                      searchController: _searchController,
+                      results: _inlineResults,
+                      searching: _inlineSearching,
+                      hasSearched: _hasSearched,
+                      onToggleSegment: _toggleSearchSegment,
+
+                      onSearch: _doInlineSearch,
+                      onRefresh: _forceRefreshSearch,
+                      onSelectResult: (ep) =>
+                          _loadDanmakuForEpisode(ep.episodeId),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                   _ChapterSelector(
                     chapters: _chapters,
                     currentChapterUuid: _currentChapterUuid,
                     onSelected: _openChapter,
-                  ),
-                  const SizedBox(height: 24),
-                  _DanmakuMatchPanel(
-                    isAutoMatched: _isAutoMatched,
-                    candidates: _matchCandidates,
-                    onSelect: _loadDanmakuForEpisode,
-                  ),
-                  const SizedBox(height: 12),
-                  _InlineSearchPanel(
-                    segments: _searchSegments,
-                    selectedIndices: _selectedSegmentIndices,
-                    searchController: _searchController,
-                    results: _inlineResults,
-                    searching: _inlineSearching,
-                    onToggleSegment: _toggleSearchSegment,
-                    onSearch: _doInlineSearch,
-                    onRefresh: _forceRefreshSearch,
-                    onSelectResult: (ep) =>
-                        _loadDanmakuForEpisode(ep.episodeId),
                   ),
                   const SizedBox(height: 24),
                   _VideoLinkPanel(
@@ -815,6 +831,19 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
   bool _controlsVisible = true;
   Timer? _hideControlsTimer;
 
+  // 手势处理状态
+  double? _dragStartX;
+  Duration? _dragTargetPosition;
+  bool _isDraggingProgress = false;
+
+  double? _dragStartY;
+  bool _isDraggingVolume = false;
+  bool _isDraggingBrightness = false;
+  double _initialVolume = 0;
+  double _initialBrightness = 0;
+  double? _currentVolume;
+  double? _currentBrightness;
+
   VideoController get controller => widget.controller;
   Player get player => widget.controller.player;
 
@@ -891,9 +920,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Center(
-                child: Video(controller: controller),
-              ),
+              Center(child: Video(controller: controller)),
               if (widget.danmakuView != null)
                 Positioned.fill(
                   child: IgnorePointer(child: widget.danmakuView),
@@ -903,8 +930,147 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                   behavior: HitTestBehavior.opaque,
                   onTap: _toggleControls,
                   onDoubleTap: _togglePlay,
+                  onHorizontalDragStart: (details) {
+                    _dragStartX = details.globalPosition.dx;
+                    _dragTargetPosition = player.state.position;
+                    _isDraggingProgress = true;
+                    _showControls();
+                  },
+                  onHorizontalDragUpdate: (details) {
+                    if (_dragStartX == null) return;
+                    final delta = details.globalPosition.dx - _dragStartX!;
+                    final screenWidth = MediaQuery.sizeOf(context).width;
+                    // 左右滑动控制进度，滑动全屏距离相当于视频总时长的 1/2
+                    final totalDuration = player.state.duration;
+                    if (totalDuration == Duration.zero) return;
+
+                    final deltaMs =
+                        (delta / screenWidth) *
+                        totalDuration.inMilliseconds *
+                        0.5;
+                    final targetMs =
+                        player.state.position.inMilliseconds + deltaMs.toInt();
+                    _dragTargetPosition = Duration(
+                      milliseconds: targetMs.clamp(
+                        0,
+                        totalDuration.inMilliseconds,
+                      ),
+                    );
+                    setState(() {});
+                  },
+                  onHorizontalDragEnd: (details) {
+                    if (_isDraggingProgress && _dragTargetPosition != null) {
+                      player.seek(_dragTargetPosition!);
+                    }
+                    _isDraggingProgress = false;
+                    _dragStartX = null;
+                    _dragTargetPosition = null;
+                  },
+                  onVerticalDragStart: (details) async {
+                    _dragStartY = details.globalPosition.dy;
+                    final screenWidth = MediaQuery.sizeOf(context).width;
+                    if (details.globalPosition.dx > screenWidth / 2) {
+                      _isDraggingVolume = true;
+                      _initialVolume = player.state.volume / 100.0;
+                    } else {
+                      _isDraggingBrightness = true;
+                      try {
+                        _initialBrightness =
+                            await ScreenBrightness().application;
+                      } catch (_) {
+                        _initialBrightness = 0.5;
+                      }
+                    }
+                  },
+                  onVerticalDragUpdate: (details) async {
+                    if (_dragStartY == null) return;
+                    final delta = _dragStartY! - details.globalPosition.dy;
+                    final screenHeight = MediaQuery.sizeOf(context).height;
+                    final ratio = delta / (screenHeight * 0.8);
+
+                    if (_isDraggingVolume) {
+                      final newVolume = (_initialVolume + ratio).clamp(
+                        0.0,
+                        1.0,
+                      );
+                      player.setVolume(newVolume * 100.0);
+                      setState(() => _currentVolume = newVolume);
+                    } else if (_isDraggingBrightness) {
+                      final newBrightness = (_initialBrightness + ratio).clamp(
+                        0.0,
+                        1.0,
+                      );
+                      try {
+                        await ScreenBrightness().setApplicationScreenBrightness(
+                          newBrightness,
+                        );
+                      } catch (_) {}
+                      setState(() => _currentBrightness = newBrightness);
+                    }
+                  },
+                  onVerticalDragEnd: (details) {
+                    _isDraggingVolume = false;
+                    _isDraggingBrightness = false;
+                    _dragStartY = null;
+                    Future.delayed(const Duration(milliseconds: 500), () {
+                      if (mounted) {
+                        setState(() {
+                          _currentVolume = null;
+                          _currentBrightness = null;
+                        });
+                      }
+                    });
+                  },
                 ),
               ),
+              if (_isDraggingProgress && _dragTargetPosition != null)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${_formatDuration(_dragTargetPosition!)} / ${_formatDuration(player.state.duration)}',
+                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                    ),
+                  ),
+                ),
+              if (_currentVolume != null || _currentBrightness != null)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _currentVolume != null
+                              ? (_currentVolume! <= 0
+                                    ? Icons.volume_mute
+                                    : Icons.volume_up)
+                              : Icons.brightness_6,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${((_currentVolume ?? _currentBrightness!) * 100).toInt()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (!playing && _controlsVisible)
                 Center(
                   child: IconButton.filledTonal(
@@ -1061,7 +1227,12 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
 
   void _togglePlay() {
     _showControls();
-    player.playOrPause();
+    if (player.state.playing) {
+      player.pause();
+    } else {
+      player.play();
+    }
+    setState(() {});
   }
 }
 
@@ -1246,11 +1417,15 @@ class _DanmakuMatchPanel extends StatelessWidget {
   final bool isAutoMatched;
   final List<DandanplayEpisode> candidates;
   final ValueChanged<int> onSelect;
+  final bool danmakuVisible;
+  final bool hasDanmaku;
 
   const _DanmakuMatchPanel({
     required this.isAutoMatched,
     required this.candidates,
     required this.onSelect,
+    required this.danmakuVisible,
+    required this.hasDanmaku,
   });
 
   @override
@@ -1269,6 +1444,37 @@ class _DanmakuMatchPanel extends StatelessWidget {
               '弹幕搜索',
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
+            const Spacer(),
+            if (danmakuVisible && !hasDanmaku)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.5),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: Colors.orange,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '未加载弹幕，请在下方选择',
+                      style: tt.labelSmall?.copyWith(
+                        color: Colors.orange.shade900,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
         if (candidates.isNotEmpty) ...[
@@ -1310,6 +1516,7 @@ class _InlineSearchPanel extends StatelessWidget {
   final TextEditingController searchController;
   final List<DandanplayEpisode> results;
   final bool searching;
+  final bool hasSearched;
   final ValueChanged<int> onToggleSegment;
   final VoidCallback onSearch;
   final VoidCallback onRefresh;
@@ -1321,6 +1528,7 @@ class _InlineSearchPanel extends StatelessWidget {
     required this.searchController,
     required this.results,
     required this.searching,
+    required this.hasSearched,
     required this.onToggleSegment,
     required this.onSearch,
     required this.onRefresh,
@@ -1391,6 +1599,8 @@ class _InlineSearchPanel extends StatelessWidget {
           )
         else if (hasResults)
           _buildGroupedResults(cs, tt)
+        else if (hasSearched)
+          _buildEmptyResults(cs, tt)
         else
           Text(
             '请选择分段或输入搜索词后点击搜索',
@@ -1456,6 +1666,38 @@ class _InlineSearchPanel extends StatelessWidget {
           const SizedBox(height: 8),
         ],
       ],
+    );
+  }
+
+  Widget _buildEmptyResults(ColorScheme cs, TextTheme tt) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.search_off_rounded, size: 40, color: cs.onSurfaceVariant),
+          const SizedBox(height: 12),
+          Text(
+            '未找到相关弹幕',
+            style: tt.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '减少关键词，仅搜索作品名称\n如：「Re：从零开始的异世界生活第四季丧失篇」 搜索 \n  「从零开始的异世界生活第四季」',
+            textAlign: TextAlign.start,
+            style: tt.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              height: 1.6,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

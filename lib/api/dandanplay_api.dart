@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 class _CacheEntry {
   final dynamic data;
@@ -171,7 +172,7 @@ class DandanplayApi {
         return results;
       }
     } catch (e) {
-      print('Dandanplay search error: $e');
+      debugPrint('Dandanplay search error: $e');
     }
     return [];
   }
@@ -221,7 +222,7 @@ class DandanplayApi {
         return results;
       }
     } catch (e) {
-      print('Dandanplay get comments error: $e');
+      debugPrint('Dandanplay get comments error: $e');
     }
     return [];
   }
