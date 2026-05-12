@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'models/user_manager.dart';
 import 'pages/anime_home_page.dart';
@@ -12,6 +13,7 @@ import 'utils/app_update.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   await UserManager().init();
   SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.manual,

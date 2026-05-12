@@ -4,7 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 
 import '../api/api_client.dart';
@@ -43,7 +44,8 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   final _api = ApiClient();
   final _user = UserManager();
-  VideoPlayerController? _videoController;
+  late final Player _player = Player();
+  late final VideoController _videoController = VideoController(_player);
   AnimePlayback? _playback;
   late String _currentChapterUuid;
   late String _currentChapterName;
@@ -74,56 +76,53 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     _currentChapterName = widget.chapterName;
     _line = widget.line;
     _danmakuVisible = _user.danmakuEnabled;
+
+    _player.stream.playing.listen((playing) {
+      if (!mounted) return;
+      if (playing && _danmakuVisible) {
+        _danmakuController?.resume();
+      } else {
+        _danmakuController?.pause();
+      }
+    });
+
+    _player.stream.position.listen((position) {
+      if (!mounted) return;
+      if (_player.state.playing && _danmakuVisible) {
+        final sec = position.inSeconds;
+        if (sec != _lastDanmakuSec) {
+          if ((sec - _lastDanmakuSec).abs() > 2) {
+            _danmakuController?.clear();
+          }
+          _lastDanmakuSec = sec;
+          if (_danmakuItems.containsKey(sec)) {
+            for (final item in _danmakuItems[sec]!) {
+              _danmakuController?.addDanmaku(item);
+            }
+          }
+        }
+      }
+    });
+
+    _player.stream.buffering.listen((buffering) {
+      if (!mounted) return;
+      setState(() => _buffering = buffering);
+    });
+
+    _player.stream.error.listen((error) {
+      if (!mounted) return;
+      setState(() => _error = _formatPlayerError(error));
+    });
+
     _load();
   }
 
   @override
   void dispose() {
     _openMediaSerial++; // 阻止正在进行的媒体加载
-    _videoController?.removeListener(_onVideoStateChanged);
-    _videoController?.dispose();
-    _videoController = null;
+    _player.dispose();
     _searchController.dispose();
     super.dispose();
-  }
-
-  void _onVideoStateChanged() {
-    final controller = _videoController;
-    if (!mounted || controller == null) return;
-    final value = controller.value;
-
-    if (value.isPlaying && _danmakuVisible) {
-      if (_danmakuController?.running == false) {
-        _danmakuController?.resume();
-      }
-      final sec = value.position.inSeconds;
-      if (sec != _lastDanmakuSec) {
-        if ((sec - _lastDanmakuSec).abs() > 2) {
-          _danmakuController?.clear();
-        }
-        _lastDanmakuSec = sec;
-        if (_danmakuItems.containsKey(sec)) {
-          for (final item in _danmakuItems[sec]!) {
-            _danmakuController?.addDanmaku(item);
-          }
-        }
-      }
-    } else if (!value.isPlaying && _danmakuController?.running == true) {
-      _danmakuController?.pause();
-    }
-
-    final nextError = value.hasError
-        ? _formatPlayerError(value.errorDescription ?? '')
-        : null;
-
-    // 优化：当正在缓冲且原本在播放时，保持 buffering 状态直到数据足够
-    if (_buffering == value.isBuffering && _error == nextError) {
-      return;
-    }
-    setState(() {
-      _buffering = value.isBuffering;
-      _error = nextError;
-    });
   }
 
   Future<void> _load() async {
@@ -227,10 +226,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   Future<void> _openMedia(String videoUrl) async {
     final serial = ++_openMediaSerial;
-    _videoController?.removeListener(_onVideoStateChanged);
-    final oldController = _videoController;
-    _videoController = null;
-    unawaited(oldController?.dispose());
     if (mounted) {
       setState(() {
         _buffering = true;
@@ -239,16 +234,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     }
 
     try {
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(videoUrl),
-        httpHeaders: _videoHttpHeaders,
+      await _player.open(
+        Media(
+          videoUrl,
+          httpHeaders: _videoHttpHeaders,
+        ),
+        play: true,
       );
-      controller.addListener(_onVideoStateChanged);
-      if (!mounted || serial != _openMediaSerial) return;
-      _videoController = controller;
-      await controller.initialize();
-      if (!mounted || serial != _openMediaSerial) return;
-      await controller.play();
       if (!mounted || serial != _openMediaSerial) return;
       setState(() {
         _buffering = false;
@@ -347,25 +339,19 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       : _currentChapterName;
 
   void _skipForward() {
-    final controller = _videoController;
-    if (controller == null || !controller.value.isInitialized) return;
-    final duration = controller.value.duration;
-    final position = controller.value.position;
+    final duration = _player.state.duration;
+    final position = _player.state.position;
     final newPosition =
         position + Duration(seconds: UserManager().animeSkipSeconds);
     if (newPosition < duration) {
-      controller.seekTo(newPosition);
+      _player.seek(newPosition);
     } else {
-      controller.seekTo(duration);
+      _player.seek(duration);
     }
   }
 
   Widget _buildVideoWithControls() {
-    final controller = _videoController;
-    if (controller == null) {
-      return const ColoredBox(color: Colors.black);
-    }
-    return _buildVideoSurface(controller, fullscreen: false);
+    return _buildVideoSurface(_videoController, fullscreen: false);
   }
 
   List<DandanplayEpisode> _matchCandidates = [];
@@ -551,7 +537,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 
   Widget _buildVideoSurface(
-    VideoPlayerController controller, {
+    VideoController controller, {
     required bool fullscreen,
   }) {
     Widget? danmakuView;
@@ -588,8 +574,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 
   Future<void> _fullscreen() async {
-    final controller = _videoController;
-    if (controller == null) return;
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
@@ -604,7 +588,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
             backgroundColor: Colors.black,
             body: SafeArea(
               child: Center(
-                child: _buildVideoSurface(controller, fullscreen: true),
+                child: _buildVideoSurface(_videoController, fullscreen: true),
               ),
             ),
           ),
@@ -655,7 +639,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     final cs = Theme.of(context).colorScheme;
     return PopScope(
       onPopInvokedWithResult: (_, _) {
-        _videoController?.pause();
+        _player.pause();
       },
       child: Scaffold(
         body: Column(
@@ -799,7 +783,7 @@ class _PlayerControlButton extends StatelessWidget {
 }
 
 class _VideoPlayerSurface extends StatefulWidget {
-  final VideoPlayerController controller;
+  final VideoController controller;
   final bool fullscreen;
   final VoidCallback onSkipForward;
   final VoidCallback onSettings;
@@ -831,55 +815,42 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
   bool _controlsVisible = true;
   Timer? _hideControlsTimer;
 
-  VideoPlayerController get controller => widget.controller;
+  VideoController get controller => widget.controller;
+  Player get player => widget.controller.player;
 
   @override
   void initState() {
     super.initState();
-    controller.addListener(_syncControlsAutoHide);
-    _syncControlsAutoHide();
+    _hideControlsTimer = Timer(_controlsAutoHideDelay, () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
   }
 
   @override
   void didUpdateWidget(covariant _VideoPlayerSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller == widget.controller) return;
-    oldWidget.controller.removeListener(_syncControlsAutoHide);
-    controller.addListener(_syncControlsAutoHide);
     setState(() => _controlsVisible = true);
-    _syncControlsAutoHide();
+    _startControlsAutoHideTimer();
   }
 
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
-    controller.removeListener(_syncControlsAutoHide);
     super.dispose();
-  }
-
-  void _syncControlsAutoHide() {
-    final value = controller.value;
-    if (!value.isInitialized || !value.isPlaying || !_controlsVisible) {
-      _hideControlsTimer?.cancel();
-      _hideControlsTimer = null;
-      return;
-    }
-    if (_hideControlsTimer?.isActive == true) return;
-    _startControlsAutoHideTimer();
   }
 
   void _startControlsAutoHideTimer() {
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(_controlsAutoHideDelay, () {
-      if (!mounted || !controller.value.isPlaying) return;
+      if (!mounted || !player.state.playing) return;
       setState(() => _controlsVisible = false);
     });
   }
 
   void _toggleControls() {
-    if (!controller.value.isInitialized) return;
     setState(() => _controlsVisible = !_controlsVisible);
-    if (!_controlsVisible || !controller.value.isPlaying) {
+    if (!_controlsVisible || !player.state.playing) {
       _hideControlsTimer?.cancel();
       _hideControlsTimer = null;
       return;
@@ -891,7 +862,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
     }
-    if (controller.value.isPlaying) {
+    if (player.state.playing) {
       _startControlsAutoHideTimer();
     }
   }
@@ -900,12 +871,14 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
   Widget build(BuildContext context) {
     const controlButtonSize = 24.0;
     const controlButtonExtent = 40.0;
-    return ValueListenableBuilder<VideoPlayerValue>(
-      valueListenable: controller,
-      builder: (context, value, _) {
-        final initialized = value.isInitialized;
-        final duration = initialized ? value.duration : Duration.zero;
-        final position = initialized ? value.position : Duration.zero;
+
+    return StreamBuilder<Object>(
+      stream: player.stream.position,
+      builder: (context, _) {
+        final state = player.state;
+        final duration = state.duration;
+        final position = state.position;
+        final playing = state.playing;
         final progress = duration.inMilliseconds <= 0
             ? 0.0
             : (position.inMilliseconds / duration.inMilliseconds).clamp(
@@ -919,12 +892,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
             fit: StackFit.expand,
             children: [
               Center(
-                child: initialized
-                    ? AspectRatio(
-                        aspectRatio: value.aspectRatio,
-                        child: VideoPlayer(controller),
-                      )
-                    : const SizedBox.shrink(),
+                child: Video(controller: controller),
               ),
               if (widget.danmakuView != null)
                 Positioned.fill(
@@ -933,11 +901,11 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: initialized ? _toggleControls : null,
-                  onDoubleTap: initialized ? _togglePlay : null,
+                  onTap: _toggleControls,
+                  onDoubleTap: _togglePlay,
                 ),
               ),
-              if (initialized && !value.isPlaying && _controlsVisible)
+              if (!playing && _controlsVisible)
                 Center(
                   child: IconButton.filledTonal(
                     onPressed: _togglePlay,
@@ -990,15 +958,12 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                 ),
                                 child: Slider(
                                   value: progress,
-                                  onChanged: initialized
-                                      ? (v) => controller.seekTo(
-                                          Duration(
-                                            milliseconds:
-                                                (duration.inMilliseconds * v)
-                                                    .round(),
-                                          ),
-                                        )
-                                      : null,
+                                  onChanged: (v) => player.seek(
+                                    Duration(
+                                      milliseconds:
+                                          (duration.inMilliseconds * v).round(),
+                                    ),
+                                  ),
                                   activeColor: Colors.red,
                                   inactiveColor: Colors.white38,
                                 ),
@@ -1028,17 +993,13 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           _PlayerControlButton(
-                                            tooltip: value.isPlaying
-                                                ? '暂停'
-                                                : '播放',
-                                            icon: value.isPlaying
+                                            tooltip: playing ? '暂停' : '播放',
+                                            icon: playing
                                                 ? Icons.pause
                                                 : Icons.play_arrow,
                                             iconSize: controlButtonSize,
                                             extent: controlButtonExtent,
-                                            onPressed: initialized
-                                                ? _togglePlay
-                                                : null,
+                                            onPressed: _togglePlay,
                                           ),
                                           _PlayerControlButton(
                                             tooltip:
@@ -1046,9 +1007,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                             icon: Icons.fast_forward,
                                             iconSize: controlButtonSize,
                                             extent: controlButtonExtent,
-                                            onPressed: initialized
-                                                ? widget.onSkipForward
-                                                : null,
+                                            onPressed: widget.onSkipForward,
                                           ),
                                           _PlayerControlButton(
                                             tooltip: widget.danmakuVisible
@@ -1102,15 +1061,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
 
   void _togglePlay() {
     _showControls();
-    if (controller.value.isPlaying) {
-      controller.pause();
-      return;
-    }
-    if (controller.value.position >= controller.value.duration &&
-        controller.value.duration > Duration.zero) {
-      controller.seekTo(Duration.zero);
-    }
-    controller.play();
+    player.playOrPause();
   }
 }
 
