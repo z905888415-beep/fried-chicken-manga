@@ -42,6 +42,7 @@
 
 - Dart
 - Flutter
+- Java 17
 
 ### 初始化项目
 

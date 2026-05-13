@@ -51,12 +51,24 @@ android {
 
     buildTypes {
         release {
+            ndk {
+                abiFilters.add("arm64-v8a")
+            }
+
             signingConfig = if (hasReleaseKeystore) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
             }
         }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.packaging.jniLibs.excludes.add("**/armeabi-v7a/*.so")
+        variant.packaging.jniLibs.excludes.add("**/x86/*.so")
+        variant.packaging.jniLibs.excludes.add("**/x86_64/*.so")
     }
 }
 
