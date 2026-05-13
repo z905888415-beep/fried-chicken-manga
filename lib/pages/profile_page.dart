@@ -399,8 +399,8 @@ class _ProfilePageState extends State<ProfilePage> {
                               icon: Icons.download_done_rounded,
                               color: Color(0xFFFFA24C),
                             ),
-                            title: const Text('本地漫画'),
-                            subtitle: const Text('查看和管理已下载的漫画章节'),
+                            title: const Text('本地下载中心'),
+                            subtitle: const Text('查看和管理已下载的资源'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.push(
                               context,

@@ -199,6 +199,12 @@ class AnimeChapterLine {
         pathWord: json['path_word']?.toString() ?? '',
         config: json['config'] == true,
       );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'path_word': pathWord,
+    'config': config,
+  };
 }
 
 class AnimeChapter {
@@ -226,6 +232,13 @@ class AnimeChapter {
             .toList() ??
         const [],
   );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'uuid': uuid,
+    'v_cover': vCover,
+    'lines': lines.map((e) => e.toJson()).toList(),
+  };
 }
 
 class AnimePlayback {
@@ -255,6 +268,15 @@ class AnimePlayback {
     isVip: json['is_vip'] == true,
     isLock: json['is_lock'] == true,
   );
+
+  Map<String, dynamic> toJson() => {
+    'cartoon': anime.toJson(),
+    'chapter': chapter.toJson(),
+    'is_login': isLogin,
+    'is_mobile_bind': isMobileBind,
+    'is_vip': isVip,
+    'is_lock': isLock,
+  };
 }
 
 class AnimePlaybackChapter {
@@ -304,6 +326,18 @@ class AnimePlaybackChapter {
       vCover: json['v_cover']?.toString() ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'count': count,
+    'name': name,
+    'cover': cover,
+    'vid': vid,
+    'video': video,
+    'uuid': uuid,
+    'lines': lines.map((key, value) => MapEntry(key, value.toJson())),
+    'video_list': videoList,
+    'v_cover': vCover,
+  };
 }
 
 class AnimeBanner {

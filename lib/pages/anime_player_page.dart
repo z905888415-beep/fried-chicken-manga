@@ -15,6 +15,7 @@ import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
 import '../utils/chinese_converter.dart';
+import '../utils/data_cache.dart';
 import '../utils/toast.dart';
 import 'profile_page.dart';
 
@@ -52,8 +53,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   static const _videoUserAgent =
       'Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36';
   static const _maxPlayerLogLines = 24;
+  static const _videoLinkCacheTtl = Duration(hours: 6);
 
   final _api = ApiClient();
+  final _cache = DataCache();
   final _user = UserManager();
   late final Player _player = Player(
     configuration: const PlayerConfiguration(logLevel: MPVLogLevel.warn),
@@ -154,7 +157,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     setState(() {
       _loading = true;
       _buffering = false;
@@ -178,11 +181,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     }
 
     try {
-      final playback = await _api.getAnimePlayback(
-        widget.pathWord,
-        _currentChapterUuid,
-        line: _line,
-      );
+      final playback = await _getPlayback(forceRefresh: forceRefresh);
       final videoUrl = _resolveVideoUrl(playback.chapter);
       if (videoUrl.isEmpty) {
         throw StateError('视频链接为空');
@@ -402,6 +401,57 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     if (loggedIn == true && mounted) {
       await _load();
     }
+  }
+
+  String get _videoLinkCacheKey =>
+      'anime_video_link_v1_${widget.pathWord}_${_currentChapterUuid}_$_line';
+
+  Future<AnimePlayback?> _readCachedPlayback() async {
+    final cached = await _cache.get(_videoLinkCacheKey);
+    if (cached is! Map) return null;
+
+    try {
+      final playback = AnimePlayback.fromJson(
+        Map<String, dynamic>.from(cached),
+      );
+      if (_resolveVideoUrl(playback.chapter).isEmpty) {
+        await _cache.remove(_videoLinkCacheKey);
+        return null;
+      }
+      return playback;
+    } catch (e) {
+      debugPrint('AnimePlayerPage cached playback error: $e');
+      await _cache.remove(_videoLinkCacheKey);
+      return null;
+    }
+  }
+
+  Future<AnimePlayback> _getPlayback({required bool forceRefresh}) async {
+    if (forceRefresh) {
+      await _cache.remove(_videoLinkCacheKey);
+    } else {
+      final cachedPlayback = await _readCachedPlayback();
+      if (cachedPlayback != null) return cachedPlayback;
+    }
+
+    final playback = await _api.getAnimePlayback(
+      widget.pathWord,
+      _currentChapterUuid,
+      line: _line,
+    );
+    if (_resolveVideoUrl(playback.chapter).isNotEmpty) {
+      await _cache.put(
+        _videoLinkCacheKey,
+        playback.toJson(),
+        ttl: _videoLinkCacheTtl,
+      );
+    }
+    return playback;
+  }
+
+  Future<void> _refreshPlayback() async {
+    if (_loading) return;
+    await _load(forceRefresh: true);
   }
 
   Future<void> _openMedia(String videoUrl) async {
@@ -882,7 +932,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                               rawError: _rawError,
                               requiresLogin: _requiresLogin,
                               onLogin: _goLogin,
-                              onRetry: _load,
+                              onRetry: () => _load(),
                             ),
                     ),
                     if (_showLoadingOverlay)
@@ -920,51 +970,55 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
               ),
             ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                children: [
-                  if (_danmakuVisible) ...[
-                    _DanmakuMatchPanel(
-                      isAutoMatched: _isAutoMatched,
-                      candidates: _matchCandidates,
-                      onSelect: _loadDanmakuForEpisode,
-                      danmakuVisible: _danmakuVisible,
-                      hasDanmaku: _danmakuItems.isNotEmpty,
-                    ),
-                    const SizedBox(height: 12),
-                    _InlineSearchPanel(
-                      segments: _searchSegments,
-                      selectedIndices: _selectedSegmentIndices,
-                      searchController: _searchController,
-                      results: _inlineResults,
-                      searching: _inlineSearching,
-                      hasSearched: _hasSearched,
-                      selectedEpisodeId: _selectedDanmakuEpisodeId,
-                      loadingEpisodeId: _loadingDanmakuEpisodeId,
-                      onToggleSegment: _toggleSearchSegment,
+              child: RefreshIndicator(
+                onRefresh: _refreshPlayback,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    if (_danmakuVisible) ...[
+                      _DanmakuMatchPanel(
+                        isAutoMatched: _isAutoMatched,
+                        candidates: _matchCandidates,
+                        onSelect: _loadDanmakuForEpisode,
+                        danmakuVisible: _danmakuVisible,
+                        hasDanmaku: _danmakuItems.isNotEmpty,
+                      ),
+                      const SizedBox(height: 12),
+                      _InlineSearchPanel(
+                        segments: _searchSegments,
+                        selectedIndices: _selectedSegmentIndices,
+                        searchController: _searchController,
+                        results: _inlineResults,
+                        searching: _inlineSearching,
+                        hasSearched: _hasSearched,
+                        selectedEpisodeId: _selectedDanmakuEpisodeId,
+                        loadingEpisodeId: _loadingDanmakuEpisodeId,
+                        onToggleSegment: _toggleSearchSegment,
 
-                      onSearch: _doInlineSearch,
-                      onRefresh: _forceRefreshSearch,
-                      onSelectResult: (ep) =>
-                          _loadDanmakuForEpisode(ep.episodeId),
+                        onSearch: _doInlineSearch,
+                        onRefresh: _forceRefreshSearch,
+                        onSelectResult: (ep) =>
+                            _loadDanmakuForEpisode(ep.episodeId),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                    _ChapterSelector(
+                      chapters: _chapters,
+                      currentChapterUuid: _currentChapterUuid,
+                      onSelected: _openChapter,
                     ),
                     const SizedBox(height: 24),
+                    _VideoLinkPanel(
+                      videoUrl: _videoUrl,
+                      lines: _playback?.chapter.lines ?? const {},
+                      currentLine: _line,
+                      onCopy: _copyVideoUrl,
+                      onOpen: _openVideoUrl,
+                      onLineSelected: _switchLine,
+                    ),
                   ],
-                  _ChapterSelector(
-                    chapters: _chapters,
-                    currentChapterUuid: _currentChapterUuid,
-                    onSelected: _openChapter,
-                  ),
-                  const SizedBox(height: 24),
-                  _VideoLinkPanel(
-                    videoUrl: _videoUrl,
-                    lines: _playback?.chapter.lines ?? const {},
-                    currentLine: _line,
-                    onCopy: _copyVideoUrl,
-                    onOpen: _openVideoUrl,
-                    onLineSelected: _switchLine,
-                  ),
-                ],
+                ),
               ),
             ),
           ],

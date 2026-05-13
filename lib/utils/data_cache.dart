@@ -38,4 +38,9 @@ class DataCache {
     }
     return decoded;
   }
+
+  Future<void> remove(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_prefix$key');
+  }
 }
