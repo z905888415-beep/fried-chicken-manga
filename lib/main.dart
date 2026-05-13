@@ -216,13 +216,6 @@ class _MainPageState extends State<MainPage> {
   bool _didCheckDisclaimer = false;
   bool _pendingIndexReset = false;
 
-  static const _allPages = [
-    HomePage(),
-    AnimeHomePage(),
-    SearchPage(),
-    BookshelfPage(),
-    ProfilePage(),
-  ];
 
   static const _disclaimerItems = [
     '本应用为非官方第三方客户端，仅基于第三方平台提供的接口或公开可访问资源进行内容展示与访问。',
@@ -294,11 +287,39 @@ class _MainPageState extends State<MainPage> {
 
   // 未登录时 tabs: [漫画(0), 动漫(1), 搜索(2), 我的(3)]
   // 登录后 tabs: [漫画(0), 动漫(1), 搜索(2), 书架(3), 我的(4)]
-  int _pageIndexFor(int selectedIndex) {
-    if (_user.isLoggedIn) return selectedIndex;
-    const map = [0, 1, 2, 4]; // tab index → page index
-    return map[selectedIndex.clamp(0, 3)];
-  }
+
+  static final _navItemData = {
+    'comic': _NavItem(
+      page: HomePage(),
+      icon: Icon(Icons.menu_book_outlined),
+      selectedIcon: Icon(Icons.menu_book),
+      label: '漫画',
+    ),
+    'anime': _NavItem(
+      page: AnimeHomePage(),
+      icon: Icon(Icons.movie_outlined),
+      selectedIcon: Icon(Icons.movie),
+      label: '动漫',
+    ),
+    'search': _NavItem(
+      page: SearchPage(),
+      icon: Icon(Icons.search_outlined),
+      selectedIcon: Icon(Icons.search),
+      label: '搜索',
+    ),
+    'bookshelf': _NavItem(
+      page: BookshelfPage(),
+      icon: Icon(Icons.bookmark_border),
+      selectedIcon: Icon(Icons.bookmark),
+      label: '书架',
+    ),
+    'profile': _NavItem(
+      page: ProfilePage(),
+      icon: Icon(Icons.person_outline),
+      selectedIcon: Icon(Icons.person),
+      label: '我的',
+    ),
+  };
 
   int _safeSelectedIndex(int destinationsLength) {
     if (_index >= 0 && _index < destinationsLength) return _index;
@@ -317,40 +338,24 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
+    final orderedKeys = _user.navOrder
+        .where((k) => _user.isLoggedIn || k != 'bookshelf')
+        .toList();
     final destinations = [
-      const NavigationDestination(
-        icon: Icon(Icons.menu_book_outlined),
-        selectedIcon: Icon(Icons.menu_book),
-        label: '漫画',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.movie_outlined),
-        selectedIcon: Icon(Icons.movie),
-        label: '动漫',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.search_outlined),
-        selectedIcon: Icon(Icons.search),
-        label: '搜索',
-      ),
-      if (_user.isLoggedIn)
-        const NavigationDestination(
-          icon: Icon(Icons.bookmark_border),
-          selectedIcon: Icon(Icons.bookmark),
-          label: '书架',
+      for (final key in orderedKeys)
+        NavigationDestination(
+          icon: _navItemData[key]!.icon,
+          selectedIcon: _navItemData[key]!.selectedIcon,
+          label: _navItemData[key]!.label,
         ),
-      const NavigationDestination(
-        icon: Icon(Icons.person_outline),
-        selectedIcon: Icon(Icons.person),
-        label: '我的',
-      ),
     ];
+    final orderedPages = [for (final key in orderedKeys) _navItemData[key]!.page];
     final selectedIndex = _safeSelectedIndex(destinations.length);
 
     return Scaffold(
       body: IndexedStack(
-        index: _pageIndexFor(selectedIndex),
-        children: _allPages,
+        index: selectedIndex,
+        children: orderedPages,
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
@@ -363,4 +368,17 @@ class _MainPageState extends State<MainPage> {
       ),
     );
   }
+}
+
+class _NavItem {
+  final Widget page;
+  final Icon icon;
+  final Icon selectedIcon;
+  final String label;
+  const _NavItem({
+    required this.page,
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+  });
 }

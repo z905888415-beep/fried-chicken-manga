@@ -14,6 +14,14 @@ class AppearancePage extends StatefulWidget {
 class _AppearancePageState extends State<AppearancePage> {
   final _user = UserManager();
 
+  static const _navMeta = {
+    'comic': (Icons.menu_book_outlined, '漫画'),
+    'anime': (Icons.movie_outlined, '动漫'),
+    'search': (Icons.search_outlined, '搜索'),
+    'bookshelf': (Icons.bookmark_border, '书架'),
+    'profile': (Icons.person_outline, '我的'),
+  };
+
   @override
   void initState() {
     super.initState();
@@ -125,6 +133,60 @@ class _AppearancePageState extends State<AppearancePage> {
         children: [
           Card(
             color: cs.surfaceContainerLow,
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: Icon(
+                    Icons.text_fields_rounded,
+                    color: cs.onSurfaceVariant,
+                  ),
+                  title: const Text('底部导航栏显示文字'),
+                  value: _user.bottomNavShowLabels,
+                  onChanged: _user.setBottomNavShowLabels,
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.swap_vert, color: cs.onSurfaceVariant, size: 20),
+                      const SizedBox(width: 16),
+                      Text('导航栏顺序', style: tt.titleSmall),
+                    ],
+                  ),
+                ),
+                ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _user.navOrder.length,
+                  onReorder: (oldIndex, newIndex) {
+                    if (newIndex > oldIndex) newIndex--;
+                    final order = List<String>.of(_user.navOrder);
+                    final item = order.removeAt(oldIndex);
+                    order.insert(newIndex, item);
+                    _user.setNavOrder(order);
+                  },
+                  itemBuilder: (context, index) {
+                    final key = _user.navOrder[index];
+                    final meta = _navMeta[key]!;
+                    return ListTile(
+                      key: ValueKey(key),
+                      leading: Icon(meta.$1, color: cs.onSurfaceVariant),
+                      title: Text(meta.$2),
+                      trailing: ReorderableDragStartListener(
+                        index: index,
+                        child: Icon(Icons.drag_handle, color: cs.onSurfaceVariant),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerLow,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(
@@ -132,7 +194,7 @@ class _AppearancePageState extends State<AppearancePage> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.palette_outlined, color: cs.onSurfaceVariant),
+                      Icon(Icons.brightness_6, color: cs.onSurfaceVariant),
                       const SizedBox(width: 16),
                       const Text('主题模式'),
                     ],
@@ -162,10 +224,24 @@ class _AppearancePageState extends State<AppearancePage> {
                       onSelectionChanged: (v) => _user.setThemeMode(v.first),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '主题风格',
-                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerLow,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.palette_outlined, color: cs.onSurfaceVariant),
+                      const SizedBox(width: 16),
+                      const Text('主题风格'),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -227,19 +303,6 @@ class _AppearancePageState extends State<AppearancePage> {
                   Theme(data: previewTheme, child: const _ThemePreviewCard()),
                 ],
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: cs.surfaceContainerLow,
-            child: SwitchListTile(
-              secondary: Icon(
-                Icons.text_fields_rounded,
-                color: cs.onSurfaceVariant,
-              ),
-              title: const Text('底部导航栏显示文字'),
-              value: _user.bottomNavShowLabels,
-              onChanged: _user.setBottomNavShowLabels,
             ),
           ),
         ],

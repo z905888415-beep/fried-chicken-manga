@@ -332,10 +332,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
             ),
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
             children: [
               if (_type == _BookshelfType.comic)
                 FilterChip(
@@ -346,10 +343,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     _user.setBookshelfShowUpdateOnly(v);
                   },
                 ),
+              const SizedBox(width: 8),
               Text(
                 '共 $_total 部收藏',
                 style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
               ),
+              const Spacer(),
               ActionChip(
                 avatar: const Icon(Icons.sort, size: 18),
                 label: Text(_orderingLabel(_ordering)),

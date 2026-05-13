@@ -79,6 +79,7 @@ class UserManager extends ChangeNotifier {
   static const _keyThemeVariant = 'theme_variant';
   static const _keyCustomThemeColor = 'custom_theme_color';
   static const _keyBottomNavShowLabels = 'bottom_nav_show_labels';
+  static const _keyNavOrder = 'nav_order';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
   static const _keyBookshelfShowUpdateOnly = 'bookshelf_show_update_only';
   static const _keyReaderMode = 'reader_mode';
@@ -132,6 +133,7 @@ class UserManager extends ChangeNotifier {
   DynamicSchemeVariant _themeVariant = appThemeVariantOptions.first.variant;
   int _customThemeColorValue = defaultCustomThemeColor.toARGB32();
   bool _bottomNavShowLabels = true;
+  List<String> _navOrder = const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
   String _bookshelfOrdering = '-datetime_updated';
   bool _bookshelfShowUpdateOnly = false;
   int _readerMode = 0;
@@ -184,6 +186,7 @@ class UserManager extends ChangeNotifier {
   DynamicSchemeVariant get themeVariant => _themeVariant;
   Color get customThemeColor => Color(_customThemeColorValue);
   bool get bottomNavShowLabels => _bottomNavShowLabels;
+  List<String> get navOrder => _navOrder;
   AppThemeOption get themeOption {
     if (_themeColor == customThemeOptionId) {
       return AppThemeOption(
@@ -287,6 +290,7 @@ class UserManager extends ChangeNotifier {
         prefs.getInt(_keyCustomThemeColor) ??
         defaultCustomThemeColor.toARGB32();
     _bottomNavShowLabels = prefs.getBool(_keyBottomNavShowLabels) ?? true;
+    _navOrder = prefs.getStringList(_keyNavOrder) ?? const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
     _bookshelfShowUpdateOnly =
@@ -536,6 +540,13 @@ class UserManager extends ChangeNotifier {
     _bottomNavShowLabels = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBottomNavShowLabels, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setNavOrder(List<String> order) async {
+    _navOrder = order;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyNavOrder, order);
     notifyListeners();
   }
 
