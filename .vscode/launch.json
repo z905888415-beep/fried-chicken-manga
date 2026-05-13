@@ -5,25 +5,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "kira (Android Emulator)",
+            "name": "Debug - Emulator",
             "request": "launch",
             "type": "dart",
             "deviceId": "emulator",
+            "preLaunchTask": "launch emulator", // ← 加这一行
             "toolArgs": [
                 "--dart-define-from-file=.env"
             ]
         },
         {
-            "name": "kira (Android MuMu)",
+            "name": "Debug - MuMu",
             "request": "launch",
             "type": "dart",
             "deviceId": "127.0.0.1:16384",
+            "preLaunchTask": "adb connect MuMu",
             "toolArgs": [
                 "--dart-define-from-file=.env"
             ]
         },
         {
-            "name": "kira (Windows)",
+            "name": "Debug - Windows",
             "request": "launch",
             "type": "dart",
             "deviceId": "windows",
