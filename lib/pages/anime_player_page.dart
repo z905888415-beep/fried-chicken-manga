@@ -775,6 +775,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       onToggleDanmaku: _toggleDanmaku,
       onSkipForward: _skipForward,
       onSettings: _showSettingsPanel,
+      chapters: _chapters,
+      currentChapterUuid: _currentChapterUuid,
+      onChapterSelected: _openChapter,
       onFullscreen: fullscreen
           ? () => Navigator.maybePop(context)
           : _fullscreen,

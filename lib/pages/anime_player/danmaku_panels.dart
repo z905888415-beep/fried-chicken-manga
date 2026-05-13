@@ -428,7 +428,7 @@ class _DanmakuResultTile extends StatelessWidget {
               ] else if (selected) ...[
                 const SizedBox(width: 8),
                 _CheckedTag(
-                  label: '已选择',
+                  label: '',
                   foreground: cs.onPrimary,
                   background: cs.primary,
                 ),

@@ -41,6 +41,9 @@ class _VideoPlayerSurface extends StatefulWidget {
   final VoidCallback onFullscreen;
   final VoidCallback onMatchDanmaku;
   final VoidCallback onToggleDanmaku;
+  final List<AnimeChapter> chapters;
+  final String currentChapterUuid;
+  final ValueChanged<AnimeChapter> onChapterSelected;
   final bool danmakuVisible;
   final Widget? danmakuView;
 
@@ -52,6 +55,9 @@ class _VideoPlayerSurface extends StatefulWidget {
     required this.onFullscreen,
     required this.onMatchDanmaku,
     required this.onToggleDanmaku,
+    required this.chapters,
+    required this.currentChapterUuid,
+    required this.onChapterSelected,
     required this.danmakuVisible,
     this.danmakuView,
   });
@@ -64,6 +70,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
   static const _controlsAutoHideDelay = Duration(seconds: 3);
 
   bool _controlsVisible = true;
+  bool _playlistVisible = false;
   Timer? _hideControlsTimer;
 
   // 手势处理状态
@@ -107,7 +114,7 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
   void _startControlsAutoHideTimer() {
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(_controlsAutoHideDelay, () {
-      if (!mounted || !player.state.playing) return;
+      if (!mounted || !player.state.playing || _playlistVisible) return;
       setState(() => _controlsVisible = false);
     });
   }
@@ -126,6 +133,26 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
     }
+    if (player.state.playing) {
+      _startControlsAutoHideTimer();
+    }
+  }
+
+  void _togglePlaylist() {
+    setState(() {
+      _controlsVisible = true;
+      _playlistVisible = !_playlistVisible;
+    });
+    if (!_playlistVisible && player.state.playing) {
+      _startControlsAutoHideTimer();
+    } else {
+      _hideControlsTimer?.cancel();
+    }
+  }
+
+  void _hidePlaylist() {
+    if (!_playlistVisible) return;
+    setState(() => _playlistVisible = false);
     if (player.state.playing) {
       _startControlsAutoHideTimer();
     }
@@ -320,6 +347,33 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                     ),
                   ),
                 ),
+              if (_playlistVisible)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _hidePlaylist,
+                    child: Align(
+                      alignment: widget.fullscreen
+                          ? Alignment.centerRight
+                          : Alignment.topRight,
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          top: widget.fullscreen ? 32 : 8,
+                          right: widget.fullscreen ? 56 : 8,
+                          bottom: widget.fullscreen ? 64 : 48,
+                        ),
+                        child: _PlayerPlaylistOverlay(
+                          chapters: widget.chapters,
+                          currentChapterUuid: widget.currentChapterUuid,
+                          onSelected: (chapter) {
+                            _hidePlaylist();
+                            widget.onChapterSelected(chapter);
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -424,6 +478,13 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                             onPressed: widget.onToggleDanmaku,
                                           ),
                                           _PlayerControlButton(
+                                            tooltip: '选集',
+                                            icon: Icons.playlist_play,
+                                            iconSize: controlButtonSize,
+                                            extent: controlButtonExtent,
+                                            onPressed: _togglePlaylist,
+                                          ),
+                                          _PlayerControlButton(
                                             tooltip: '设置跳转秒数',
                                             icon: Icons.settings,
                                             iconSize: controlButtonSize,
@@ -470,6 +531,118 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
       player.play();
     }
     setState(() {});
+  }
+}
+
+class _PlayerPlaylistOverlay extends StatelessWidget {
+  final List<AnimeChapter> chapters;
+  final String currentChapterUuid;
+  final ValueChanged<AnimeChapter> onSelected;
+
+  const _PlayerPlaylistOverlay({
+    required this.chapters,
+    required this.currentChapterUuid,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    const itemTextStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      height: 1.2,
+    );
+    final maxWidth = (size.width * 0.34).clamp(240.0, 340.0).toDouble();
+    final textMaxWidth = maxWidth - 56;
+    var widestTitle = 0.0;
+    for (final chapter in chapters) {
+      final painter = TextPainter(
+        text: TextSpan(text: chapter.name, style: itemTextStyle),
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: textMaxWidth);
+      if (painter.width > widestTitle) widestTitle = painter.width;
+    }
+    final width = (widestTitle + 44).clamp(200.0, maxWidth).toDouble();
+    final maxHeight = (size.height * 0.78).clamp(220.0, 620.0).toDouble();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width, maxHeight: maxHeight),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              itemCount: chapters.length,
+              itemBuilder: (context, index) {
+                final chapter = chapters[index];
+                final selected = chapter.uuid == currentChapterUuid;
+                return _PlayerPlaylistItem(
+                  chapter: chapter,
+                  selected: selected,
+                  textStyle: itemTextStyle,
+                  onTap: () => onSelected(chapter),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerPlaylistItem extends StatelessWidget {
+  final AnimeChapter chapter;
+  final bool selected;
+  final TextStyle textStyle;
+  final VoidCallback onTap;
+
+  const _PlayerPlaylistItem({
+    required this.chapter,
+    required this.selected,
+    required this.textStyle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? const Color(0xFF03A9F4) : Colors.white;
+
+    return Material(
+      color: selected
+          ? Colors.white.withValues(alpha: 0.06)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  chapter.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: textStyle.copyWith(
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
