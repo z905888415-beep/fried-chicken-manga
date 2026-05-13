@@ -18,6 +18,63 @@ import '../utils/chinese_converter.dart';
 import '../utils/toast.dart';
 import 'profile_page.dart';
 
+class _MediaOpenDiagnosis {
+  final int? manifestStatus;
+  final bool manifestLooksLikeHls;
+  final String? manifestError;
+  final String? firstSegmentUrl;
+  final int? segmentStatus;
+  final int? segmentBytes;
+  final String? segmentError;
+
+  const _MediaOpenDiagnosis({
+    this.manifestStatus,
+    this.manifestLooksLikeHls = false,
+    this.manifestError,
+    this.firstSegmentUrl,
+    this.segmentStatus,
+    this.segmentBytes,
+    this.segmentError,
+  });
+
+  bool get networkLooksHealthy =>
+      manifestStatus == 200 &&
+      manifestLooksLikeHls &&
+      segmentStatus == 200 &&
+      (segmentBytes ?? 0) > 0;
+
+  String toDebugString() {
+    final buffer = StringBuffer();
+    if (manifestStatus != null) {
+      buffer.writeln('m3u8 状态: $manifestStatus');
+    }
+    if (manifestLooksLikeHls) {
+      buffer.writeln('m3u8 内容: 已识别为 HLS 清单');
+    } else if (manifestStatus == 200) {
+      buffer.writeln('m3u8 内容: 返回 200，但内容不像标准 HLS 清单');
+    }
+    if (manifestError != null && manifestError!.isNotEmpty) {
+      buffer.writeln('m3u8 错误: $manifestError');
+    }
+    if (firstSegmentUrl != null && firstSegmentUrl!.isNotEmpty) {
+      buffer.writeln('首个分片: $firstSegmentUrl');
+    }
+    if (segmentStatus != null) {
+      buffer.writeln('首个分片状态: $segmentStatus');
+    }
+    if (segmentBytes != null) {
+      buffer.writeln('首个分片字节数: $segmentBytes');
+    }
+    if (segmentError != null && segmentError!.isNotEmpty) {
+      buffer.writeln('首个分片错误: $segmentError');
+    }
+    if (networkLooksHealthy) {
+      buffer.writeln('结论: m3u8 与首个分片都可访问，更像是播放器解析或解码兼容问题');
+    }
+    return buffer.toString().trim();
+  }
+}
+
 class AnimePlayerPage extends StatefulWidget {
   final String animeName;
   final String pathWord;
@@ -43,10 +100,13 @@ class AnimePlayerPage extends StatefulWidget {
 class _AnimePlayerPageState extends State<AnimePlayerPage> {
   static const _videoUserAgent =
       'Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36';
+  static const _maxPlayerLogLines = 24;
 
   final _api = ApiClient();
   final _user = UserManager();
-  late final Player _player = Player();
+  late final Player _player = Player(
+    configuration: const PlayerConfiguration(logLevel: MPVLogLevel.warn),
+  );
   late final VideoController _videoController = VideoController(_player);
   AnimePlayback? _playback;
   late String _currentChapterUuid;
@@ -58,10 +118,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   bool _requiresLogin = false;
   int _openMediaSerial = 0;
   String? _error;
+  String? _rawError;
+  final List<String> _recentPlayerLogs = <String>[];
 
   DanmakuController? _danmakuController;
   Map<int, List<DanmakuContentItem>> _danmakuItems = {};
   int _lastDanmakuSec = -1;
+  int _danmakuSurfaceGeneration = 0;
   bool _danmakuVisible = true;
 
   // 内联搜索
@@ -117,9 +180,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       setState(() => _buffering = buffering);
     });
 
+    _player.stream.log.listen(_rememberPlayerLog);
     _player.stream.error.listen((error) {
       if (!mounted) return;
-      setState(() => _error = _formatPlayerError(error));
+      setState(() {
+        _error = _formatPlayerError(error);
+        _rawError = _buildPlayerDebugReport(error);
+      });
     });
 
     _load();
@@ -187,6 +254,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         _loading = false;
         _requiresLogin = requiresLogin;
         _error = requiresLogin ? '登录后才能播放该视频' : _formatLoadError(e);
+        _rawError = e.toString();
       });
     }
   }
@@ -213,14 +281,159 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     return error.toString();
   }
 
-  String _formatPlayerError(String message) {
+  void _rememberPlayerLog(PlayerLog log) {
+    final line = '[${log.level}] ${log.prefix}: ${log.text}';
+    if (_recentPlayerLogs.isNotEmpty && _recentPlayerLogs.last == line) return;
+    _recentPlayerLogs.add(line);
+    if (_recentPlayerLogs.length > _maxPlayerLogLines) {
+      _recentPlayerLogs.removeRange(
+        0,
+        _recentPlayerLogs.length - _maxPlayerLogLines,
+      );
+    }
+    debugPrint('AnimePlayerPage player log: $line');
+  }
+
+  String _buildPlayerDebugReport(
+    String message, {
+    _MediaOpenDiagnosis? diagnosis,
+  }) {
+    final buffer = StringBuffer()..writeln(message);
+    if (_recentPlayerLogs.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('media_kit/mpv 日志:');
+      for (final line in _recentPlayerLogs) {
+        buffer.writeln(line);
+      }
+    }
+    final diagnosisText = diagnosis?.toDebugString();
+    if (diagnosisText != null && diagnosisText.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('快速诊断:')
+        ..writeln(diagnosisText);
+    }
+    return buffer.toString().trim();
+  }
+
+  String _formatPlayerError(String message, {_MediaOpenDiagnosis? diagnosis}) {
     final lower = message.toLowerCase();
+    final manifestStatus = diagnosis?.manifestStatus;
+    final segmentStatus = diagnosis?.segmentStatus;
+    if (lower.contains('403') ||
+        lower.contains('forbidden') ||
+        manifestStatus == 403 ||
+        segmentStatus == 403) {
+      return '视频源拒绝访问（403）';
+    }
+    if (lower.contains('404') ||
+        lower.contains('not found') ||
+        manifestStatus == 404 ||
+        segmentStatus == 404) {
+      return '视频地址已失效（404）';
+    }
+    if (lower.contains('certificate') ||
+        lower.contains('tls') ||
+        lower.contains('ssl')) {
+      return '视频证书校验失败';
+    }
+    if (lower.contains('timeout') || lower.contains('timed out')) {
+      return '视频连接超时';
+    }
+    if (diagnosis?.networkLooksHealthy == true) {
+      return '视频源可访问，但播放器无法解析该视频流';
+    }
     if (lower.contains('127.0.0.1') ||
         lower.contains('localhost') ||
         lower.contains('failed to open')) {
-      return '视频加载失败，请重试';
+      return '视频加载失败，请开启代理后重试';
     }
     return message;
+  }
+
+  Future<_MediaOpenDiagnosis> _diagnoseMediaOpen(String videoUrl) async {
+    final uri = Uri.tryParse(videoUrl);
+    if (uri == null || !uri.hasScheme) {
+      return const _MediaOpenDiagnosis(manifestError: '视频地址不是合法 URI');
+    }
+
+    final dio = Dio(
+      BaseOptions(
+        headers: _videoHttpHeaders,
+        responseType: ResponseType.plain,
+        sendTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 8),
+        validateStatus: (status) => status != null && status < 600,
+      ),
+    );
+
+    try {
+      final manifestResponse = await dio.getUri<String>(uri);
+      final manifestText = manifestResponse.data ?? '';
+      final manifestLooksLikeHls = manifestText.contains('#EXTM3U');
+      final firstSegment = manifestLooksLikeHls
+          ? manifestText
+                .split(RegExp(r'\r?\n'))
+                .map((line) => line.trim())
+                .firstWhere(
+                  (line) => line.isNotEmpty && !line.startsWith('#'),
+                  orElse: () => '',
+                )
+          : '';
+      final segmentUri = firstSegment.isEmpty
+          ? null
+          : uri.resolve(firstSegment);
+
+      int? segmentStatus;
+      int? segmentBytes;
+      String? segmentError;
+      if (segmentUri != null) {
+        try {
+          final segmentResponse = await dio.getUri<List<int>>(
+            segmentUri,
+            options: Options(responseType: ResponseType.bytes),
+          );
+          segmentStatus = segmentResponse.statusCode;
+          segmentBytes = segmentResponse.data?.length;
+        } on DioException catch (e) {
+          segmentStatus = e.response?.statusCode;
+          segmentError = _formatLoadError(e);
+        }
+      }
+
+      return _MediaOpenDiagnosis(
+        manifestStatus: manifestResponse.statusCode,
+        manifestLooksLikeHls: manifestLooksLikeHls,
+        manifestError: manifestResponse.statusCode == 200
+            ? null
+            : '请求失败（${manifestResponse.statusCode ?? 'unknown'}）',
+        firstSegmentUrl: segmentUri?.toString(),
+        segmentStatus: segmentStatus,
+        segmentBytes: segmentBytes,
+        segmentError: segmentError ?? (segmentUri == null ? '未解析出分片地址' : null),
+      );
+    } on DioException catch (e) {
+      return _MediaOpenDiagnosis(
+        manifestStatus: e.response?.statusCode,
+        manifestError: _formatLoadError(e),
+      );
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
+  Future<void> _enrichOpenMediaFailure({
+    required int serial,
+    required String videoUrl,
+    required String rawMessage,
+  }) async {
+    final diagnosis = await _diagnoseMediaOpen(videoUrl);
+    if (!mounted || serial != _openMediaSerial) return;
+    setState(() {
+      _error = _formatPlayerError(rawMessage, diagnosis: diagnosis);
+      _rawError = _buildPlayerDebugReport(rawMessage, diagnosis: diagnosis);
+    });
   }
 
   Future<void> _goLogin() async {
@@ -235,10 +448,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   Future<void> _openMedia(String videoUrl) async {
     final serial = ++_openMediaSerial;
+    _recentPlayerLogs.clear();
     if (mounted) {
       setState(() {
         _buffering = true;
         _error = null;
+        _rawError = null;
       });
     }
 
@@ -251,14 +466,24 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       setState(() {
         _buffering = false;
         _error = null;
+        _rawError = null;
       });
     } catch (e) {
       debugPrint('AnimePlayerPage open media error: $e');
+      final rawMessage = e.toString();
       if (!mounted || serial != _openMediaSerial) return;
       setState(() {
         _buffering = false;
-        _error = '视频加载失败，请重试';
+        _error = _formatPlayerError(rawMessage);
+        _rawError = _buildPlayerDebugReport(rawMessage);
       });
+      unawaited(
+        _enrichOpenMediaFailure(
+          serial: serial,
+          videoUrl: videoUrl,
+          rawMessage: rawMessage,
+        ),
+      );
     }
   }
 
@@ -526,7 +751,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         }
       });
       _lastDanmakuSec = -1;
-      if (!silent) showToast(context, '共加载了 ${items.length} 条弹幕');
+      // if (!silent) showToast(context, '共加载了 ${items.length} 条弹幕');
     } catch (e) {
       debugPrint('LoadDanmaku error: $e');
       if (!silent) showToast(context, '加载弹幕失败: $e', isError: true);
@@ -553,8 +778,14 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     Widget? danmakuView;
     if (_danmakuVisible) {
       danmakuView = DanmakuScreen(
+        key: ValueKey('danmaku-$fullscreen-$_danmakuSurfaceGeneration'),
         createdController: (c) {
           _danmakuController = c;
+          if (_player.state.playing && _danmakuVisible) {
+            c.resume();
+          } else {
+            c.pause();
+          }
         },
         option: DanmakuOption(
           fontSize: _user.danmakuFontSize,
@@ -607,6 +838,11 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     } finally {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+      if (mounted && _danmakuVisible) {
+        _danmakuController = null;
+        _lastDanmakuSec = -1;
+        setState(() => _danmakuSurfaceGeneration++);
+      }
     }
   }
 
@@ -673,6 +909,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                           ? _buildVideoWithControls()
                           : _ErrorPanel(
                               message: _error!,
+                              rawError: _rawError,
                               requiresLogin: _requiresLogin,
                               onLogin: _goLogin,
                               onRetry: _load,
@@ -920,7 +1157,9 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Center(child: Video(controller: controller)),
+              Center(
+                child: Video(controller: controller, controls: NoVideoControls),
+              ),
               if (widget.danmakuView != null)
                 Positioned.fill(
                   child: IgnorePointer(child: widget.danmakuView),
@@ -1792,12 +2031,14 @@ class _ChapterButton extends StatelessWidget {
 
 class _ErrorPanel extends StatelessWidget {
   final String message;
+  final String? rawError;
   final bool requiresLogin;
   final VoidCallback onLogin;
   final VoidCallback onRetry;
 
   const _ErrorPanel({
     required this.message,
+    this.rawError,
     required this.requiresLogin,
     required this.onLogin,
     required this.onRetry,
@@ -1842,9 +2083,60 @@ class _ErrorPanel extends StatelessWidget {
                 label: const Text('去登录'),
               )
             else
-              FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (rawError != null) ...[
+                    TextButton.icon(
+                      onPressed: () => _showErrorLog(context),
+                      icon: const Icon(Icons.bug_report_outlined, size: 18),
+                      label: const Text('查看日志'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  FilledButton.tonal(
+                    onPressed: onRetry,
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showErrorLog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('错误日志'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            rawError ?? '无日志信息',
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              if (rawError != null) {
+                await Clipboard.setData(ClipboardData(text: rawError!));
+                if (context.mounted) {
+                  showToast(context, '日志已复制到剪贴板');
+                }
+              }
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
   }

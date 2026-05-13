@@ -214,6 +214,7 @@ class _MainPageState extends State<MainPage> {
   final _user = UserManager();
   bool _didAutoCheckUpdate = false;
   bool _didCheckDisclaimer = false;
+  bool _pendingIndexReset = false;
 
   static const _allPages = [
     HomePage(),
@@ -293,51 +294,72 @@ class _MainPageState extends State<MainPage> {
 
   // 未登录时 tabs: [漫画(0), 动漫(1), 搜索(2), 我的(3)]
   // 登录后 tabs: [漫画(0), 动漫(1), 搜索(2), 书架(3), 我的(4)]
-  int get _pageIndex {
-    if (_user.isLoggedIn) return _index;
+  int _pageIndexFor(int selectedIndex) {
+    if (_user.isLoggedIn) return selectedIndex;
     const map = [0, 1, 2, 4]; // tab index → page index
-    return map[_index.clamp(0, 3)];
+    return map[selectedIndex.clamp(0, 3)];
+  }
+
+  int _safeSelectedIndex(int destinationsLength) {
+    if (_index >= 0 && _index < destinationsLength) return _index;
+
+    if (!_pendingIndexReset) {
+      _pendingIndexReset = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _pendingIndexReset = false;
+        if (!mounted) return;
+        setState(() => _index = 0);
+      });
+    }
+
+    return 0;
   }
 
   @override
   Widget build(BuildContext context) {
+    final destinations = [
+      const NavigationDestination(
+        icon: Icon(Icons.menu_book_outlined),
+        selectedIcon: Icon(Icons.menu_book),
+        label: '漫画',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.movie_outlined),
+        selectedIcon: Icon(Icons.movie),
+        label: '动漫',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.search_outlined),
+        selectedIcon: Icon(Icons.search),
+        label: '搜索',
+      ),
+      if (_user.isLoggedIn)
+        const NavigationDestination(
+          icon: Icon(Icons.bookmark_border),
+          selectedIcon: Icon(Icons.bookmark),
+          label: '书架',
+        ),
+      const NavigationDestination(
+        icon: Icon(Icons.person_outline),
+        selectedIcon: Icon(Icons.person),
+        label: '我的',
+      ),
+    ];
+    final selectedIndex = _safeSelectedIndex(destinations.length);
+
     return Scaffold(
-      body: IndexedStack(index: _pageIndex, children: _allPages),
+      body: IndexedStack(
+        index: _pageIndexFor(selectedIndex),
+        children: _allPages,
+      ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
+        selectedIndex: selectedIndex,
         onDestinationSelected: (i) => setState(() => _index = i),
         height: _user.bottomNavShowLabels ? null : 64,
         labelBehavior: _user.bottomNavShowLabels
             ? NavigationDestinationLabelBehavior.alwaysShow
             : NavigationDestinationLabelBehavior.alwaysHide,
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.menu_book_outlined),
-            selectedIcon: Icon(Icons.menu_book),
-            label: '漫画',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.movie_outlined),
-            selectedIcon: Icon(Icons.movie),
-            label: '动漫',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search),
-            label: '搜索',
-          ),
-          if (_user.isLoggedIn)
-            const NavigationDestination(
-              icon: Icon(Icons.bookmark_border),
-              selectedIcon: Icon(Icons.bookmark),
-              label: '书架',
-            ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: '我的',
-          ),
-        ],
+        destinations: destinations,
       ),
     );
   }
