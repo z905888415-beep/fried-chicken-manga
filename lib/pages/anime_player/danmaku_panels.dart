@@ -307,7 +307,7 @@ class _InlineSearchPanel extends StatelessWidget {
         const SizedBox(height: 8),
         DecoratedBox(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: cs.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: cs.outlineVariant),
           ),
@@ -387,7 +387,7 @@ class _DanmakuResultTile extends StatelessWidget {
     return Material(
       color: selected
           ? cs.primaryContainer.withValues(alpha: 0.22)
-          : Colors.white,
+          : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -402,7 +402,7 @@ class _DanmakuResultTile extends StatelessWidget {
                     Text(
                       episode.animeTitle,
                       style: tt.bodyMedium?.copyWith(
-                        color: Colors.black87,
+                        color: cs.onSurface,
                         fontWeight: FontWeight.w700,
                         height: 1.35,
                       ),
@@ -411,7 +411,7 @@ class _DanmakuResultTile extends StatelessWidget {
                     Text(
                       episode.episodeTitle,
                       style: tt.bodySmall?.copyWith(
-                        color: Colors.black87.withValues(alpha: 0.78),
+                        color: cs.onSurfaceVariant,
                         height: 1.35,
                       ),
                     ),

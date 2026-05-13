@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
+import '../utils/anime_download_manager.dart';
 import '../utils/data_cache.dart';
 import '../utils/toast.dart';
 import 'anime_player_page.dart';
+import 'download_center_page.dart';
 import 'home_page.dart';
 
 class AnimeDetailPage extends StatefulWidget {
@@ -21,6 +23,7 @@ class AnimeDetailPage extends StatefulWidget {
 class _AnimeDetailPageState extends State<AnimeDetailPage> {
   final _api = ApiClient();
   final _cache = DataCache();
+  final _downloads = AnimeDownloadManager();
   Anime? _anime;
   List<AnimeChapter> _chapters = [];
   int _chapterTotal = 0;
@@ -31,6 +34,10 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
   bool _collectSubmitting = false;
   String? _error;
 
+  // 批量下载选择
+  final Set<String> _selectedUuids = {};
+  bool _selectionMode = false;
+
   String get _cacheKey => 'anime_detail_${widget.pathWord}';
 
   @override
@@ -38,8 +45,19 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     super.initState();
     _anime = widget.initialAnime;
     _loadingDetail = widget.initialAnime == null;
+    _downloads.addListener(_onDownloadsChanged);
     _loadFromCache();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _downloads.removeListener(_onDownloadsChanged);
+    super.dispose();
+  }
+
+  void _onDownloadsChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadFromCache() async {
@@ -167,6 +185,109 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     return null;
   }
 
+  void _toggleSelection(String uuid) {
+    setState(() {
+      if (_selectedUuids.contains(uuid)) {
+        _selectedUuids.remove(uuid);
+        if (_selectedUuids.isEmpty) _selectionMode = false;
+      } else {
+        _selectedUuids.add(uuid);
+      }
+    });
+  }
+
+  void _enterSelectionMode(String uuid) {
+    setState(() {
+      _selectionMode = true;
+      _selectedUuids.add(uuid);
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedUuids.clear();
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      _selectedUuids.addAll(
+        _chapters
+            .where((c) =>
+                !_downloads.isDownloaded(widget.pathWord, c.uuid) &&
+                !_downloads.isInQueue(widget.pathWord, c.uuid))
+            .map((c) => c.uuid),
+      );
+    });
+  }
+
+  Future<void> _batchDownload() async {
+    final anime = _anime;
+    if (anime == null || _selectedUuids.isEmpty) return;
+
+    await _downloads.init();
+    if (!mounted) return;
+
+    // 用第一个选中章节的线路
+    final first = _chapters.firstWhere(
+      (c) => _selectedUuids.contains(c.uuid),
+      orElse: () => _chapters.first,
+    );
+    final line = _resolveChapterLine(first);
+    if (line == null || line.isEmpty) {
+      showToast(context, '当前选集暂无可用线路，无法下载', isError: true);
+      return;
+    }
+
+    final toDownload = _chapters
+        .where((c) => _selectedUuids.contains(c.uuid))
+        .toList();
+
+    final added = await _downloads.enqueueChapters(
+      pathWord: widget.pathWord,
+      anime: anime,
+      chapters: toDownload,
+      line: line,
+    );
+
+    if (mounted) {
+      showToast(context, '已添加 $added 个下载任务');
+    }
+    _exitSelectionMode();
+  }
+
+  Future<void> _downloadSingle(AnimeChapter chapter) async {
+    final anime = _anime;
+    if (anime == null) return;
+    await _downloads.init();
+    if (!mounted) return;
+
+    final line = _resolveChapterLine(chapter);
+    if (line == null || line.isEmpty) {
+      showToast(context, '当前选集暂无可用线路，无法下载', isError: true);
+      return;
+    }
+
+    if (_downloads.isDownloaded(widget.pathWord, chapter.uuid)) {
+      showToast(context, '该集已下载');
+      return;
+    }
+
+    if (_downloads.isInQueue(widget.pathWord, chapter.uuid)) {
+      showToast(context, '该集已在下载队列中');
+      return;
+    }
+
+    await _downloads.enqueueChapters(
+      pathWord: widget.pathWord,
+      anime: anime,
+      chapters: [chapter],
+      line: line,
+    );
+    if (mounted) showToast(context, '已添加到下载队列');
+  }
+
   Future<void> _toggleCollect() async {
     final anime = _anime;
     final cartoonId = anime?.uuid;
@@ -197,6 +318,23 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     } finally {
       if (mounted) setState(() => _collectSubmitting = false);
     }
+  }
+
+  Widget? _buildDownloadFab(ColorScheme cs) {
+    final count = _downloads.tasks
+        .where((t) => t.pathWord == widget.pathWord)
+        .length;
+    if (count == 0) return null;
+    return FloatingActionButton.extended(
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const DownloadCenterPage(initialTab: 2),
+        ),
+      ),
+      icon: const Icon(Icons.downloading_outlined),
+      label: Text('$count 个任务'),
+    );
   }
 
   @override
@@ -231,6 +369,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     }
 
     return Scaffold(
+      floatingActionButton: _buildDownloadFab(cs),
       body: RefreshIndicator(
         onRefresh: _load,
         child: CustomScrollView(
@@ -277,12 +416,39 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
                   children: [
                     Icon(Icons.video_library_outlined, color: cs.primary),
                     const SizedBox(width: 6),
-                    Text(
-                      '选集 ($_chapterTotal)',
-                      style: tt.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Text(
+                        _selectionMode
+                            ? '已选 ${_selectedUuids.length} 集'
+                            : '选集 ($_chapterTotal)',
+                        style: tt.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
+                    if (_selectionMode) ...[
+                      TextButton(
+                        onPressed: _selectAll,
+                        child: const Text('全选未下载'),
+                      ),
+                      const SizedBox(width: 4),
+                      FilledButton.tonal(
+                        onPressed:
+                            _selectedUuids.isEmpty ? null : _batchDownload,
+                        child: const Text('下载选中'),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        onPressed: _exitSelectionMode,
+                        icon: const Icon(Icons.close),
+                        tooltip: '取消',
+                      ),
+                    ] else if (_chapters.isNotEmpty)
+                      IconButton(
+                        onPressed: () => setState(() => _selectionMode = true),
+                        icon: const Icon(Icons.checklist),
+                        tooltip: '批量选择',
+                      ),
                   ],
                 ),
               ),
@@ -312,10 +478,34 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
                     crossAxisSpacing: 12,
                   ),
                   delegate: SliverChildBuilderDelegate(
-                    (_, i) => _AnimeChapterCard(
-                      chapter: _chapters[i],
-                      onTap: () => _openChapter(_chapters[i]),
-                    ),
+                    (_, i) {
+                      final chapter = _chapters[i];
+                      final selected = _selectedUuids.contains(chapter.uuid);
+                      final downloaded = _downloads.isDownloaded(
+                        widget.pathWord, chapter.uuid);
+                      final taskInfo = _downloads.taskInfo(
+                        widget.pathWord, chapter.uuid);
+                      final inQueue = taskInfo != null;
+
+                      return _AnimeChapterCard(
+                        chapter: chapter,
+                        selected: selected,
+                        selectionMode: _selectionMode,
+                        isDownloaded: downloaded,
+                        isDownloading: taskInfo?.status == DownloadTaskStatus.downloading,
+                        isQueued: inQueue && taskInfo.status != DownloadTaskStatus.downloading,
+                        progress: _downloads.progressOf(widget.pathWord, chapter.uuid),
+                        onTap: () {
+                          if (_selectionMode) {
+                            _toggleSelection(chapter.uuid);
+                            return;
+                          }
+                          _openChapter(chapter);
+                        },
+                        onLongPress: () => _enterSelectionMode(chapter.uuid),
+                        onDownload: () => _downloadSingle(chapter),
+                      );
+                    },
                     childCount: _chapters.length,
                   ),
                 ),
@@ -512,9 +702,28 @@ class _AnimeInfoPanel extends StatelessWidget {
 
 class _AnimeChapterCard extends StatelessWidget {
   final AnimeChapter chapter;
+  final bool selected;
+  final bool selectionMode;
+  final bool isDownloaded;
+  final bool isDownloading;
+  final bool isQueued;
+  final AnimeChapterDownloadProgress? progress;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onDownload;
 
-  const _AnimeChapterCard({required this.chapter, required this.onTap});
+  const _AnimeChapterCard({
+    required this.chapter,
+    required this.selected,
+    required this.selectionMode,
+    required this.isDownloaded,
+    required this.isDownloading,
+    required this.isQueued,
+    required this.progress,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onDownload,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -522,9 +731,16 @@ class _AnimeChapterCard extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Card(
         clipBehavior: Clip.antiAlias,
         margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: selected
+              ? BorderSide(color: cs.primary, width: 2)
+              : BorderSide.none,
+        ),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -552,9 +768,30 @@ class _AnimeChapterCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (selectionMode)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? cs.primary : Colors.white70,
+                  size: 22,
+                ),
+              ),
+            if (isDownloading && progress != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: LinearProgressIndicator(
+                  value: progress!.ratio,
+                  backgroundColor: Colors.transparent,
+                  color: cs.primary,
+                ),
+              ),
             Positioned(
               left: 10,
-              right: 10,
+              right: selectionMode ? 10 : 36,
               bottom: 8,
               child: Text(
                 chapter.name,
@@ -566,7 +803,53 @@ class _AnimeChapterCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (!selectionMode)
+              Positioned(
+                right: 4,
+                bottom: 4,
+                child: _buildDownloadButton(cs),
+              ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadButton(ColorScheme cs) {
+    if (isDownloaded) {
+      return const Padding(
+        padding: EdgeInsets.all(6),
+        child: Icon(Icons.download_done, color: Colors.greenAccent, size: 18),
+      );
+    }
+    if (isDownloading) {
+      return const Padding(
+        padding: EdgeInsets.all(6),
+        child: SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+    if (isQueued) {
+      return const Padding(
+        padding: EdgeInsets.all(6),
+        child: Icon(Icons.hourglass_bottom, color: Colors.orangeAccent, size: 18),
+      );
+    }
+    return Material(
+      color: Colors.white24,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onDownload,
+        child: const Padding(
+          padding: EdgeInsets.all(6),
+          child: Icon(Icons.download_outlined, color: Colors.white, size: 18),
         ),
       ),
     );

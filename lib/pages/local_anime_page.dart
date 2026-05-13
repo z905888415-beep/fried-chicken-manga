@@ -1,26 +1,23 @@
 import 'dart:io';
-import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../utils/download_manager.dart';
-import '../utils/reading_history.dart';
+import '../utils/anime_download_manager.dart';
 import '../utils/toast.dart';
-import 'chapter_comments_sheet.dart';
-import 'comic_detail_page.dart';
-import 'reader_page.dart';
+import 'anime_detail_page.dart';
+import 'anime_player_page.dart';
 
-class LocalComicsPage extends StatefulWidget {
+class LocalAnimePage extends StatefulWidget {
   final bool embedded;
 
-  const LocalComicsPage({super.key, this.embedded = false});
+  const LocalAnimePage({super.key, this.embedded = false});
 
   @override
-  State<LocalComicsPage> createState() => _LocalComicsPageState();
+  State<LocalAnimePage> createState() => _LocalAnimePageState();
 }
 
-class _LocalComicsPageState extends State<LocalComicsPage> {
-  final _downloads = DownloadManager();
+class _LocalAnimePageState extends State<LocalAnimePage> {
+  final _downloads = AnimeDownloadManager();
   final Set<String> _selectedPathWords = {};
   bool _selectionMode = false;
   bool _loading = true;
@@ -29,7 +26,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   void initState() {
     super.initState();
     _downloads.addListener(_handleChanged);
-    unawaited(_initialize());
+    _initialize();
   }
 
   @override
@@ -41,13 +38,11 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   void _handleChanged() {
     if (!mounted) return;
     final valid = _downloads
-        .localComics()
-        .map((item) => item.info.comic.pathWord)
+        .localAnimes()
+        .map((item) => item.info.anime.pathWord)
         .toSet();
     _selectedPathWords.removeWhere((pathWord) => !valid.contains(pathWord));
-    if (_selectedPathWords.isEmpty) {
-      _selectionMode = false;
-    }
+    if (_selectedPathWords.isEmpty) _selectionMode = false;
     setState(() {});
   }
 
@@ -63,8 +58,8 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除本地漫画'),
-        content: Text('确定删除选中的 $count 部本地漫画吗？已下载章节和封面都会被删除。'),
+        title: const Text('删除本地动漫'),
+        content: Text('确定删除选中的 $count 部本地动漫吗？已下载视频和封面都会被删除。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -79,20 +74,20 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     );
     if (confirmed != true) return;
 
-    await _downloads.deleteLocalComics(_selectedPathWords);
+    await _downloads.deleteLocalAnimes(_selectedPathWords);
     if (!mounted) return;
     setState(() {
       _selectedPathWords.clear();
       _selectionMode = false;
     });
-    showToast(context, '已删除 $count 部本地漫画');
+    showToast(context, '已删除 $count 部本地动漫');
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final items = _downloads.localComics();
+    final items = _downloads.localAnimes();
 
     final body = _loading
         ? const Center(child: CircularProgressIndicator())
@@ -107,10 +102,10 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   color: cs.onSurfaceVariant,
                 ),
                 const SizedBox(height: 12),
-                Text('还没有本地漫画', style: tt.titleMedium),
+                Text('还没有本地动漫', style: tt.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  '去漫画详情页下载章节后，这里会显示离线内容',
+                  '去动漫详情页下载剧集后，这里会显示离线内容',
                   style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ],
@@ -120,16 +115,16 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
             padding: const EdgeInsets.all(16),
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 150,
-              childAspectRatio: 0.58,
+              childAspectRatio: 0.6,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
             ),
             itemCount: items.length,
             itemBuilder: (_, index) {
               final item = items[index];
-              final pathWord = item.info.comic.pathWord;
+              final pathWord = item.info.anime.pathWord;
               final selected = _selectedPathWords.contains(pathWord);
-              return _LocalComicCard(
+              return _LocalAnimeCard(
                 entry: item,
                 selected: selected,
                 selectionMode: _selectionMode,
@@ -141,17 +136,14 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                       } else {
                         _selectedPathWords.add(pathWord);
                       }
-                      if (_selectedPathWords.isEmpty) {
-                        _selectionMode = false;
-                      }
+                      if (_selectedPathWords.isEmpty) _selectionMode = false;
                     });
                     return;
                   }
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          LocalComicDetailPage(pathWord: pathWord),
+                      builder: (_) => LocalAnimeDetailPage(pathWord: pathWord),
                     ),
                   );
                 },
@@ -168,7 +160,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _selectionMode ? '已选 ${_selectedPathWords.length} 部' : '本地漫画',
+          _selectionMode ? '已选 ${_selectedPathWords.length} 部' : '本地动漫',
         ),
         actions: [
           if (!_selectionMode && items.isNotEmpty)
@@ -184,7 +176,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   : () => setState(() {
                       _selectedPathWords
                         ..clear()
-                        ..addAll(items.map((item) => item.info.comic.pathWord));
+                        ..addAll(items.map((item) => item.info.anime.pathWord));
                     }),
               icon: const Icon(Icons.select_all),
               tooltip: '全选',
@@ -210,14 +202,14 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   }
 }
 
-class _LocalComicCard extends StatelessWidget {
-  final LocalComicEntry entry;
+class _LocalAnimeCard extends StatelessWidget {
+  final LocalAnimeEntry entry;
   final bool selected;
   final bool selectionMode;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
-  const _LocalComicCard({
+  const _LocalAnimeCard({
     required this.entry,
     required this.selected,
     required this.selectionMode,
@@ -229,7 +221,7 @@ class _LocalComicCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final comic = entry.info.comic;
+    final anime = entry.info.anime;
     final coverPath = entry.info.coverPath;
 
     return Material(
@@ -260,7 +252,7 @@ class _LocalComicCard extends StatelessWidget {
                             : ColoredBox(
                                 color: cs.surfaceContainerHighest,
                                 child: Icon(
-                                  Icons.broken_image_outlined,
+                                  Icons.movie_outlined,
                                   color: cs.onSurfaceVariant,
                                   size: 32,
                                 ),
@@ -288,7 +280,6 @@ class _LocalComicCard extends StatelessWidget {
                       ),
                     Positioned(
                       left: 8,
-                      right: 8,
                       bottom: 8,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -300,9 +291,7 @@ class _LocalComicCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
-                          '已下载 ${entry.downloadedCount} 章',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          '已下载 ${entry.downloadedCount} 集',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -314,20 +303,24 @@ class _LocalComicCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                comic.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.bodySmall,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  anime.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodySmall,
+                ),
               ),
               const SizedBox(height: 2),
-              Text(
-                comic.authors.isNotEmpty
-                    ? comic.authors.map((item) => item.name).join(' / ')
-                    : comic.pathWord,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  anime.pathWord,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
               ),
             ],
           ),
@@ -337,34 +330,25 @@ class _LocalComicCard extends StatelessWidget {
   }
 }
 
-class LocalComicDetailPage extends StatefulWidget {
+class LocalAnimeDetailPage extends StatefulWidget {
   final String pathWord;
 
-  const LocalComicDetailPage({super.key, required this.pathWord});
+  const LocalAnimeDetailPage({super.key, required this.pathWord});
 
   @override
-  State<LocalComicDetailPage> createState() => _LocalComicDetailPageState();
+  State<LocalAnimeDetailPage> createState() => _LocalAnimeDetailPageState();
 }
 
-class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
-  static const _continueReadingNameMaxLength = 10;
-  static const _nextChapterNameMaxLength = 10;
-
-  final _downloads = DownloadManager();
+class _LocalAnimeDetailPageState extends State<LocalAnimeDetailPage> {
+  final _downloads = AnimeDownloadManager();
   final Set<String> _selectedChapterIds = {};
   bool _selectionMode = false;
-  bool _reversed = true;
   bool _didPopAfterDeletion = false;
-  String? _lastBrowseId;
-  String? _lastBrowseName;
-  int _lastBrowsePage = 1;
-  int _lastBrowseTotalPage = 0;
 
   @override
   void initState() {
     super.initState();
     _downloads.addListener(_handleChanged);
-    _loadHistory();
   }
 
   @override
@@ -375,7 +359,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
 
   void _handleChanged() {
     if (!mounted) return;
-    final info = _downloads.getLocalComicInfo(widget.pathWord);
+    final info = _downloads.getLocalAnimeInfo(widget.pathWord);
     if (info == null ||
         _downloads.downloadedChapters(widget.pathWord).isEmpty) {
       if (_didPopAfterDeletion) return;
@@ -388,65 +372,8 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
         .map((item) => item.chapterUuid)
         .toSet();
     _selectedChapterIds.removeWhere((id) => !validIds.contains(id));
-    if (_selectedChapterIds.isEmpty) {
-      _selectionMode = false;
-    }
+    if (_selectedChapterIds.isEmpty) _selectionMode = false;
     setState(() {});
-  }
-
-  Future<void> _loadHistory() async {
-    final record = await ReadingHistory.get(widget.pathWord);
-    if (!mounted || record == null) return;
-    setState(() {
-      _lastBrowseId = record.chapterUuid;
-      _lastBrowseName = record.chapterName;
-      _lastBrowsePage = record.page;
-      _lastBrowseTotalPage = record.totalPage;
-    });
-  }
-
-  bool get _isLastBrowseComplete {
-    if (_lastBrowseTotalPage <= 0) return false;
-    final unreadThreshold = _lastBrowseTotalPage <= 1
-        ? 1
-        : _lastBrowseTotalPage - 1;
-    return _lastBrowsePage >= unreadThreshold;
-  }
-
-  String _continueReadingLabel() {
-    final name = _truncateContinueReadingName(_lastBrowseName ?? '');
-    if (_lastBrowseTotalPage > 1) {
-      return name.isEmpty
-          ? '$_lastBrowsePage/$_lastBrowseTotalPage'
-          : '$name · $_lastBrowsePage/$_lastBrowseTotalPage';
-    }
-    return name;
-  }
-
-  String _truncateContinueReadingName(String name) =>
-      _truncateChapterName(name, maxLength: _continueReadingNameMaxLength);
-
-  String _truncateNextChapterName(String name) =>
-      _truncateChapterName(name, maxLength: _nextChapterNameMaxLength);
-
-  String _truncateChapterName(String name, {required int maxLength}) {
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) return '';
-    final chars = trimmed.characters;
-    if (chars.length <= maxLength) return trimmed;
-    return '${chars.take(maxLength).toString()}...';
-  }
-
-  /// 在已下载章节中查找当前章节的下一章，未找到返回 null
-  DownloadedChapterSummary? _findNextDownloadedChapter(
-    List<DownloadedChapterSummary> chapters,
-  ) {
-    if (_lastBrowseId == null) return null;
-    final index = chapters.indexWhere(
-      (item) => item.chapterUuid == _lastBrowseId,
-    );
-    if (index < 0 || index + 1 >= chapters.length) return null;
-    return chapters[index + 1];
   }
 
   Future<void> _deleteSelected() async {
@@ -455,8 +382,8 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除本地章节'),
-        content: Text('确定删除选中的 $count 个章节吗？'),
+        title: const Text('删除本地剧集'),
+        content: Text('确定删除选中的 $count 个剧集吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -473,35 +400,36 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
 
     await _downloads.deleteChapters(widget.pathWord, _selectedChapterIds);
     if (!mounted) return;
-    showToast(context, '已删除 $count 个章节');
+    showToast(context, '已删除 $count 个剧集');
     final remain = _downloads.downloadedChapters(widget.pathWord);
-    if (remain.isEmpty) {
-      return;
-    }
+    if (remain.isEmpty) return;
     setState(() {
       _selectedChapterIds.clear();
       _selectionMode = false;
     });
   }
 
-  Future<void> _showComments(DownloadedChapterSummary summary) async {
-    final detail = await _downloads.getDownloadedChapterDetail(
+  void _playChapter(DownloadedAnimeChapterSummary summary) {
+    final videoPath = _downloads.getLocalVideoPath(
       widget.pathWord,
       summary.chapterUuid,
     );
-    if (!mounted || detail == null) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width,
-      ),
-      backgroundColor: Colors.transparent,
-      builder: (_) => ChapterCommentsSheet(
-        chapterUuid: detail.uuid,
-        chapterName: detail.name,
-        initialComments: detail.comments,
-        initialTotal: detail.commentTotal,
+    if (videoPath == null || !File(videoPath).existsSync()) {
+      showToast(context, '视频文件不存在', isError: true);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AnimePlayerPage(
+          animeName:
+              _downloads.getLocalAnimeInfo(widget.pathWord)?.anime.name ?? '',
+          pathWord: widget.pathWord,
+          chapterUuid: summary.chapterUuid,
+          chapterName: summary.chapterName,
+          line: '',
+          localVideoPath: videoPath,
+        ),
       ),
     );
   }
@@ -510,30 +438,30 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final info = _downloads.getLocalComicInfo(widget.pathWord);
+    final info = _downloads.getLocalAnimeInfo(widget.pathWord);
     final chapters = _downloads.downloadedChapters(widget.pathWord);
 
     if (info == null || chapters.isEmpty) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final displayChapters = _reversed ? chapters.reversed.toList() : chapters;
-    final comic = info.comic;
-    final nextChapter = _findNextDownloadedChapter(chapters);
+    final anime = info.anime;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _selectionMode ? '已选 ${_selectedChapterIds.length} 章' : comic.name,
+          _selectionMode ? '已选 ${_selectedChapterIds.length} 集' : anime.name,
         ),
         actions: [
           if (!_selectionMode)
             IconButton(
               onPressed: () => Navigator.push(
                 context,
-                ComicDetailPage.route(
-                  pathWord: widget.pathWord,
-                  initialComic: comic,
+                MaterialPageRoute(
+                  builder: (_) => AnimeDetailPage(
+                    pathWord: widget.pathWord,
+                    initialAnime: anime,
+                  ),
                 ),
               ),
               icon: const Icon(Icons.public),
@@ -543,7 +471,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
             IconButton(
               onPressed: () => setState(() => _selectionMode = true),
               icon: const Icon(Icons.checklist),
-              tooltip: '管理章节',
+              tooltip: '管理剧集',
             ),
           if (_selectionMode) ...[
             IconButton(
@@ -571,10 +499,8 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
           ],
         ],
       ),
-      body: Stack(
-        children: [
-          CustomScrollView(
-            slivers: [
+      body: CustomScrollView(
+        slivers: [
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -593,7 +519,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                           : ColoredBox(
                               color: cs.surfaceContainerHighest,
                               child: Icon(
-                                Icons.image_not_supported_outlined,
+                                Icons.movie_outlined,
                                 color: cs.onSurfaceVariant,
                               ),
                             ),
@@ -604,36 +530,29 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (comic.authors.isNotEmpty)
-                          Text(
-                            comic.authors.map((item) => item.name).join(' / '),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: tt.bodyMedium,
-                          ),
+                        if (anime.company != null)
+                          Text(anime.company!.name, style: tt.bodyMedium),
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 6,
                           runSpacing: 6,
                           children: [
-                            if (comic.status != null)
+                            if (anime.category?['display'] != null)
                               _DetailChip(
-                                label:
-                                    comic.status!['display']?.toString() ?? '',
+                                label: anime.category!['display'].toString(),
                               ),
-                            if (comic.region != null)
+                            if (anime.grade?['display'] != null)
                               _DetailChip(
-                                label:
-                                    comic.region!['display']?.toString() ?? '',
+                                label: anime.grade!['display'].toString(),
                               ),
-                            ...comic.themes.map(
+                            ...anime.themes.map(
                               (item) => _DetailChip(label: item.name),
                             ),
                           ],
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          '已下载 ${chapters.length} 章',
+                          '已下载 ${chapters.length} 集',
                           style: tt.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
@@ -645,12 +564,12 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
               ),
             ),
           ),
-          if (comic.brief != null && comic.brief!.isNotEmpty)
+          if (anime.brief != null && anime.brief!.isNotEmpty)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Text(
-                  comic.brief!,
+                  anime.brief!,
                   style: tt.bodySmall?.copyWith(
                     color: cs.onSurfaceVariant,
                     height: 1.5,
@@ -661,38 +580,29 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Row(
-                children: [
-                  Text(
-                    '本地章节 (${chapters.length})',
-                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => setState(() => _reversed = !_reversed),
-                    icon: Icon(
-                      _reversed ? Icons.arrow_downward : Icons.arrow_upward,
-                      size: 20,
-                    ),
-                    tooltip: _reversed ? '逆序（新→旧）' : '正序（旧→新）',
-                  ),
-                ],
+              child: Text(
+                '本地剧集 (${chapters.length})',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 100,
+                childAspectRatio: 1.8,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+              ),
               delegate: SliverChildBuilderDelegate((_, index) {
-                final chapter = displayChapters[index];
+                final chapter = chapters[index];
                 final selected = _selectedChapterIds.contains(
                   chapter.chapterUuid,
                 );
-                final isLastRead = _lastBrowseId == chapter.chapterUuid;
-                return _LocalChapterCard(
+                return _LocalAnimeChapterCard(
                   summary: chapter,
                   selected: selected,
-                  isLastRead: isLastRead,
                   selectionMode: _selectionMode,
                   onTap: () {
                     if (_selectionMode) {
@@ -708,183 +618,78 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                       });
                       return;
                     }
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ReaderPage(
-                          pathWord: widget.pathWord,
-                          chapterUuid: chapter.chapterUuid,
-                          chapterName: chapter.chapterName,
-                        ),
-                      ),
-                    ).then((_) => _loadHistory());
+                    _playChapter(chapter);
                   },
                   onLongPress: () => setState(() {
                     _selectionMode = true;
                     _selectedChapterIds.add(chapter.chapterUuid);
                   }),
-                  onCommentsTap: _selectionMode
-                      ? null
-                      : () => _showComments(chapter),
                 );
-              }, childCount: displayChapters.length),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 160,
-                mainAxisExtent: 74,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-              ),
+              }, childCount: chapters.length),
             ),
           ),
-        ],
-      ),
-          if (_lastBrowseId != null)
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: Wrap(
-                spacing: 12,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                alignment: WrapAlignment.end,
-                children: [
-                  if (nextChapter != null && _isLastBrowseComplete)
-                    FloatingActionButton.extended(
-                      heroTag: 'local_next_chapter',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ReaderPage(
-                            pathWord: widget.pathWord,
-                            chapterUuid: nextChapter.chapterUuid,
-                            chapterName: nextChapter.chapterName,
-                          ),
-                        ),
-                      ).then((_) => _loadHistory()),
-                      icon: const Icon(Icons.skip_next, size: 20),
-                      label: Text(
-                        _truncateNextChapterName(nextChapter.chapterName),
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  FloatingActionButton.extended(
-                    heroTag: 'local_continue_reading',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ReaderPage(
-                          pathWord: widget.pathWord,
-                          chapterUuid: _lastBrowseId!,
-                          chapterName: _lastBrowseName ?? '',
-                          initialPage: _lastBrowsePage,
-                        ),
-                      ),
-                    ).then((_) => _loadHistory()),
-                    icon: const Icon(Icons.play_arrow, size: 20),
-                    label: Text(
-                      _continueReadingLabel(),
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
   }
 }
 
-class _LocalChapterCard extends StatelessWidget {
-  final DownloadedChapterSummary summary;
+class _LocalAnimeChapterCard extends StatelessWidget {
+  final DownloadedAnimeChapterSummary summary;
   final bool selected;
-  final bool isLastRead;
   final bool selectionMode;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  final VoidCallback? onCommentsTap;
 
-  const _LocalChapterCard({
+  const _LocalAnimeChapterCard({
     required this.summary,
     required this.selected,
-    required this.isLastRead,
     required this.selectionMode,
     required this.onTap,
     required this.onLongPress,
-    this.onCommentsTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    final background = selected
-        ? cs.secondaryContainer
-        : isLastRead
-        ? cs.primaryContainer
-        : cs.surfaceContainerLow;
-    final foreground = selected
-        ? cs.onSecondaryContainer
-        : isLastRead
-        ? cs.onPrimaryContainer
-        : cs.onSurface;
-
     return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(12),
+      color: selected ? cs.primaryContainer : cs.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      summary.chapterName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tt.bodySmall?.copyWith(
-                        color: foreground,
-                        fontWeight: isLastRead || selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Center(
+                child: Text(
+                  summary.chapterName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: selected
+                        ? cs.onPrimaryContainer
+                        : cs.onSurfaceVariant,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                    height: 1.2,
                   ),
-                  if (selectionMode)
-                    Icon(
-                      selected
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      size: 18,
-                      color: selected ? cs.primary : cs.onSurfaceVariant,
-                    )
-                  else
-                    InkWell(
-                      borderRadius: BorderRadius.circular(999),
-                      onTap: onCommentsTap,
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.forum_outlined,
-                          size: 16,
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
-              const Spacer(),
-              Text(
-                '${summary.pageCount}P',
-                style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+            if (selectionMode)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? cs.primary : cs.onSurfaceVariant,
+                  size: 20,
+                ),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );

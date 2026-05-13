@@ -14,6 +14,7 @@ import '../api/api_client.dart';
 import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
+import '../utils/anime_download_manager.dart';
 import '../utils/chinese_converter.dart';
 import '../utils/data_cache.dart';
 import '../utils/toast.dart';
@@ -34,6 +35,7 @@ class AnimePlayerPage extends StatefulWidget {
   final String chapterName;
   final String line;
   final List<AnimeChapter> chapters;
+  final String? localVideoPath;
 
   const AnimePlayerPage({
     super.key,
@@ -43,6 +45,7 @@ class AnimePlayerPage extends StatefulWidget {
     required this.chapterName,
     required this.line,
     this.chapters = const [],
+    this.localVideoPath,
   });
 
   @override
@@ -58,6 +61,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   final _api = ApiClient();
   final _cache = DataCache();
   final _user = UserManager();
+  final _downloads = AnimeDownloadManager();
   late final Player _player = Player(
     configuration: const PlayerConfiguration(logLevel: MPVLogLevel.warn),
   );
@@ -170,6 +174,35 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       _selectedDanmakuEpisodeId = null;
       _loadingDanmakuEpisodeId = null;
     });
+
+    if (widget.localVideoPath != null) {
+      if (!mounted) return;
+      setState(() {
+        _videoUrl = widget.localVideoPath;
+        _loading = false;
+        _buffering = true;
+      });
+      unawaited(_openMedia(widget.localVideoPath!));
+      unawaited(_autoMatchDanmaku());
+      return;
+    }
+
+    await _downloads.init();
+    final localPath = _downloads.getLocalVideoPath(
+      widget.pathWord,
+      _currentChapterUuid,
+    );
+    if (localPath != null) {
+      if (!mounted) return;
+      setState(() {
+        _videoUrl = localPath;
+        _loading = false;
+        _buffering = true;
+      });
+      unawaited(_openMedia(localPath));
+      unawaited(_autoMatchDanmaku());
+      return;
+    }
 
     if (!_user.isLoggedIn) {
       setState(() {

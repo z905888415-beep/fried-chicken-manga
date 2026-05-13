@@ -10,8 +10,8 @@ import '../utils/app_update.dart';
 import '../utils/toast.dart';
 import 'appearance_page.dart';
 import 'browse_history_page.dart';
+import 'download_center_page.dart';
 import 'general_page.dart';
-import 'local_comics_page.dart';
 import 'network_page.dart';
 
 const _appDisclaimerItems = [
@@ -405,7 +405,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => const LocalComicsPage(),
+                                builder: (_) => const DownloadCenterPage(),
                               ),
                             ),
                           ),
