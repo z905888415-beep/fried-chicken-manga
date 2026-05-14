@@ -108,6 +108,7 @@ class UserManager extends ChangeNotifier {
   static const _keyDisclaimerAccepted = 'disclaimer_accepted';
   static const _keyLoginSource = 'login_source';
   static const _keyApiRoute = 'api_route';
+  static const _keyAnimeFeatureEnabled = 'anime_feature_enabled';
   static const _keyAnimeHomeBannerCollapsed = 'anime_home_banner_collapsed';
   static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
   static const _keyAnimePlaybackProgressEnabled =
@@ -168,6 +169,7 @@ class UserManager extends ChangeNotifier {
   bool _disclaimerAccepted = false;
   String _loginSource = 'hotmanga';
   int _apiRoute = 0; // 0=线路1(默认), 1=线路2
+  bool _animeFeatureEnabled = true;
   bool _animeHomeBannerCollapsed = false;
   int _animeSkipSeconds = 86;
   bool _animePlaybackProgressEnabled = true;
@@ -236,6 +238,7 @@ class UserManager extends ChangeNotifier {
   bool get disclaimerAccepted => _disclaimerAccepted;
   String get loginSource => _loginSource;
   int get apiRoute => _apiRoute;
+  bool get animeFeatureEnabled => _animeFeatureEnabled;
   bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
   int get animeSkipSeconds => _animeSkipSeconds;
   bool get animePlaybackProgressEnabled => _animePlaybackProgressEnabled;
@@ -336,6 +339,7 @@ class UserManager extends ChangeNotifier {
     _disclaimerAccepted = prefs.getBool(_keyDisclaimerAccepted) ?? false;
     _loginSource = prefs.getString(_keyLoginSource) ?? 'hotmanga';
     _apiRoute = prefs.getInt(_keyApiRoute) ?? 0;
+    _animeFeatureEnabled = prefs.getBool(_keyAnimeFeatureEnabled) ?? true;
     _animeHomeBannerCollapsed =
         prefs.getBool(_keyAnimeHomeBannerCollapsed) ?? false;
     _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
@@ -750,6 +754,14 @@ class UserManager extends ChangeNotifier {
     _apiRoute = route;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyApiRoute, route);
+    notifyListeners();
+  }
+
+  Future<void> setAnimeFeatureEnabled(bool enabled) async {
+    if (_animeFeatureEnabled == enabled) return;
+    _animeFeatureEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAnimeFeatureEnabled, enabled);
     notifyListeners();
   }
 

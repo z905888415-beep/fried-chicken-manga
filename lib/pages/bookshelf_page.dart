@@ -56,8 +56,17 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   void _onUserChanged() {
     if (!mounted) return;
+    if (!_animeFeatureEnabled && _type == _BookshelfType.anime) {
+      setState(() {
+        _type = _BookshelfType.comic;
+        _animeItems = [];
+        _total = 0;
+        _offset = 0;
+        _loadingMore = false;
+      });
+    }
     if (_user.isLoggedIn) {
-      _load(silent: true);
+      _load(silent: true, force: true);
     } else {
       setState(() {
         _items = [];
@@ -238,8 +247,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
       _type == _BookshelfType.comic ? _items.isEmpty : _animeItems.isEmpty;
 
   String get _typeLabel => _type == _BookshelfType.comic ? '漫画' : '动漫';
+  bool get _animeFeatureEnabled => _user.animeFeatureEnabled;
 
   void _setType(_BookshelfType type) {
+    if (type == _BookshelfType.anime && !_animeFeatureEnabled) return;
     if (type == _type) return;
     setState(() {
       _type = type;
@@ -311,27 +322,29 @@ class _BookshelfPageState extends State<BookshelfPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<_BookshelfType>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(
-                  value: _BookshelfType.comic,
-                  icon: Icon(Icons.menu_book),
-                  label: Text('漫画'),
-                ),
-                ButtonSegment(
-                  value: _BookshelfType.anime,
-                  icon: Icon(Icons.movie_outlined),
-                  label: Text('动漫'),
-                ),
-              ],
-              selected: {_type},
-              onSelectionChanged: (v) => _setType(v.first),
+          if (_animeFeatureEnabled) ...[
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<_BookshelfType>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: _BookshelfType.comic,
+                    icon: Icon(Icons.menu_book),
+                    label: Text('漫画'),
+                  ),
+                  ButtonSegment(
+                    value: _BookshelfType.anime,
+                    icon: Icon(Icons.movie_outlined),
+                    label: Text('动漫'),
+                  ),
+                ],
+                selected: {_type},
+                onSelectionChanged: (v) => _setType(v.first),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
+            const SizedBox(height: 8),
+          ],
           Row(
             children: [
               if (_type == _BookshelfType.comic)

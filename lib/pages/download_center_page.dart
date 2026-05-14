@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/user_manager.dart';
 import '../utils/anime_download_manager.dart';
 import 'local_comics_page.dart';
 import 'local_anime_page.dart';
@@ -27,24 +28,32 @@ class DownloadCenterPage extends StatefulWidget {
 
 class _DownloadCenterPageState extends State<DownloadCenterPage>
     with TickerProviderStateMixin {
-  late final _tabController = TabController(
-    length: 3,
-    vsync: this,
-    initialIndex: widget.initialTab.clamp(0, 2),
-  );
+  late final TabController _tabController;
+  final _user = UserManager();
   final _animeDownloads = AnimeDownloadManager();
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTab.clamp(0, 2),
+    );
+    _user.addListener(_onSettingsChanged);
     _animeDownloads.addListener(_onQueueChanged);
   }
 
   @override
   void dispose() {
+    _user.removeListener(_onSettingsChanged);
     _animeDownloads.removeListener(_onQueueChanged);
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onQueueChanged() {
@@ -53,6 +62,13 @@ class _DownloadCenterPageState extends State<DownloadCenterPage>
 
   @override
   Widget build(BuildContext context) {
+    if (!_user.animeFeatureEnabled) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('下载中心')),
+        body: const LocalComicsPage(embedded: true),
+      );
+    }
+
     final tasks = _animeDownloads.tasks;
     final queueCount = tasks.length;
 

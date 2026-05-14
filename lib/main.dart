@@ -273,7 +273,7 @@ class _MainPageState extends State<MainPage> {
   void _onUserChanged() {
     if (!mounted) return;
     setState(() {
-      final maxIndex = _user.isLoggedIn ? 4 : 3;
+      final maxIndex = _visibleNavKeys().length - 1;
       if (_index > maxIndex) _index = 0;
     });
   }
@@ -284,8 +284,7 @@ class _MainPageState extends State<MainPage> {
     await AppUpdateService.checkAndPrompt(context, auto: true);
   }
 
-  // 未登录时 tabs: [漫画(0), 动漫(1), 搜索(2), 我的(3)]
-  // 登录后 tabs: [漫画(0), 动漫(1), 搜索(2), 书架(3), 我的(4)]
+  // 可见 tabs 取决于登录状态和动漫功能开关；外观页仍保留完整顺序。
 
   static final _navItemData = {
     'comic': _NavItem(
@@ -320,6 +319,15 @@ class _MainPageState extends State<MainPage> {
     ),
   };
 
+  List<String> _visibleNavKeys() {
+    final keys = _user.navOrder
+        .where(_navItemData.containsKey)
+        .where((k) => _user.isLoggedIn || k != 'bookshelf')
+        .where((k) => _user.animeFeatureEnabled || k != 'anime')
+        .toList();
+    return keys.isEmpty ? const ['comic'] : keys;
+  }
+
   int _safeSelectedIndex(int destinationsLength) {
     if (_index >= 0 && _index < destinationsLength) return _index;
 
@@ -337,9 +345,7 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
-    final orderedKeys = _user.navOrder
-        .where((k) => _user.isLoggedIn || k != 'bookshelf')
-        .toList();
+    final orderedKeys = _visibleNavKeys();
     final destinations = [
       for (final key in orderedKeys)
         NavigationDestination(

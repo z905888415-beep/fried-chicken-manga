@@ -36,7 +36,8 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   int _offset = 0;
   int _total = 0;
 
-  bool get _isAnimeMode => _mode == _HistoryMode.anime;
+  bool get _animeFeatureEnabled => _user.animeFeatureEnabled;
+  bool get _isAnimeMode => _animeFeatureEnabled && _mode == _HistoryMode.anime;
   String get _modeLabel => _isAnimeMode ? '动漫' : '漫画';
   bool get _currentItemsEmpty =>
       _isAnimeMode ? _animeItems.isEmpty : _comicItems.isEmpty;
@@ -62,8 +63,14 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
 
   void _onUserChanged() {
     if (!mounted) return;
+    if (!_animeFeatureEnabled && _mode == _HistoryMode.anime) {
+      setState(() {
+        _mode = _HistoryMode.comic;
+        _clearItems();
+      });
+    }
     if (_user.isLoggedIn) {
-      _load(silent: true);
+      _load(silent: true, force: true);
     } else {
       setState(() {
         _clearItems();
@@ -79,8 +86,8 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
     _total = 0;
   }
 
-  Future<void> _load({bool silent = false}) async {
-    if (_refreshing) return;
+  Future<void> _load({bool silent = false, bool force = false}) async {
+    if (_refreshing && !force) return;
     final mode = _mode;
     _refreshing = true;
     final isInitial = _currentItemsEmpty;
@@ -159,6 +166,7 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   }
 
   void _setMode(_HistoryMode mode) {
+    if (mode == _HistoryMode.anime && !_animeFeatureEnabled) return;
     if (_mode == mode) return;
     setState(() {
       _mode = mode;
@@ -229,6 +237,7 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   }
 
   void _openAnime(AnimeBrowseHistoryItem item) {
+    if (!_animeFeatureEnabled) return;
     if (item.anime.pathWord.isEmpty) return;
     Navigator.push(
       context,
@@ -272,7 +281,9 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '浏览过的漫画和动漫会同步显示在这里',
+                      _animeFeatureEnabled
+                          ? '浏览过的漫画和动漫会同步显示在这里'
+                          : '浏览过的漫画会同步显示在这里',
                       textAlign: TextAlign.center,
                       style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                     ),
@@ -305,27 +316,28 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
                       const SliverToBoxAdapter(
                         child: LinearProgressIndicator(minHeight: 2),
                       ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
-                        child: SegmentedButton<_HistoryMode>(
-                          segments: const [
-                            ButtonSegment(
-                              value: _HistoryMode.comic,
-                              label: Text('漫画'),
-                              icon: Icon(Icons.menu_book_outlined),
-                            ),
-                            ButtonSegment(
-                              value: _HistoryMode.anime,
-                              label: Text('动漫'),
-                              icon: Icon(Icons.movie_outlined),
-                            ),
-                          ],
-                          selected: {_mode},
-                          onSelectionChanged: (v) => _setMode(v.first),
+                    if (_animeFeatureEnabled)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
+                          child: SegmentedButton<_HistoryMode>(
+                            segments: const [
+                              ButtonSegment(
+                                value: _HistoryMode.comic,
+                                label: Text('漫画'),
+                                icon: Icon(Icons.menu_book_outlined),
+                              ),
+                              ButtonSegment(
+                                value: _HistoryMode.anime,
+                                label: Text('动漫'),
+                                icon: Icon(Icons.movie_outlined),
+                              ),
+                            ],
+                            selected: {_mode},
+                            onSelectionChanged: (v) => _setMode(v.first),
+                          ),
                         ),
                       ),
-                    ),
                     if (_currentItemsEmpty)
                       SliverFillRemaining(
                         hasScrollBody: false,

@@ -61,4 +61,16 @@ void main() {
       expect(user.animePlaybackProgressEnabled, isFalse);
     },
   );
+
+  test('anime feature setting defaults to enabled and persists', () async {
+    final user = UserManager();
+    await user.init();
+
+    expect(user.animeFeatureEnabled, isTrue);
+
+    await user.setAnimeFeatureEnabled(false);
+    await user.init();
+
+    expect(user.animeFeatureEnabled, isFalse);
+  });
 }

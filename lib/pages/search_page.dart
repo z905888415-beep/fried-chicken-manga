@@ -5,6 +5,7 @@ import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/comic.dart' as m;
+import '../models/user_manager.dart';
 import '../utils/comic_card_skeleton.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
@@ -27,6 +28,7 @@ class _SearchPageState extends State<SearchPage> {
 
   final _api = ApiClient();
   final _cache = DataCache();
+  final _user = UserManager();
   final _searchController = TextEditingController();
 
   List<String> _keywords = [];
@@ -44,20 +46,32 @@ class _SearchPageState extends State<SearchPage> {
   int _total = 0;
   String? _searchQuery;
 
-  bool get _isAnimeMode => _mode == _SearchMode.anime;
+  bool get _animeFeatureEnabled => _user.animeFeatureEnabled;
+  bool get _isAnimeMode => _animeFeatureEnabled && _mode == _SearchMode.anime;
   String get _modeLabel => _isAnimeMode ? '动漫' : '漫画';
   bool get _hasResults => _comics.isNotEmpty || _animes.isNotEmpty;
 
   @override
   void initState() {
     super.initState();
+    _user.addListener(_onUserChanged);
     _loadInit();
   }
 
   @override
   void dispose() {
+    _user.removeListener(_onUserChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onUserChanged() {
+    if (!mounted) return;
+    if (!_animeFeatureEnabled && _mode == _SearchMode.anime) {
+      _setMode(_SearchMode.comic);
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _loadInit() async {
@@ -100,8 +114,9 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _doSearch(String query) async {
     final keyword = query.trim();
     if (keyword.isEmpty) return;
-    final mode = _mode;
+    final mode = _animeFeatureEnabled ? _mode : _SearchMode.comic;
     setState(() {
+      _mode = mode;
       _searching = true;
       _searchQuery = keyword;
       _comics = [];
@@ -210,6 +225,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _setMode(_SearchMode mode) {
+    if (mode == _SearchMode.anime && !_animeFeatureEnabled) return;
     if (_mode == mode) return;
     final keyword = _searchController.text.trim();
     setState(() {
@@ -261,6 +277,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _openAnime(Anime anime) {
+    if (!_animeFeatureEnabled) return;
     if (anime.pathWord.isEmpty) return;
     Navigator.push(
       context,
@@ -315,27 +332,28 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(hp, 0, hp, 8),
-              child: SegmentedButton<_SearchMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: _SearchMode.comic,
-                    label: Text('漫画'),
-                    icon: Icon(Icons.menu_book_outlined),
-                  ),
-                  ButtonSegment(
-                    value: _SearchMode.anime,
-                    label: Text('动漫'),
-                    icon: Icon(Icons.movie_outlined),
-                  ),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (v) => _setMode(v.first),
+          if (_animeFeatureEnabled)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(hp, 0, hp, 8),
+                child: SegmentedButton<_SearchMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: _SearchMode.comic,
+                      label: Text('漫画'),
+                      icon: Icon(Icons.menu_book_outlined),
+                    ),
+                    ButtonSegment(
+                      value: _SearchMode.anime,
+                      label: Text('动漫'),
+                      icon: Icon(Icons.movie_outlined),
+                    ),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (v) => _setMode(v.first),
+                ),
               ),
             ),
-          ),
           if (_searching)
             const SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),

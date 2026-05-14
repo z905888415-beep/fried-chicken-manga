@@ -213,6 +213,14 @@ class _GeneralPageState extends State<GeneralPage> {
                     onChanged: canAutoLogin ? _user.setAutoLogin : null,
                   ),
                   const Divider(height: 1, indent: 16, endIndent: 16),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.movie_outlined),
+                    title: const Text('动漫功能'),
+                    subtitle: Text('关闭后隐藏动漫主页、入口和筛选器', style: tt.bodySmall),
+                    value: _user.animeFeatureEnabled,
+                    onChanged: _user.setAnimeFeatureEnabled,
+                  ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
                   ListTile(
                     leading: const Icon(Icons.upload_file_rounded),
                     title: const Text('导出设置'),
