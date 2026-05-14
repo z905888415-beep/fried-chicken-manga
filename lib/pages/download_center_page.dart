@@ -279,6 +279,22 @@ class _QueueTaskCard extends StatelessWidget {
             Text('已暂停', style: tt.labelSmall?.copyWith(color: Colors.orange)),
           ],
         );
+      case DownloadTaskStatus.failed:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, size: 14, color: cs.error),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                task.errorMessage ?? '下载失败',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tt.labelSmall?.copyWith(color: cs.error),
+              ),
+            ),
+          ],
+        );
     }
   }
 
@@ -305,6 +321,24 @@ class _QueueTaskCard extends StatelessWidget {
                   downloads.resumeTask(task.pathWord, task.chapterUuid),
               icon: Icon(Icons.play_arrow, color: cs.primary),
               tooltip: '继续',
+            ),
+            IconButton(
+              onPressed: () =>
+                  downloads.cancelTask(task.pathWord, task.chapterUuid),
+              icon: Icon(Icons.close, color: cs.error),
+              tooltip: '取消',
+            ),
+          ],
+        );
+      case DownloadTaskStatus.failed:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: () =>
+                  downloads.resumeTask(task.pathWord, task.chapterUuid),
+              icon: Icon(Icons.refresh, color: cs.primary),
+              tooltip: '重试',
             ),
             IconButton(
               onPressed: () =>

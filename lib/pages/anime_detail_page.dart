@@ -44,6 +44,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
   // 批量下载选择
   final Set<String> _selectedUuids = {};
   bool _selectionMode = false;
+  StreamSubscription<String>? _errorSub;
 
   String get _cacheKey => 'anime_detail_${widget.pathWord}';
 
@@ -53,12 +54,16 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     _anime = widget.initialAnime;
     _loadingDetail = widget.initialAnime == null;
     _downloads.addListener(_onDownloadsChanged);
+    _errorSub = _downloads.onError.listen((msg) {
+      if (mounted) showToast(context, msg, isError: true);
+    });
     _loadFromCache();
     _load();
   }
 
   @override
   void dispose() {
+    _errorSub?.cancel();
     _downloads.removeListener(_onDownloadsChanged);
     super.dispose();
   }
@@ -1088,9 +1093,9 @@ class _AnimeChapterCard extends StatelessWidget {
     }
     return Material(
       color: Colors.white24,
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: BorderRadius.circular(6),
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(6),
         onTap: onDownload,
         child: const Padding(
           padding: EdgeInsets.all(6),

@@ -296,7 +296,7 @@ class _LocalComicCard extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: Colors.black54,
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           '已下载 ${entry.downloadedCount} 章',
@@ -909,7 +909,7 @@ class _DetailChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: cs.secondaryContainer,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         label,

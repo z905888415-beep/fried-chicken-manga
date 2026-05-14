@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 import '../models/anime.dart';
 
-enum DownloadTaskStatus { pending, downloading, paused }
+enum DownloadTaskStatus { pending, downloading, paused, failed }
 
 class AnimeDownloadTaskInfo {
   final String pathWord;
@@ -19,6 +19,7 @@ class AnimeDownloadTaskInfo {
   final String? cover;
   final DownloadTaskStatus status;
   final AnimeChapterDownloadProgress? progress;
+  final String? errorMessage;
 
   const AnimeDownloadTaskInfo({
     required this.pathWord,
@@ -28,6 +29,7 @@ class AnimeDownloadTaskInfo {
     this.cover,
     required this.status,
     this.progress,
+    this.errorMessage,
   });
 
   String get taskKey => '$pathWord|||$chapterUuid';
@@ -49,12 +51,16 @@ class AnimeDownloadManager extends ChangeNotifier {
   final ApiClient _api = ApiClient();
   final Map<String, Map<String, DownloadedAnimeChapterSummary>> _manifest = {};
   final List<_AnimeDownloadTask> _tasks = [];
+  final StreamController<String> _errorController =
+      StreamController<String>.broadcast();
 
   bool _initialized = false;
   bool _processing = false;
   Future<void>? _initFuture;
   Directory? _rootDirectory;
   CancelToken? _activeCancelToken;
+
+  Stream<String> get onError => _errorController.stream;
 
   List<AnimeDownloadTaskInfo> get tasks {
     // 去重：同一个 chapter 只取最新状态的任务
@@ -72,6 +78,19 @@ class AnimeDownloadManager extends ChangeNotifier {
         t.status == DownloadTaskStatus.pending ||
         t.status == DownloadTaskStatus.downloading,
   );
+
+  String _friendlyErrorMessage(DioException e) {
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return '连接超时';
+      case DioExceptionType.connectionError:
+        return '建议开启代理后重试';
+      default:
+        return e.message ?? '建议开启代理后重试';
+    }
+  }
 
   Future<void> init() async {
     if (_initialized) return;
@@ -217,12 +236,16 @@ class AnimeDownloadManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 恢复暂停的任务
+  /// 恢复暂停/失败的任务
   void resumeTask(String pathWord, String chapterUuid) {
     final task = _findTask(pathWord, chapterUuid);
-    if (task == null || task.status != DownloadTaskStatus.paused) return;
+    if (task == null) return;
+    if (task.status != DownloadTaskStatus.paused &&
+        task.status != DownloadTaskStatus.failed)
+      return;
 
     task.status = DownloadTaskStatus.pending;
+    task.errorMessage = null;
     notifyListeners();
     unawaited(_processQueue());
   }
@@ -340,14 +363,20 @@ class AnimeDownloadManager extends ChangeNotifier {
             debugPrint(
               'Download anime chapter failed: ${task.pathWord}/${task.chapter.uuid} $e',
             );
-            _tasks.remove(task);
+            task.status = DownloadTaskStatus.failed;
+            task.errorMessage = _friendlyErrorMessage(e);
+            _errorController.add(
+              '${task.chapterName} 下载失败：${task.errorMessage}',
+            );
             notifyListeners();
           }
         } catch (e) {
           debugPrint(
             'Download anime chapter failed: ${task.pathWord}/${task.chapter.uuid} $e',
           );
-          _tasks.remove(task);
+          task.status = DownloadTaskStatus.failed;
+          task.errorMessage = '未知错误';
+          _errorController.add('${task.chapterName} 下载失败：$e');
           notifyListeners();
         }
       }
@@ -1018,6 +1047,7 @@ class _AnimeDownloadTask {
   final String cover;
   DownloadTaskStatus status = DownloadTaskStatus.pending;
   AnimeChapterDownloadProgress? progress;
+  String? errorMessage;
 
   _AnimeDownloadTask({
     required this.pathWord,
@@ -1039,6 +1069,7 @@ class _AnimeDownloadTask {
     cover: cover,
     status: status,
     progress: progress,
+    errorMessage: errorMessage,
   );
 }
 
