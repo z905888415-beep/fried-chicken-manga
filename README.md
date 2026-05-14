@@ -19,22 +19,32 @@
 
 <table>
   <tr>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/Nv9r/image-20260409170720476.png"/></td>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/ex3Q/image-20260409170916801.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/pOx4/PixPin_2026-05-14_16-09-53.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/d8mZ/PixPin_2026-05-14_16-10-40.png"/></td>
+  </tr> 
+  <tr>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/S7ir/PixPin_2026-05-14_16-04-18.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/5Fik/PixPin_2026-05-14_16-04-34.png"/></td>
+  </tr>
+</table>
+
+<details>
+<summary>查看更多截图</summary>
+<table>
+  <tr>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/6guP/PixPin_2026-05-14_15-55-21.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/oK3h/PixPin_2026-05-14_15-56-28.png"/></td>
   </tr>
   <tr>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/w4qZ/20260409171036966.png"/></td>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/tO0b/20260409171139823.png"/></td>
-  </tr>  
-  <tr>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/lmT9/20260409171234851.png"/></td>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/c6hF/20260409171942789.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/fEm5/PixPin_2026-05-14_16-02-05.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/I1sh/PixPin_2026-05-14_15-53-03.png"/></td>
   </tr>
   <tr>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/Yr9g/20260409172234773.png"/></td>
-    <td><img src="https://files.seeusercontent.com/2026/04/09/mJs4/20260409172416081.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/gW8m/PixPin_2026-05-14_16-00-34.png"/></td>
+    <td><img src="https://files.seeusercontent.com/2026/05/14/7efA/PixPin_2026-05-14_16-11-06.png"/></td>
   </tr>
-</table> 
+</table>
+</details>
 
 ## 开发
 
@@ -59,20 +69,7 @@ flutter pub get
 
 ### 运行项目
 
-如果你使用vscode，可以直接F5启动调试，你也可以使用下面命令启动：
-
-默认运行：
-
-```sh
-flutter run
-```
-
-在指定设备上运行：
-
-```sh
-flutter run -d win
-flutter run -d emulator
-```
+如果你需要弹幕功能，需要先创建弹弹play账号，获取`appId`和`appSecret`，然后在项目根目录下创建一个`.env`文件，内容参考`.env.example`
 
 查看可用设备
 
@@ -90,11 +87,35 @@ flutter emulators --launch 设备ID
 
 ### 构建安装包
 
-在本地构建apk安装包
+在本地构建apk安装包，需要在项目根目录下创建一个`.env`文件，
 
 ```sh
-flutter build apk --release --target-platform android-arm64
+flutter build apk --release --target-platform android-arm64 --dart-define-from-file=.env
 ```
+
+## 致谢
+
+感谢以下服务支持：
+
+- [弹弹play](https://www.dandanplay.com/) — 提供弹幕服务
+- [繁化姬](https://zhconvert.org/) — 提供简体化服务
+
+本项目基于以下优秀的开源库构建：
+
+- [dio](https://github.com/cfug/dio) - 网络请求
+- [cached_network_image](https://github.com/Baseflow/flutter_cached_network_image) - 图片缓存加载
+- [media_kit](https://github.com/media-kit/media-kit) - 视频播放
+- [canvas_danmaku](https://github.com/Predidit/canvas_danmaku) - 弹幕渲染
+- [flutter_svg](https://github.com/dnfield/flutter_svg) - SVG 图标支持
+- [flex_color_picker](https://github.com/rydmike/flex_color_picker) - 颜色选择器
+- [scrollable_positioned_list](https://github.com/google/flutter.widgets) - 漫画翻页定位
+- [shared_preferences](https://github.com/flutter/packages) - 本地偏好设置
+- [url_launcher](https://github.com/flutter/packages) - 外部链接跳转
+- [screen_brightness](https://github.com/aaassseee/screen_brightness) - 屏幕亮度控制
+- [wakelock_plus](https://github.com/solid-software/wakelock_plus) - 防息屏
+- [crypto](https://github.com/dart-lang/core) - 加密工具
+
+以上库均遵循各自的开源许可证。
 
 ## 免责声明
 
