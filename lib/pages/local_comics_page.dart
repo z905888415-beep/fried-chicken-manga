@@ -150,8 +150,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          LocalComicDetailPage(pathWord: pathWord),
+                      builder: (_) => LocalComicDetailPage(pathWord: pathWord),
                     ),
                   );
                 },
@@ -493,9 +492,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width,
-      ),
+      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
       backgroundColor: Colors.transparent,
       builder: (_) => ChapterCommentsSheet(
         chapterUuid: detail.uuid,
@@ -575,169 +572,178 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
         children: [
           CustomScrollView(
             slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: 110,
-                      height: 150,
-                      child:
-                          info.coverPath != null &&
-                              File(info.coverPath!).existsSync()
-                          ? Image.file(File(info.coverPath!), fit: BoxFit.cover)
-                          : ColoredBox(
-                              color: cs.surfaceContainerHighest,
-                              child: Icon(
-                                Icons.image_not_supported_outlined,
-                                color: cs.onSurfaceVariant,
-                              ),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (comic.authors.isNotEmpty)
-                          Text(
-                            comic.authors.map((item) => item.name).join(' / '),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: tt.bodyMedium,
-                          ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: 110,
+                          height: 150,
+                          child:
+                              info.coverPath != null &&
+                                  File(info.coverPath!).existsSync()
+                              ? Image.file(
+                                  File(info.coverPath!),
+                                  fit: BoxFit.cover,
+                                )
+                              : ColoredBox(
+                                  color: cs.surfaceContainerHighest,
+                                  child: Icon(
+                                    Icons.image_not_supported_outlined,
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (comic.status != null)
-                              _DetailChip(
-                                label:
-                                    comic.status!['display']?.toString() ?? '',
+                            if (comic.authors.isNotEmpty)
+                              Text(
+                                comic.authors
+                                    .map((item) => item.name)
+                                    .join(' / '),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: tt.bodyMedium,
                               ),
-                            if (comic.region != null)
-                              _DetailChip(
-                                label:
-                                    comic.region!['display']?.toString() ?? '',
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                if (comic.status != null)
+                                  _DetailChip(
+                                    label:
+                                        comic.status!['display']?.toString() ??
+                                        '',
+                                  ),
+                                if (comic.region != null)
+                                  _DetailChip(
+                                    label:
+                                        comic.region!['display']?.toString() ??
+                                        '',
+                                  ),
+                                ...comic.themes.map(
+                                  (item) => _DetailChip(label: item.name),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              '已下载 ${chapters.length} 章',
+                              style: tt.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
                               ),
-                            ...comic.themes.map(
-                              (item) => _DetailChip(label: item.name),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          '已下载 ${chapters.length} 章',
-                          style: tt.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (comic.brief != null && comic.brief!.isNotEmpty)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Text(
-                  comic.brief!,
-                  style: tt.bodySmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    height: 1.5,
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Row(
-                children: [
-                  Text(
-                    '本地章节 (${chapters.length})',
-                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => setState(() => _reversed = !_reversed),
-                    icon: Icon(
-                      _reversed ? Icons.arrow_downward : Icons.arrow_upward,
-                      size: 20,
+              if (comic.brief != null && comic.brief!.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Text(
+                      comic.brief!,
+                      style: tt.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        height: 1.5,
+                      ),
                     ),
-                    tooltip: _reversed ? '逆序（新→旧）' : '正序（旧→新）',
                   ),
-                ],
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            sliver: SliverGrid(
-              delegate: SliverChildBuilderDelegate((_, index) {
-                final chapter = displayChapters[index];
-                final selected = _selectedChapterIds.contains(
-                  chapter.chapterUuid,
-                );
-                final isLastRead = _lastBrowseId == chapter.chapterUuid;
-                return _LocalChapterCard(
-                  summary: chapter,
-                  selected: selected,
-                  isLastRead: isLastRead,
-                  selectionMode: _selectionMode,
-                  onTap: () {
-                    if (_selectionMode) {
-                      setState(() {
-                        if (selected) {
-                          _selectedChapterIds.remove(chapter.chapterUuid);
-                        } else {
-                          _selectedChapterIds.add(chapter.chapterUuid);
-                        }
-                        if (_selectedChapterIds.isEmpty) {
-                          _selectionMode = false;
-                        }
-                      });
-                      return;
-                    }
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ReaderPage(
-                          pathWord: widget.pathWord,
-                          chapterUuid: chapter.chapterUuid,
-                          chapterName: chapter.chapterName,
+                ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        '本地章节 (${chapters.length})',
+                        style: tt.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ).then((_) => _loadHistory());
-                  },
-                  onLongPress: () => setState(() {
-                    _selectionMode = true;
-                    _selectedChapterIds.add(chapter.chapterUuid);
-                  }),
-                  onCommentsTap: _selectionMode
-                      ? null
-                      : () => _showComments(chapter),
-                );
-              }, childCount: displayChapters.length),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 160,
-                mainAxisExtent: 74,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => setState(() => _reversed = !_reversed),
+                        icon: Icon(
+                          _reversed ? Icons.arrow_downward : Icons.arrow_upward,
+                          size: 20,
+                        ),
+                        tooltip: _reversed ? '逆序（新→旧）' : '正序（旧→新）',
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverGrid(
+                  delegate: SliverChildBuilderDelegate((_, index) {
+                    final chapter = displayChapters[index];
+                    final selected = _selectedChapterIds.contains(
+                      chapter.chapterUuid,
+                    );
+                    final isLastRead = _lastBrowseId == chapter.chapterUuid;
+                    return _LocalChapterCard(
+                      summary: chapter,
+                      selected: selected,
+                      isLastRead: isLastRead,
+                      selectionMode: _selectionMode,
+                      onTap: () {
+                        if (_selectionMode) {
+                          setState(() {
+                            if (selected) {
+                              _selectedChapterIds.remove(chapter.chapterUuid);
+                            } else {
+                              _selectedChapterIds.add(chapter.chapterUuid);
+                            }
+                            if (_selectedChapterIds.isEmpty) {
+                              _selectionMode = false;
+                            }
+                          });
+                          return;
+                        }
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReaderPage(
+                              pathWord: widget.pathWord,
+                              chapterUuid: chapter.chapterUuid,
+                              chapterName: chapter.chapterName,
+                            ),
+                          ),
+                        ).then((_) => _loadHistory());
+                      },
+                      onLongPress: () => setState(() {
+                        _selectionMode = true;
+                        _selectedChapterIds.add(chapter.chapterUuid);
+                      }),
+                      onCommentsTap: _selectionMode
+                          ? null
+                          : () => _showComments(chapter),
+                    );
+                  }, childCount: displayChapters.length),
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 160,
+                    mainAxisExtent: 74,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
           if (_lastBrowseId != null)
             Positioned(
               right: 16,

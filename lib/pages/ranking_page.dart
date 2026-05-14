@@ -54,7 +54,10 @@ class _RankingPageState extends State<RankingPage> {
     setState(() => _loadingMore = true);
     try {
       final data = await _api.getComicList(
-          ordering: _ordering, limit: 21, offset: _offset);
+        ordering: _ordering,
+        limit: 21,
+        offset: _offset,
+      );
       if (!mounted) return;
       setState(() {
         _comics.addAll(data.list);
@@ -90,13 +93,15 @@ class _RankingPageState extends State<RankingPage> {
             child: SegmentedButton<String>(
               segments: const [
                 ButtonSegment(
-                    value: '-popular',
-                    label: Text('热度'),
-                    icon: Icon(Icons.whatshot, size: 16)),
+                  value: '-popular',
+                  label: Text('热度'),
+                  icon: Icon(Icons.whatshot, size: 16),
+                ),
                 ButtonSegment(
-                    value: '-datetime_updated',
-                    label: Text('更新'),
-                    icon: Icon(Icons.schedule, size: 16)),
+                  value: '-datetime_updated',
+                  label: Text('更新'),
+                  icon: Icon(Icons.schedule, size: 16),
+                ),
               ],
               selected: {_ordering},
               onSelectionChanged: (v) {

@@ -92,7 +92,9 @@ class _ToastWidgetState extends State<_ToastWidget>
     final cs = widget.colorScheme;
     final bg = widget.isError ? cs.errorContainer : cs.primaryContainer;
     final fg = widget.isError ? cs.onErrorContainer : cs.onPrimaryContainer;
-    final icon = widget.isError ? Icons.error_outline : Icons.check_circle_outline;
+    final icon = widget.isError
+        ? Icons.error_outline
+        : Icons.check_circle_outline;
 
     return Positioned(
       top: MediaQuery.of(context).padding.top + 16,
@@ -107,7 +109,10 @@ class _ToastWidgetState extends State<_ToastWidget>
             child: Material(
               color: Colors.transparent,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: bg,
                   borderRadius: BorderRadius.circular(12),

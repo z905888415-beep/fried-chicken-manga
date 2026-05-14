@@ -40,7 +40,8 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   String get _modeLabel => _isAnimeMode ? '动漫' : '漫画';
   bool get _currentItemsEmpty =>
       _isAnimeMode ? _animeItems.isEmpty : _comicItems.isEmpty;
-  int get _currentLength => _isAnimeMode ? _animeItems.length : _comicItems.length;
+  int get _currentLength =>
+      _isAnimeMode ? _animeItems.length : _comicItems.length;
 
   @override
   void initState() {
@@ -457,7 +458,8 @@ class _ComicBrowseHistoryCard extends StatelessWidget {
       subtitle: authors.isEmpty ? null : authors.join(' / '),
       lastBrowseName: item.lastBrowseName,
       lastBrowseIcon: Icons.menu_book_outlined,
-      latestText: comic.lastChapterName == null || comic.lastChapterName!.isEmpty
+      latestText:
+          comic.lastChapterName == null || comic.lastChapterName!.isEmpty
           ? null
           : '最新 ${comic.lastChapterName}',
       chips: [
@@ -672,7 +674,11 @@ class _HistoryCover extends StatelessWidget {
         errorWidget: (_, _, _) => Container(
           color: cs.surfaceContainerHighest,
           child: Center(
-            child: Icon(Icons.broken_image, color: cs.onSurfaceVariant, size: 28),
+            child: Icon(
+              Icons.broken_image,
+              color: cs.onSurfaceVariant,
+              size: 28,
+            ),
           ),
         ),
       ),

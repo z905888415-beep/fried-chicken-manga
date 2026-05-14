@@ -5,10 +5,7 @@ final _punctuationRegex = RegExp(r'[^\w\s一-鿿]');
 
 /// 规范化评论文本：去除标点符号、转小写、去除首尾空格
 String _normalizeComment(String text) {
-  return text
-      .replaceAll(_punctuationRegex, '')
-      .toLowerCase()
-      .trim();
+  return text.replaceAll(_punctuationRegex, '').toLowerCase().trim();
 }
 
 /// 从评论列表中选择出现次数最多的原始文本作为显示文本
@@ -38,9 +35,7 @@ List<ChapterCommentDisplayEntry> groupChapterComments(
       return <ChapterComment>[];
     });
     // 同一用户重复发相同内容的评论不参与合并，保留为独立条目
-    if (bucket.any(
-      (c) => c.userId == comment.userId && c.userId.isNotEmpty,
-    )) {
+    if (bucket.any((c) => c.userId == comment.userId && c.userId.isNotEmpty)) {
       duplicates.add(comment);
       continue;
     }
@@ -50,8 +45,7 @@ List<ChapterCommentDisplayEntry> groupChapterComments(
   final entries = [
     for (final normalizedKey in orderedKeys)
       ChapterCommentDisplayEntry(comments: groupedByNormalized[normalizedKey]!),
-    for (final dup in duplicates)
-      ChapterCommentDisplayEntry(comments: [dup]),
+    for (final dup in duplicates) ChapterCommentDisplayEntry(comments: [dup]),
   ];
 
   final firstAppearanceOrder = <String, int>{

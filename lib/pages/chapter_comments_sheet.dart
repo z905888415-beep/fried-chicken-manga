@@ -12,7 +12,7 @@ class ChapterCommentsSheet extends StatefulWidget {
   final List<ChapterComment>? initialComments;
   final int? initialTotal;
   final void Function(List<ChapterComment> comments, int total)?
-      onCommentsUpdated;
+  onCommentsUpdated;
   final bool hasNextChapter;
   final VoidCallback? onNextChapter;
   final VoidCallback? onBackToCatalog;
@@ -814,7 +814,6 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
           compact: true,
         );
   }
-
 }
 
 double _measureTextWidth(
@@ -985,7 +984,8 @@ class _CommentCard extends StatelessWidget {
       fontScale: fontScale,
     );
     final showMetaRow = showAvatar || showUserName || showCommentTime;
-    final isHotMergedComment = entry.isMerged && _isHotMergedComment(entry.count);
+    final isHotMergedComment =
+        entry.isMerged && _isHotMergedComment(entry.count);
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -1173,9 +1173,7 @@ class _MergedCommentCountTag extends StatelessWidget {
         minWidth: compact ? 24 : 28,
         minHeight: tagHeight,
       ),
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 6 : 8,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 8),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: backgroundColor,
@@ -1555,9 +1553,9 @@ BoxDecoration _buildCommentCardDecoration(
     const Color(0xFFFFA05C),
     brightness == Brightness.dark ? 0.12 : 0.22,
   )!;
-  final borderColor = const Color(0xFFFFB34D).withValues(
-    alpha: brightness == Brightness.dark ? 0.42 : 0.7,
-  );
+  final borderColor = const Color(
+    0xFFFFB34D,
+  ).withValues(alpha: brightness == Brightness.dark ? 0.42 : 0.7);
 
   return BoxDecoration(
     gradient: LinearGradient(
@@ -1569,9 +1567,9 @@ BoxDecoration _buildCommentCardDecoration(
     border: Border.all(color: borderColor),
     boxShadow: [
       BoxShadow(
-        color: const Color(0xFFFF8A3D).withValues(
-          alpha: brightness == Brightness.dark ? 0.16 : 0.12,
-        ),
+        color: const Color(
+          0xFFFF8A3D,
+        ).withValues(alpha: brightness == Brightness.dark ? 0.16 : 0.12),
         blurRadius: compact ? 14 : 18,
         offset: Offset(0, compact ? 4 : 6),
       ),

@@ -100,7 +100,11 @@ class _AnimeDownloadQueueView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.download_done_outlined, size: 56, color: cs.onSurfaceVariant),
+            Icon(
+              Icons.download_done_outlined,
+              size: 56,
+              color: cs.onSurfaceVariant,
+            ),
             const SizedBox(height: 12),
             Text('下载队列为空', style: tt.titleMedium),
             const SizedBox(height: 6),
@@ -151,7 +155,11 @@ class _QueueTaskCard extends StatelessWidget {
                     width: 48,
                     height: 64,
                     child: task.cover != null && task.cover!.isNotEmpty
-                        ? Image.network(task.cover!, fit: BoxFit.cover, errorBuilder: (_, _, _) => _placeholder(cs))
+                        ? Image.network(
+                            task.cover!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _placeholder(cs),
+                          )
                         : _placeholder(cs),
                   ),
                 ),
@@ -160,11 +168,23 @@ class _QueueTaskCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(task.animeName, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: tt.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+                      Text(
+                        task.animeName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.labelMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text(task.chapterName, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                      Text(
+                        task.chapterName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       _buildStatusLabel(cs, tt),
                     ],
@@ -173,7 +193,8 @@ class _QueueTaskCard extends StatelessWidget {
                 _buildActionButton(downloads, cs),
               ],
             ),
-            if (task.status == DownloadTaskStatus.downloading && task.progress != null) ...[
+            if (task.status == DownloadTaskStatus.downloading &&
+                task.progress != null) ...[
               const SizedBox(height: 10),
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
@@ -210,8 +231,12 @@ class _QueueTaskCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: 12, height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.5, color: cs.primary),
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: cs.primary,
+              ),
             ),
             const SizedBox(width: 6),
             Text('下载中', style: tt.labelSmall?.copyWith(color: cs.primary)),
@@ -223,7 +248,10 @@ class _QueueTaskCard extends StatelessWidget {
           children: [
             Icon(Icons.schedule, size: 14, color: cs.onSurfaceVariant),
             const SizedBox(width: 6),
-            Text('等待中', style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+            Text(
+              '等待中',
+              style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
           ],
         );
       case DownloadTaskStatus.paused:
@@ -257,12 +285,14 @@ class _QueueTaskCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              onPressed: () => downloads.resumeTask(task.pathWord, task.chapterUuid),
+              onPressed: () =>
+                  downloads.resumeTask(task.pathWord, task.chapterUuid),
               icon: Icon(Icons.play_arrow, color: cs.primary),
               tooltip: '继续',
             ),
             IconButton(
-              onPressed: () => downloads.cancelTask(task.pathWord, task.chapterUuid),
+              onPressed: () =>
+                  downloads.cancelTask(task.pathWord, task.chapterUuid),
               icon: Icon(Icons.close, color: cs.error),
               tooltip: '取消',
             ),

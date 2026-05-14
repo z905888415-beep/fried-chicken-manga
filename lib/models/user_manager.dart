@@ -135,7 +135,13 @@ class UserManager extends ChangeNotifier {
   DynamicSchemeVariant _themeVariant = appThemeVariantOptions.first.variant;
   int _customThemeColorValue = defaultCustomThemeColor.toARGB32();
   bool _bottomNavShowLabels = true;
-  List<String> _navOrder = const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
+  List<String> _navOrder = const [
+    'comic',
+    'anime',
+    'search',
+    'bookshelf',
+    'profile',
+  ];
   String _bookshelfOrdering = '-datetime_updated';
   bool _bookshelfShowUpdateOnly = false;
   int _readerMode = 0;
@@ -294,7 +300,9 @@ class UserManager extends ChangeNotifier {
         prefs.getInt(_keyCustomThemeColor) ??
         defaultCustomThemeColor.toARGB32();
     _bottomNavShowLabels = prefs.getBool(_keyBottomNavShowLabels) ?? true;
-    _navOrder = prefs.getStringList(_keyNavOrder) ?? const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
+    _navOrder =
+        prefs.getStringList(_keyNavOrder) ??
+        const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
     _bookshelfShowUpdateOnly =

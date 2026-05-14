@@ -399,11 +399,7 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
     );
   }
 
-  Widget _buildCommentCard(
-    ColorScheme cs,
-    TextTheme tt,
-    ComicComment comment,
-  ) {
+  Widget _buildCommentCard(ColorScheme cs, TextTheme tt, ComicComment comment) {
     final replyState = _replyStateOf(comment.id);
     final canExpandReplies = comment.replyCount > 0;
     final userStyle = tt.labelMedium?.copyWith(
@@ -414,11 +410,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
       color: cs.onSurfaceVariant.withValues(alpha: 0.72),
       fontWeight: FontWeight.w400,
     );
-    final bodyStyle =
-        (tt.bodyLarge ?? tt.bodyMedium)?.copyWith(
-          height: 1.55,
-          fontWeight: FontWeight.w500,
-        );
+    final bodyStyle = (tt.bodyLarge ?? tt.bodyMedium)?.copyWith(
+      height: 1.55,
+      fontWeight: FontWeight.w500,
+    );
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
@@ -442,17 +437,11 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                _formatRelativeTime(comment.createAt),
-                style: timeStyle,
-              ),
+              Text(_formatRelativeTime(comment.createAt), style: timeStyle),
             ],
           ),
           const SizedBox(height: 8),
-          _buildCommentText(
-            comment,
-            bodyStyle: bodyStyle,
-          ),
+          _buildCommentText(comment, bodyStyle: bodyStyle),
           if (canExpandReplies) ...[
             const SizedBox(height: 10),
             _buildCommentActions(cs, tt, comment, replyState),
@@ -541,9 +530,7 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                   Expanded(
                     child: Text(
                       '回复加载失败',
-                      style: tt.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                     ),
                   ),
                   TextButton(
@@ -553,7 +540,9 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                 ],
               ),
             ),
-          if (!replyState.loading && replies.isEmpty && replyState.error == null)
+          if (!replyState.loading &&
+              replies.isEmpty &&
+              replyState.error == null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
@@ -563,7 +552,9 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
             ),
           for (var i = 0; i < replies.length; i++)
             Padding(
-              padding: EdgeInsets.only(bottom: i == replies.length - 1 ? 0 : 12),
+              padding: EdgeInsets.only(
+                bottom: i == replies.length - 1 ? 0 : 12,
+              ),
               child: _buildReplyItem(cs, tt, replies[i], comment),
             ),
           if (replyState.error != null && replies.isNotEmpty)
@@ -688,10 +679,7 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                 ],
               ),
               const SizedBox(height: 4),
-              _buildCommentText(
-                reply,
-                bodyStyle: bodyStyle,
-              ),
+              _buildCommentText(reply, bodyStyle: bodyStyle),
             ],
           ),
         ),

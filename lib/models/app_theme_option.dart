@@ -32,76 +32,20 @@ const customThemeOptionId = 'custom';
 const defaultCustomThemeColor = Color(0xFF166FF3);
 
 const appThemeOptions = <AppThemeOption>[
-  AppThemeOption(
-    id: 'blue_grey',
-    label: '蓝灰',
-    seedColor: Colors.blueGrey,
-  ),
-  AppThemeOption(
-    id: 'teal',
-    label: '青绿',
-    seedColor: Colors.teal,
-  ),
-  AppThemeOption(
-    id: 'indigo',
-    label: '靛蓝',
-    seedColor: Colors.indigo,
-  ),
-  AppThemeOption(
-    id: 'green',
-    label: '森绿',
-    seedColor: Colors.green,
-  ),
-  AppThemeOption(
-    id: 'orange',
-    label: '橙金',
-    seedColor: Colors.orange,
-  ),
-  AppThemeOption(
-    id: 'pink',
-    label: '粉色',
-    seedColor: Color(0xFFFB7299),
-  ),
-  AppThemeOption(
-    id: 'bright_blue',
-    label: '亮蓝',
-    seedColor: Color(0xFF166FF3),
-  ),
-  AppThemeOption(
-    id: 'violet',
-    label: '紫罗兰',
-    seedColor: Color(0xFF7E57C2),
-  ),
-  AppThemeOption(
-    id: 'orchid',
-    label: '兰紫',
-    seedColor: Color(0xFFAB47BC),
-  ),
-  AppThemeOption(
-    id: 'cyan',
-    label: '湖青',
-    seedColor: Color(0xFF00ACC1),
-  ),
-  AppThemeOption(
-    id: 'emerald',
-    label: '翡翠',
-    seedColor: Color(0xFF1F9D72),
-  ),
-  AppThemeOption(
-    id: 'lime',
-    label: '青柠',
-    seedColor: Color(0xFF7CB342),
-  ),
-  AppThemeOption(
-    id: 'amber',
-    label: '琥珀',
-    seedColor: Color(0xFFF9A825),
-  ),
-  AppThemeOption(
-    id: 'coral',
-    label: '珊瑚',
-    seedColor: Color(0xFFFF7043),
-  ),
+  AppThemeOption(id: 'blue_grey', label: '蓝灰', seedColor: Colors.blueGrey),
+  AppThemeOption(id: 'teal', label: '青绿', seedColor: Colors.teal),
+  AppThemeOption(id: 'indigo', label: '靛蓝', seedColor: Colors.indigo),
+  AppThemeOption(id: 'green', label: '森绿', seedColor: Colors.green),
+  AppThemeOption(id: 'orange', label: '橙金', seedColor: Colors.orange),
+  AppThemeOption(id: 'pink', label: '粉色', seedColor: Color(0xFFFB7299)),
+  AppThemeOption(id: 'bright_blue', label: '亮蓝', seedColor: Color(0xFF166FF3)),
+  AppThemeOption(id: 'violet', label: '紫罗兰', seedColor: Color(0xFF7E57C2)),
+  AppThemeOption(id: 'orchid', label: '兰紫', seedColor: Color(0xFFAB47BC)),
+  AppThemeOption(id: 'cyan', label: '湖青', seedColor: Color(0xFF00ACC1)),
+  AppThemeOption(id: 'emerald', label: '翡翠', seedColor: Color(0xFF1F9D72)),
+  AppThemeOption(id: 'lime', label: '青柠', seedColor: Color(0xFF7CB342)),
+  AppThemeOption(id: 'amber', label: '琥珀', seedColor: Color(0xFFF9A825)),
+  AppThemeOption(id: 'coral', label: '珊瑚', seedColor: Color(0xFFFF7043)),
 ];
 
 const appThemeVariantOptions = <AppThemeVariantOption>[

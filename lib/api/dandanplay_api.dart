@@ -53,12 +53,13 @@ class DandanplayApi {
   DateTime? _lastClearTime;
 
   // 缓存时长：根据弹弹play官方建议
-  static const _ttlMatch = Duration(hours: 6);       // 匹配结果 6小时
-  static const _ttlSearch = Duration(hours: 6);       // 搜索结果 6小时
-  static const _ttlComments = Duration(hours: 1);     // 弹幕 1小时（较活跃）
+  static const _ttlMatch = Duration(hours: 6); // 匹配结果 6小时
+  static const _ttlSearch = Duration(hours: 6); // 搜索结果 6小时
+  static const _ttlComments = Duration(hours: 1); // 弹幕 1小时（较活跃）
 
   String _cacheKey(String endpoint, [Map<String, dynamic>? params]) {
-    final sorted = params?.entries.toList()?..sort((a, b) => a.key.compareTo(b.key));
+    final sorted = params?.entries.toList()
+      ?..sort((a, b) => a.key.compareTo(b.key));
     return '$endpoint${sorted != null ? jsonEncode(sorted.map((e) => [e.key, e.value]).toList()) : ''}';
   }
 
@@ -100,8 +101,14 @@ class DandanplayApi {
     );
   }
 
-  Future<Map<String, dynamic>?> getRawMatch(String fileName, {String? hash}) async {
-    final key = _cacheKey('/api/v2/match', {'fileName': fileName, 'hash': hash ?? ''});
+  Future<Map<String, dynamic>?> getRawMatch(
+    String fileName, {
+    String? hash,
+  }) async {
+    final key = _cacheKey('/api/v2/match', {
+      'fileName': fileName,
+      'hash': hash ?? '',
+    });
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 

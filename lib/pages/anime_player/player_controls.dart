@@ -686,9 +686,7 @@ class _PlayerPlaylistItem extends StatelessWidget {
                   chapter.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: textStyle.copyWith(
-                    color: color,
-                  ),
+                  style: textStyle.copyWith(color: color),
                 ),
               ),
             ],

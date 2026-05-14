@@ -216,7 +216,6 @@ class _MainPageState extends State<MainPage> {
   bool _didCheckDisclaimer = false;
   bool _pendingIndexReset = false;
 
-
   static const _disclaimerItems = [
     '本应用为非官方第三方客户端，仅基于第三方平台提供的接口或公开可访问资源进行内容展示与访问。',
     '本应用不生产、上传、编辑、修改或预先审查具体展示内容，相关内容均来源于第三方返回结果，开发者无法对其进行完全控制。',
@@ -349,14 +348,13 @@ class _MainPageState extends State<MainPage> {
           label: _navItemData[key]!.label,
         ),
     ];
-    final orderedPages = [for (final key in orderedKeys) _navItemData[key]!.page];
+    final orderedPages = [
+      for (final key in orderedKeys) _navItemData[key]!.page,
+    ];
     final selectedIndex = _safeSelectedIndex(destinations.length);
 
     return Scaffold(
-      body: IndexedStack(
-        index: selectedIndex,
-        children: orderedPages,
-      ),
+      body: IndexedStack(index: selectedIndex, children: orderedPages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (i) => setState(() => _index = i),

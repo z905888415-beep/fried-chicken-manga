@@ -68,7 +68,8 @@ class AnimeDownloadManager extends ChangeNotifier {
   }
 
   bool get isBusy => _tasks.any(
-    (t) => t.status == DownloadTaskStatus.pending ||
+    (t) =>
+        t.status == DownloadTaskStatus.pending ||
         t.status == DownloadTaskStatus.downloading,
   );
 
@@ -149,22 +150,16 @@ class AnimeDownloadManager extends ChangeNotifier {
   String? getLocalVideoPath(String pathWord, String chapterUuid) {
     if (!isDownloaded(pathWord, chapterUuid)) return null;
     final dir = _chapterDirectory(pathWord, chapterUuid);
-    final playlistFile = File(
-      _joinPath([dir.path, _playlistFileName]),
-    );
+    final playlistFile = File(_joinPath([dir.path, _playlistFileName]));
     if (playlistFile.existsSync()) return playlistFile.path;
 
-    final videoFiles = dir
-        .listSync()
-        .whereType<File>()
-        .where((f) {
-          final ext = f.path.toLowerCase();
-          return ext.endsWith('.mp4') ||
-              ext.endsWith('.mkv') ||
-              ext.endsWith('.webm') ||
-              ext.endsWith('.ts');
-        })
-        .toList();
+    final videoFiles = dir.listSync().whereType<File>().where((f) {
+      final ext = f.path.toLowerCase();
+      return ext.endsWith('.mp4') ||
+          ext.endsWith('.mkv') ||
+          ext.endsWith('.webm') ||
+          ext.endsWith('.ts');
+    }).toList();
     if (videoFiles.isNotEmpty) return videoFiles.first.path;
     return null;
   }
@@ -187,13 +182,15 @@ class AnimeDownloadManager extends ChangeNotifier {
       }
       if (_findTask(pathWord, chapter.uuid) != null) continue;
 
-      _tasks.add(_AnimeDownloadTask(
-        pathWord: pathWord,
-        chapter: chapter,
-        line: line,
-        animeName: anime.name,
-        cover: anime.cover,
-      ));
+      _tasks.add(
+        _AnimeDownloadTask(
+          pathWord: pathWord,
+          chapter: chapter,
+          line: line,
+          animeName: anime.name,
+          cover: anime.cover,
+        ),
+      );
       added++;
     }
 
@@ -297,10 +294,10 @@ class AnimeDownloadManager extends ChangeNotifier {
             for (final chapterEntry in chaptersRaw.entries) {
               final summaryRaw = chapterEntry.value;
               if (summaryRaw is! Map) continue;
-              summaries[chapterEntry.key.toString()] =
-                  DownloadedAnimeChapterSummary.fromJson(
-                    Map<String, dynamic>.from(summaryRaw),
-                  );
+              summaries[chapterEntry.key
+                  .toString()] = DownloadedAnimeChapterSummary.fromJson(
+                Map<String, dynamic>.from(summaryRaw),
+              );
             }
 
             if (summaries.isNotEmpty) {
@@ -323,8 +320,9 @@ class AnimeDownloadManager extends ChangeNotifier {
     try {
       while (_tasks.any((t) => t.status == DownloadTaskStatus.pending)) {
         // 取第一个 pending 任务
-        final task =
-            _tasks.firstWhere((t) => t.status == DownloadTaskStatus.pending);
+        final task = _tasks.firstWhere(
+          (t) => t.status == DownloadTaskStatus.pending,
+        );
         task.status = DownloadTaskStatus.downloading;
         task.progress = null;
         notifyListeners();
@@ -413,11 +411,13 @@ class AnimeDownloadManager extends ChangeNotifier {
 
   Future<bool> _isHlsStream(String url) async {
     try {
-      final dio = Dio(BaseOptions(
-        responseType: ResponseType.plain,
-        sendTimeout: _timeout,
-        receiveTimeout: _timeout,
-      ));
+      final dio = Dio(
+        BaseOptions(
+          responseType: ResponseType.plain,
+          sendTimeout: _timeout,
+          receiveTimeout: _timeout,
+        ),
+      );
       final response = await dio.get(url);
       dio.close(force: true);
       final text = response.data?.toString() ?? '';
@@ -431,17 +431,21 @@ class AnimeDownloadManager extends ChangeNotifier {
     _activeCancelToken = CancelToken();
     final cancelToken = _activeCancelToken!;
 
-    final dio = Dio(BaseOptions(
-      responseType: ResponseType.plain,
-      sendTimeout: _timeout,
-      receiveTimeout: _timeout,
-    ));
+    final dio = Dio(
+      BaseOptions(
+        responseType: ResponseType.plain,
+        sendTimeout: _timeout,
+        receiveTimeout: _timeout,
+      ),
+    );
 
-    final segmentDio = Dio(BaseOptions(
-      responseType: ResponseType.bytes,
-      sendTimeout: _timeout,
-      receiveTimeout: const Duration(minutes: 5),
-    ));
+    final segmentDio = Dio(
+      BaseOptions(
+        responseType: ResponseType.bytes,
+        sendTimeout: _timeout,
+        receiveTimeout: const Duration(minutes: 5),
+      ),
+    );
 
     try {
       final resolved = await _resolveMediaPlaylist(
@@ -636,10 +640,7 @@ class AnimeDownloadManager extends ChangeNotifier {
   }
 
   String _replaceUriAttribute(String tagLine, String newUri) {
-    return tagLine.replaceFirst(
-      RegExp(r'URI="[^"]*"'),
-      'URI="$newUri"',
-    );
+    return tagLine.replaceFirst(RegExp(r'URI="[^"]*"'), 'URI="$newUri"');
   }
 
   String _hlsExtFromUri(String uri, String fallback) {
@@ -674,17 +675,17 @@ class AnimeDownloadManager extends ChangeNotifier {
       }
     }
 
-    final videoFile = File(
-      _joinPath([chapterDir.path, 'video$extension']),
-    );
+    final videoFile = File(_joinPath([chapterDir.path, 'video$extension']));
 
     _updateProgress(task: null, completed: 0, total: 1);
 
-    final dio = Dio(BaseOptions(
-      responseType: ResponseType.bytes,
-      sendTimeout: _timeout,
-      receiveTimeout: const Duration(hours: 2),
-    ));
+    final dio = Dio(
+      BaseOptions(
+        responseType: ResponseType.bytes,
+        sendTimeout: _timeout,
+        receiveTimeout: const Duration(hours: 2),
+      ),
+    );
 
     await dio.download(
       videoUrl,
@@ -720,10 +721,12 @@ class AnimeDownloadManager extends ChangeNotifier {
     required int total,
     int? estimatedTotalBytes,
   }) {
-    final t = task ?? _tasks.firstWhere(
-      (t) => t.status == DownloadTaskStatus.downloading,
-      orElse: () => _placeholderTask,
-    );
+    final t =
+        task ??
+        _tasks.firstWhere(
+          (t) => t.status == DownloadTaskStatus.downloading,
+          orElse: () => _placeholderTask,
+        );
     if (t == _placeholderTask) return;
     t.progress = AnimeChapterDownloadProgress(
       completed: completed,
@@ -820,7 +823,9 @@ class AnimeDownloadManager extends ChangeNotifier {
         coverPath: coverFile?.path,
         updatedAt: DateTime.now(),
       );
-      await _animeMetadataFile(pathWord).writeAsString(jsonEncode(info.toJson()));
+      await _animeMetadataFile(
+        pathWord,
+      ).writeAsString(jsonEncode(info.toJson()));
       return;
     }
 
@@ -834,22 +839,19 @@ class AnimeDownloadManager extends ChangeNotifier {
     ).writeAsString(jsonEncode(nextInfo.toJson()));
   }
 
-  Future<File?> _downloadCoverIfNeeded(
-    String pathWord,
-    String coverUrl,
-  ) async {
+  Future<File?> _downloadCoverIfNeeded(String pathWord, String coverUrl) async {
     if (coverUrl.isEmpty) return null;
     final animeDir = _animeDirectory(pathWord);
     await animeDir.create(recursive: true);
-    final dio = Dio(BaseOptions(
-      responseType: ResponseType.bytes,
-      sendTimeout: _timeout,
-      receiveTimeout: _timeout,
-    ));
-    final extension = _resolveExtension(Uri.parse(coverUrl));
-    final file = File(
-      _joinPath([animeDir.path, '$_coverFileName$extension']),
+    final dio = Dio(
+      BaseOptions(
+        responseType: ResponseType.bytes,
+        sendTimeout: _timeout,
+        receiveTimeout: _timeout,
+      ),
     );
+    final extension = _resolveExtension(Uri.parse(coverUrl));
+    final file = File(_joinPath([animeDir.path, '$_coverFileName$extension']));
     await dio.download(coverUrl, file.path);
     dio.close(force: true);
     return file;

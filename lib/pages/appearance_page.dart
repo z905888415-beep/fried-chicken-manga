@@ -149,7 +149,11 @@ class _AppearancePageState extends State<AppearancePage> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Row(
                     children: [
-                      Icon(Icons.swap_vert, color: cs.onSurfaceVariant, size: 20),
+                      Icon(
+                        Icons.swap_vert,
+                        color: cs.onSurfaceVariant,
+                        size: 20,
+                      ),
                       const SizedBox(width: 16),
                       Text('导航栏顺序', style: tt.titleSmall),
                     ],
@@ -175,7 +179,10 @@ class _AppearancePageState extends State<AppearancePage> {
                       title: Text(meta.$2),
                       trailing: ReorderableDragStartListener(
                         index: index,
-                        child: Icon(Icons.drag_handle, color: cs.onSurfaceVariant),
+                        child: Icon(
+                          Icons.drag_handle,
+                          color: cs.onSurfaceVariant,
+                        ),
                       ),
                     );
                   },
