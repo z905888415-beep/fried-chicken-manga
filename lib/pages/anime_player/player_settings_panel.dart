@@ -20,6 +20,7 @@ class _PlayerSettingsPanel extends StatefulWidget {
 class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
   final _user = UserManager();
   late int _skipSeconds;
+  late bool _playbackProgressEnabled;
   late double _fontSize;
   late double _area;
   late double _opacity;
@@ -31,6 +32,7 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
   void initState() {
     super.initState();
     _skipSeconds = _user.animeSkipSeconds;
+    _playbackProgressEnabled = _user.animePlaybackProgressEnabled;
     _fontSize = _user.danmakuFontSize;
     _area = _user.danmakuArea;
     _opacity = _user.danmakuOpacity;
@@ -119,6 +121,24 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
                   _user.setAnimeSkipSeconds(value);
                   widget.onChanged();
                 }
+              },
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                '记录播放进度',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '再次打开同一集时自动跳转到上次观看位置',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+              value: _playbackProgressEnabled,
+              onChanged: (v) {
+                setState(() => _playbackProgressEnabled = v);
+                _user.setAnimePlaybackProgressEnabled(v);
+                widget.onChanged();
               },
             ),
 

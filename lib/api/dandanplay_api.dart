@@ -177,15 +177,30 @@ class DandanplayApi {
     return [];
   }
 
-  /// 清除缓存，限制1分钟内只能清除一次
-  bool clearCache() {
+  bool _clearCacheWhere(bool Function(String key) shouldRemove) {
     final now = DateTime.now();
-    if (_lastClearTime != null && now.difference(_lastClearTime!).inSeconds < 60) {
+    if (_lastClearTime != null &&
+        now.difference(_lastClearTime!).inSeconds < 60) {
       return false;
     }
     _lastClearTime = now;
-    _cache.clear();
+    _cache.removeWhere((key, _) => shouldRemove(key));
     return true;
+  }
+
+  /// 清除匹配和搜索缓存，限制1分钟内只能清除一次。
+  /// 不清除弹幕评论缓存，避免影响已选弹幕来源的加载。
+  bool clearSearchCache() {
+    return _clearCacheWhere(
+      (key) =>
+          key.startsWith('/api/v2/match') ||
+          key.startsWith('/api/v2/search/episodes'),
+    );
+  }
+
+  /// 清除全部弹弹play缓存，限制1分钟内只能清除一次
+  bool clearCache() {
+    return _clearCacheWhere((_) => true);
   }
 
   Future<List<DandanplayComment>> getComments(int episodeId) async {

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../utils/anime_download_manager.dart';
+import '../utils/anime_playback_history.dart';
 import '../utils/data_cache.dart';
 import '../utils/toast.dart';
 import 'anime_player_page.dart';
@@ -21,6 +24,8 @@ class AnimeDetailPage extends StatefulWidget {
 }
 
 class _AnimeDetailPageState extends State<AnimeDetailPage> {
+  static const _watchedCompleteRemainingThreshold = Duration(minutes: 3);
+
   final _api = ApiClient();
   final _cache = DataCache();
   final _downloads = AnimeDownloadManager();
@@ -32,6 +37,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
   bool _briefExpanded = false;
   bool _isCollected = false;
   bool _collectSubmitting = false;
+  DateTime? _refreshedAt;
+  AnimePlaybackRecord? _latestPlaybackRecord;
   String? _error;
 
   // 批量下载选择
@@ -75,9 +82,11 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
           const [];
       _chapterTotal = cached['chapterTotal'] as int? ?? _chapters.length;
       _isCollected = cached['isCollected'] == true;
+      _refreshedAt = DateTime.tryParse(cached['refreshedAt']?.toString() ?? '');
       _loadingDetail = false;
       _loadingChapters = false;
     });
+    unawaited(_loadLatestPlaybackRecord());
   }
 
   Future<void> _saveCache() async {
@@ -105,6 +114,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
           .toList(),
       'chapterTotal': _chapterTotal,
       'isCollected': _isCollected,
+      if (_refreshedAt != null) 'refreshedAt': _refreshedAt!.toIso8601String(),
     });
   }
 
@@ -131,16 +141,19 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
       }
 
       if (!mounted) return;
+      final refreshedAt = DateTime.now();
       setState(() {
         _anime = detail;
         _chapters = chapters.list;
         _chapterTotal = chapters.total;
         _isCollected = query?.isCollected ?? false;
+        _refreshedAt = refreshedAt;
         _loadingDetail = false;
         _loadingChapters = false;
         _error = null;
       });
       await _saveCache();
+      unawaited(_loadLatestPlaybackRecord());
     } catch (e) {
       debugPrint('AnimeDetailPage load error: $e');
       if (!mounted) return;
@@ -152,14 +165,69 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     }
   }
 
-  void _openChapter(AnimeChapter chapter) {
+  Future<void> _refresh() async {
+    _exitSelectionMode();
+    await _load();
+  }
+
+  String? get _refreshedAtText {
+    final refreshedAt = _refreshedAt;
+    if (refreshedAt == null) return null;
+    return _formatRefreshTime(refreshedAt);
+  }
+
+  String _formatRefreshTime(DateTime time) {
+    final local = time.toLocal();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
+        '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
+  }
+
+  Future<void> _loadLatestPlaybackRecord() async {
+    final records = await AnimePlaybackHistory.progressRecordsForAnime(
+      pathWord: widget.pathWord,
+    );
+    if (!mounted) return;
+    final record = _selectLatestChapterPlaybackRecord(records);
+    setState(() => _latestPlaybackRecord = record);
+  }
+
+  AnimePlaybackRecord? _selectLatestChapterPlaybackRecord(
+    List<AnimePlaybackRecord> records,
+  ) {
+    if (records.isEmpty) return null;
+    final byChapterUuid = {
+      for (final record in records) record.chapterUuid: record,
+    };
+    for (var i = _chapters.length - 1; i >= 0; i--) {
+      final record = byChapterUuid[_chapters[i].uuid];
+      if (record != null) return record;
+    }
+    records.sort((a, b) {
+      final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);
+    });
+    return records.first;
+  }
+
+  AnimeChapter? get _latestPlaybackChapter {
+    final record = _latestPlaybackRecord;
+    if (record == null) return null;
+    for (final chapter in _chapters) {
+      if (chapter.uuid == record.chapterUuid) return chapter;
+    }
+    return null;
+  }
+
+  Future<void> _openChapter(AnimeChapter chapter) async {
     final line = _resolveChapterLine(chapter);
     if (line == null || line.isEmpty) {
       showToast(context, '当前选集暂无可用线路', isError: true);
       return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => AnimePlayerPage(
@@ -173,6 +241,37 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
         ),
       ),
     );
+    if (!mounted) return;
+    await _loadLatestPlaybackRecord();
+  }
+
+  Future<void> _continueWatching() async {
+    final chapter = _latestPlaybackChapter;
+    if (chapter == null) {
+      showToast(context, '播放记录对应选集暂不可用', isError: true);
+      return;
+    }
+    await _openChapter(chapter);
+  }
+
+  Future<void> _openNextPlaybackChapter() async {
+    final chapter = _nextChapterAfterLatestPlayback;
+    if (chapter == null) return;
+    await _openChapter(chapter);
+  }
+
+  AnimeChapter? get _nextChapterAfterLatestPlayback {
+    final chapter = _latestPlaybackChapter;
+    if (chapter == null) return null;
+    final index = _chapters.indexWhere((item) => item.uuid == chapter.uuid);
+    if (index < 0 || index + 1 >= _chapters.length) return null;
+    return _chapters[index + 1];
+  }
+
+  bool _isPlaybackRecordNearEnd(AnimePlaybackRecord record) {
+    final duration = record.duration;
+    if (duration <= Duration.zero) return false;
+    return duration - record.position < _watchedCompleteRemainingThreshold;
   }
 
   String? _resolveChapterLine(AnimeChapter chapter) {
@@ -214,9 +313,11 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     setState(() {
       _selectedUuids.addAll(
         _chapters
-            .where((c) =>
-                !_downloads.isDownloaded(widget.pathWord, c.uuid) &&
-                !_downloads.isInQueue(widget.pathWord, c.uuid))
+            .where(
+              (c) =>
+                  !_downloads.isDownloaded(widget.pathWord, c.uuid) &&
+                  !_downloads.isInQueue(widget.pathWord, c.uuid),
+            )
             .map((c) => c.uuid),
       );
     });
@@ -326,6 +427,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
         .length;
     if (count == 0) return null;
     return FloatingActionButton.extended(
+      heroTag: 'anime_download_tasks_${widget.pathWord}',
       onPressed: () => Navigator.push(
         context,
         MaterialPageRoute(
@@ -335,6 +437,107 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
       icon: const Icon(Icons.downloading_outlined),
       label: Text('$count 个任务'),
     );
+  }
+
+  Widget? _buildFloatingActions(ColorScheme cs) {
+    final rows = <Widget>[];
+    final availableWidth = MediaQuery.sizeOf(context).width - 32;
+    final maxButtonWidth = availableWidth.clamp(112.0, 320.0).toDouble();
+    final maxLabelWidth = (maxButtonWidth - 76).clamp(36.0, 240.0).toDouble();
+    final downloadFab = _buildDownloadFab(cs);
+    if (downloadFab != null) {
+      rows.add(downloadFab);
+    }
+
+    final playbackRecord = _latestPlaybackRecord;
+    if (playbackRecord != null) {
+      final chapterName =
+          _latestPlaybackChapter?.name ?? playbackRecord.chapterName;
+      final nextChapter = _isPlaybackRecordNearEnd(playbackRecord)
+          ? _nextChapterAfterLatestPlayback
+          : null;
+      rows.add(
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: availableWidth),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.end,
+            children: [
+              if (nextChapter != null)
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxButtonWidth),
+                  child: FloatingActionButton.extended(
+                    heroTag: 'anime_next_watching_${widget.pathWord}',
+                    onPressed: () => unawaited(_openNextPlaybackChapter()),
+                    icon: const Icon(Icons.skip_next_rounded, size: 20),
+                    label: _FabLabel(
+                      text: _truncateChapterName(
+                        nextChapter.name,
+                        maxLength: 12,
+                      ),
+                      maxWidth: maxLabelWidth,
+                    ),
+                  ),
+                ),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxButtonWidth),
+                child: FloatingActionButton.extended(
+                  heroTag: 'anime_continue_watching_${widget.pathWord}',
+                  onPressed: () => unawaited(_continueWatching()),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                  label: _FabLabel(
+                    text: _continueWatchingLabel(chapterName, playbackRecord),
+                    maxWidth: maxLabelWidth,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (rows.isEmpty) return null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (var i = 0; i < rows.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          rows[i],
+        ],
+      ],
+    );
+  }
+
+  String _continueWatchingLabel(
+    String chapterName,
+    AnimePlaybackRecord record,
+  ) {
+    final name = _truncateChapterName(chapterName, maxLength: 12);
+    final progress = record.duration > Duration.zero
+        ? '${_formatDuration(record.position)} / ${_formatDuration(record.duration)}'
+        : _formatDuration(record.position);
+    return name.isEmpty ? progress : '$name · $progress';
+  }
+
+  String _truncateChapterName(String name, {required int maxLength}) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '';
+
+    final chars = trimmed.characters;
+    if (chars.length <= maxLength) return trimmed;
+    return '${chars.take(maxLength).toString()}...';
+  }
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    if (hours > 0) return '$hours:$minutes:$seconds';
+    return '${duration.inMinutes}:$seconds';
   }
 
   @override
@@ -369,10 +572,11 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     }
 
     return Scaffold(
-      floatingActionButton: _buildDownloadFab(cs),
+      floatingActionButton: _buildFloatingActions(cs),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _refresh,
         child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverAppBar(
               pinned: true,
@@ -402,6 +606,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
                     isCollected: _isCollected,
                     collectSubmitting: _collectSubmitting,
                     briefExpanded: _briefExpanded,
+                    refreshedAtText: _refreshedAtText,
                     onToggleCollect: _toggleCollect,
                     onToggleBrief: () {
                       setState(() => _briefExpanded = !_briefExpanded);
@@ -433,8 +638,9 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
                       ),
                       const SizedBox(width: 4),
                       FilledButton.tonal(
-                        onPressed:
-                            _selectedUuids.isEmpty ? null : _batchDownload,
+                        onPressed: _selectedUuids.isEmpty
+                            ? null
+                            : _batchDownload,
                         child: const Text('下载选中'),
                       ),
                       const SizedBox(width: 4),
@@ -477,37 +683,44 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
                   ),
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) {
-                      final chapter = _chapters[i];
-                      final selected = _selectedUuids.contains(chapter.uuid);
-                      final downloaded = _downloads.isDownloaded(
-                        widget.pathWord, chapter.uuid);
-                      final taskInfo = _downloads.taskInfo(
-                        widget.pathWord, chapter.uuid);
-                      final inQueue = taskInfo != null;
+                  delegate: SliverChildBuilderDelegate((_, i) {
+                    final chapter = _chapters[i];
+                    final selected = _selectedUuids.contains(chapter.uuid);
+                    final downloaded = _downloads.isDownloaded(
+                      widget.pathWord,
+                      chapter.uuid,
+                    );
+                    final taskInfo = _downloads.taskInfo(
+                      widget.pathWord,
+                      chapter.uuid,
+                    );
+                    final inQueue = taskInfo != null;
 
-                      return _AnimeChapterCard(
-                        chapter: chapter,
-                        selected: selected,
-                        selectionMode: _selectionMode,
-                        isDownloaded: downloaded,
-                        isDownloading: taskInfo?.status == DownloadTaskStatus.downloading,
-                        isQueued: inQueue && taskInfo.status != DownloadTaskStatus.downloading,
-                        progress: _downloads.progressOf(widget.pathWord, chapter.uuid),
-                        onTap: () {
-                          if (_selectionMode) {
-                            _toggleSelection(chapter.uuid);
-                            return;
-                          }
-                          _openChapter(chapter);
-                        },
-                        onLongPress: () => _enterSelectionMode(chapter.uuid),
-                        onDownload: () => _downloadSingle(chapter),
-                      );
-                    },
-                    childCount: _chapters.length,
-                  ),
+                    return _AnimeChapterCard(
+                      chapter: chapter,
+                      selected: selected,
+                      selectionMode: _selectionMode,
+                      isDownloaded: downloaded,
+                      isDownloading:
+                          taskInfo?.status == DownloadTaskStatus.downloading,
+                      isQueued:
+                          inQueue &&
+                          taskInfo.status != DownloadTaskStatus.downloading,
+                      progress: _downloads.progressOf(
+                        widget.pathWord,
+                        chapter.uuid,
+                      ),
+                      onTap: () {
+                        if (_selectionMode) {
+                          _toggleSelection(chapter.uuid);
+                          return;
+                        }
+                        _openChapter(chapter);
+                      },
+                      onLongPress: () => _enterSelectionMode(chapter.uuid),
+                      onDownload: () => _downloadSingle(chapter),
+                    );
+                  }, childCount: _chapters.length),
                 ),
               ),
             const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
@@ -612,11 +825,32 @@ class _AnimeDetailHeader extends StatelessWidget {
   }
 }
 
+class _FabLabel extends StatelessWidget {
+  final String text;
+  final double maxWidth;
+
+  const _FabLabel({required this.text, required this.maxWidth});
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13),
+      ),
+    );
+  }
+}
+
 class _AnimeInfoPanel extends StatelessWidget {
   final Anime anime;
   final bool isCollected;
   final bool collectSubmitting;
   final bool briefExpanded;
+  final String? refreshedAtText;
   final VoidCallback onToggleCollect;
   final VoidCallback onToggleBrief;
 
@@ -625,6 +859,7 @@ class _AnimeInfoPanel extends StatelessWidget {
     required this.isCollected,
     required this.collectSubmitting,
     required this.briefExpanded,
+    required this.refreshedAtText,
     required this.onToggleCollect,
     required this.onToggleBrief,
   });
@@ -676,6 +911,19 @@ class _AnimeInfoPanel extends StatelessWidget {
           Text(
             '最新：${anime.lastChapter!['name']}',
             style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ],
+        if (refreshedAtText != null) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.update, size: 16, color: cs.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(
+                '刷新于 $refreshedAtText',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ],
           ),
         ],
         if (anime.brief != null && anime.brief!.isNotEmpty) ...[
@@ -804,11 +1052,7 @@ class _AnimeChapterCard extends StatelessWidget {
               ),
             ),
             if (!selectionMode)
-              Positioned(
-                right: 4,
-                bottom: 4,
-                child: _buildDownloadButton(cs),
-              ),
+              Positioned(right: 4, bottom: 4, child: _buildDownloadButton(cs)),
           ],
         ),
       ),
@@ -828,17 +1072,18 @@ class _AnimeChapterCard extends StatelessWidget {
         child: SizedBox(
           width: 16,
           height: 16,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: Colors.white,
-          ),
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
         ),
       );
     }
     if (isQueued) {
       return const Padding(
         padding: EdgeInsets.all(6),
-        child: Icon(Icons.hourglass_bottom, color: Colors.orangeAccent, size: 18),
+        child: Icon(
+          Icons.hourglass_bottom,
+          color: Colors.orangeAccent,
+          size: 18,
+        ),
       );
     }
     return Material(

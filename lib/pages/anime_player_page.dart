@@ -15,9 +15,9 @@ import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
 import '../models/user_manager.dart';
 import '../utils/anime_download_manager.dart';
+import '../utils/anime_playback_history.dart';
 import '../utils/chinese_converter.dart';
 import '../utils/data_cache.dart';
-import '../utils/toast.dart';
 import 'profile_page.dart';
 
 part 'anime_player/media_open_diagnosis.dart';
@@ -52,11 +52,15 @@ class AnimePlayerPage extends StatefulWidget {
   State<AnimePlayerPage> createState() => _AnimePlayerPageState();
 }
 
-class _AnimePlayerPageState extends State<AnimePlayerPage> {
+class _AnimePlayerPageState extends State<AnimePlayerPage>
+    with WidgetsBindingObserver {
   static const _videoUserAgent =
       'Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36';
   static const _maxPlayerLogLines = 24;
   static const _videoLinkCacheTtl = Duration(hours: 6);
+  static const _playbackProgressSaveInterval = Duration(seconds: 5);
+  static const _minPlaybackProgressToSave = Duration(seconds: 3);
+  static const _playbackProgressSeekTolerance = Duration(seconds: 2);
 
   final _api = ApiClient();
   final _cache = DataCache();
@@ -78,6 +82,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   String? _error;
   String? _rawError;
   final List<String> _recentPlayerLogs = <String>[];
+  bool _readyToSavePlaybackProgress = false;
+  DateTime? _lastPlaybackProgressSavedAt;
+  AnimePlaybackRecord? _playbackRecord;
+  bool _playbackProgressRestored = false;
 
   DanmakuController? _danmakuController;
   Map<int, List<DanmakuContentItem>> _danmakuItems = {};
@@ -94,10 +102,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   bool _hasSearched = false;
   int? _selectedDanmakuEpisodeId;
   int? _loadingDanmakuEpisodeId;
+  int _danmakuLoadSerial = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentChapterUuid = widget.chapterUuid;
     _currentChapterName = widget.chapterName;
     _line = widget.line;
@@ -119,6 +129,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
     _player.stream.position.listen((position) {
       if (!mounted) return;
+      _maybeSavePlaybackProgress(position);
       if (_player.state.playing && _danmakuVisible) {
         final sec = position.inSeconds;
         if (sec != _lastDanmakuSec) {
@@ -154,6 +165,8 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_savePlaybackProgress(force: true, updateState: false));
     _openMediaSerial++; // 阻止正在进行的媒体加载
     _player.dispose();
     WakelockPlus.disable();
@@ -161,7 +174,21 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      unawaited(_savePlaybackProgress(force: true, updateState: false));
+    }
+  }
+
   Future<void> _load({bool forceRefresh = false}) async {
+    _readyToSavePlaybackProgress = false;
+    _lastPlaybackProgressSavedAt = null;
+    _playbackProgressRestored = false;
+    final danmakuSerial = ++_danmakuLoadSerial;
     setState(() {
       _loading = true;
       _buffering = false;
@@ -173,7 +200,9 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       _isAutoMatched = false;
       _selectedDanmakuEpisodeId = null;
       _loadingDanmakuEpisodeId = null;
+      _playbackRecord = null;
     });
+    unawaited(_loadPlaybackRecord(danmakuSerial));
 
     if (widget.localVideoPath != null) {
       if (!mounted) return;
@@ -183,7 +212,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         _buffering = true;
       });
       unawaited(_openMedia(widget.localVideoPath!));
-      unawaited(_autoMatchDanmaku());
+      unawaited(_loadSavedDanmakuOrAutoMatch(danmakuSerial));
       return;
     }
 
@@ -200,7 +229,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         _buffering = true;
       });
       unawaited(_openMedia(localPath));
-      unawaited(_autoMatchDanmaku());
+      unawaited(_loadSavedDanmakuOrAutoMatch(danmakuSerial));
       return;
     }
 
@@ -231,7 +260,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         _buffering = true;
       });
       unawaited(_openMedia(videoUrl));
-      unawaited(_autoMatchDanmaku());
+      unawaited(_loadSavedDanmakuOrAutoMatch(danmakuSerial));
     } catch (e) {
       debugPrint('AnimePlayerPage load error: $e');
       if (!mounted) return;
@@ -487,9 +516,49 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     await _load(forceRefresh: true);
   }
 
+  void _showPlayerHint(String message, {bool isError = false}) {
+    if (!mounted) return;
+    final cs = Theme.of(context).colorScheme;
+    final bg = isError ? cs.errorContainer : cs.inverseSurface;
+    final fg = isError ? cs.onErrorContainer : cs.onInverseSurface;
+    final icon = isError
+        ? Icons.error_outline_rounded
+        : Icons.check_circle_outline_rounded;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          elevation: 3,
+          duration: const Duration(milliseconds: 1600),
+          backgroundColor: bg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: fg, size: 18),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: fg, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+  }
+
   Future<void> _openMedia(String videoUrl) async {
     final serial = ++_openMediaSerial;
     _recentPlayerLogs.clear();
+    _readyToSavePlaybackProgress = false;
+    _lastPlaybackProgressSavedAt = null;
     if (mounted) {
       setState(() {
         _buffering = true;
@@ -504,11 +573,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         play: true,
       );
       if (!mounted || serial != _openMediaSerial) return;
+      _readyToSavePlaybackProgress = true;
       setState(() {
         _buffering = false;
         _error = null;
         _rawError = null;
       });
+      unawaited(_restorePlaybackProgress(serial));
     } catch (e) {
       debugPrint('AnimePlayerPage open media error: $e');
       final rawMessage = e.toString();
@@ -542,11 +613,189 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     return '';
   }
 
+  bool get _canUsePlaybackHistory =>
+      _user.animePlaybackProgressEnabled &&
+      widget.pathWord.trim().isNotEmpty &&
+      _currentChapterUuid.trim().isNotEmpty;
+
+  bool _isRestorablePlaybackRecord(AnimePlaybackRecord? record) {
+    if (!_canUsePlaybackHistory || record == null) return false;
+    final position = record.position;
+    if (position < _minPlaybackProgressToSave) return false;
+    final duration = record.duration;
+    if (duration > Duration.zero) {
+      if (position >= duration) return false;
+      if (duration - position <= const Duration(seconds: 5)) return false;
+    }
+    return true;
+  }
+
+  Future<AnimePlaybackRecord?> _loadPlaybackRecord(int serial) async {
+    if (!_canUsePlaybackHistory) return null;
+    final record = await AnimePlaybackHistory.get(
+      pathWord: widget.pathWord,
+      chapterUuid: _currentChapterUuid,
+    );
+    if (!mounted || serial != _danmakuLoadSerial) return record;
+    setState(() => _playbackRecord = record);
+    return record;
+  }
+
+  Future<void> _restorePlaybackProgress(int serial) async {
+    if (!_canUsePlaybackHistory) return;
+    final record =
+        _playbackRecord ?? await _loadPlaybackRecord(_danmakuLoadSerial);
+    if (!mounted || serial != _openMediaSerial || !_canUsePlaybackHistory) {
+      return;
+    }
+
+    if (!_isRestorablePlaybackRecord(record)) return;
+
+    await _waitForPlaybackBeforeRestore(serial);
+    if (!mounted || serial != _openMediaSerial) return;
+
+    final restored = await _seekToPlaybackProgress(record!.position, serial);
+    if (!mounted || serial != _openMediaSerial) return;
+    if (!restored) return;
+
+    _lastDanmakuSec = -1;
+    _playbackProgressRestored = true;
+    setState(() {});
+  }
+
+  Future<void> _waitForPlaybackBeforeRestore(int serial) async {
+    for (var i = 0; i < 20; i++) {
+      if (!mounted || serial != _openMediaSerial) return;
+      if (_player.state.playing) {
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
+  Future<bool> _seekToPlaybackProgress(Duration position, int serial) async {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      if (!mounted || serial != _openMediaSerial) return false;
+      final duration = _player.state.duration;
+      if (duration > Duration.zero &&
+          (position >= duration ||
+              duration - position <= const Duration(seconds: 5))) {
+        return false;
+      }
+
+      try {
+        await _player.seek(position);
+      } catch (e) {
+        debugPrint('Restore playback progress seek error: $e');
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        continue;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!mounted || serial != _openMediaSerial) return false;
+
+      final current = _player.state.position;
+      if (!_isNearOrAfterPlaybackProgress(current, position)) {
+        continue;
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (!mounted || serial != _openMediaSerial) return false;
+      if (_isNearOrAfterPlaybackProgress(_player.state.position, position)) {
+        return true;
+      }
+    }
+
+    try {
+      await _player.seek(position);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      return mounted &&
+          serial == _openMediaSerial &&
+          _isNearOrAfterPlaybackProgress(_player.state.position, position);
+    } catch (e) {
+      debugPrint('Restore playback progress final seek error: $e');
+      return false;
+    }
+  }
+
+  bool _isNearOrAfterPlaybackProgress(Duration current, Duration target) {
+    return current + _playbackProgressSeekTolerance >= target;
+  }
+
+  void _maybeSavePlaybackProgress(Duration position) {
+    if (!_readyToSavePlaybackProgress) return;
+    final record = _playbackRecord;
+    if (!_playbackProgressRestored &&
+        _isRestorablePlaybackRecord(record) &&
+        position + _playbackProgressSeekTolerance < record!.position) {
+      return;
+    }
+    final lastSavedAt = _lastPlaybackProgressSavedAt;
+    final now = DateTime.now();
+    if (lastSavedAt != null &&
+        now.difference(lastSavedAt) < _playbackProgressSaveInterval) {
+      return;
+    }
+    _lastPlaybackProgressSavedAt = now;
+    unawaited(_savePlaybackProgress(position: position));
+  }
+
+  Future<void> _savePlaybackProgress({
+    Duration? position,
+    bool force = false,
+    bool updateState = true,
+  }) async {
+    if (!_canUsePlaybackHistory) return;
+    if (!_readyToSavePlaybackProgress && !force) return;
+
+    final currentPosition = position ?? _player.state.position;
+    final duration = _player.state.duration;
+    if (currentPosition < _minPlaybackProgressToSave) return;
+    final existingRecord = _playbackRecord;
+    if (!_playbackProgressRestored &&
+        _isRestorablePlaybackRecord(existingRecord) &&
+        currentPosition + _playbackProgressSeekTolerance <
+            existingRecord!.position) {
+      return;
+    }
+    final targetChapterUuid = _currentChapterUuid;
+    final targetChapterName = _currentChapterName;
+
+    var progressPosition = currentPosition;
+    if (duration > Duration.zero &&
+        duration - currentPosition <= const Duration(seconds: 5)) {
+      progressPosition = Duration.zero;
+    }
+
+    await AnimePlaybackHistory.saveProgress(
+      pathWord: widget.pathWord,
+      chapterUuid: _currentChapterUuid,
+      chapterName: _currentChapterName,
+      position: progressPosition,
+      duration: duration,
+    );
+    if (!updateState || !mounted || targetChapterUuid != _currentChapterUuid) {
+      return;
+    }
+    setState(() {
+      _playbackRecord = AnimePlaybackRecord(
+        chapterUuid: targetChapterUuid,
+        chapterName: targetChapterName,
+        position: progressPosition,
+        duration: duration,
+        danmakuEpisodeId: _playbackRecord?.danmakuEpisodeId,
+        updatedAt: DateTime.now(),
+      );
+    });
+  }
+
   String _removeParentheses(String text) =>
       text.replaceAll(RegExp(r'\([^)]*\)'), '').trim();
 
   Future<void> _switchLine(String line) async {
     if (line == _line || _loading) return;
+    await _savePlaybackProgress(force: true, updateState: false);
+    if (!mounted) return;
     setState(() => _line = line);
     await _load();
   }
@@ -554,15 +803,17 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   Future<void> _openChapter(AnimeChapter chapter) async {
     if (chapter.uuid == _currentChapterUuid) return;
     if (_loading) {
-      showToast(context, '视频加载中，请稍后再切换', isError: true);
+      _showPlayerHint('视频加载中，请稍后再切换', isError: true);
       return;
     }
     final line = _resolveChapterLine(chapter) ?? _line;
     if (line.isEmpty) {
-      showToast(context, '当前选集暂无可用线路', isError: true);
+      _showPlayerHint('当前选集暂无可用线路', isError: true);
       return;
     }
 
+    await _savePlaybackProgress(force: true, updateState: false);
+    if (!mounted) return;
     setState(() {
       _currentChapterUuid = chapter.uuid;
       _currentChapterName = chapter.name;
@@ -584,25 +835,25 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   Future<void> _copyVideoUrl() async {
     final url = _videoUrl;
     if (url == null || url.isEmpty) {
-      showToast(context, '暂无可复制的视频链接', isError: true);
+      _showPlayerHint('暂无可复制的视频链接', isError: true);
       return;
     }
     await Clipboard.setData(ClipboardData(text: url));
     if (!mounted) return;
-    showToast(context, '视频链接已复制到剪贴板');
+    _showPlayerHint('视频链接已复制到剪贴板');
   }
 
   Future<void> _openVideoUrl() async {
     final url = _videoUrl;
     final uri = url == null ? null : Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) {
-      showToast(context, '暂无可打开的视频链接', isError: true);
+      _showPlayerHint('暂无可打开的视频链接', isError: true);
       return;
     }
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!mounted) return;
     if (!launched) {
-      showToast(context, '无法打开视频链接', isError: true);
+      _showPlayerHint('无法打开视频链接', isError: true);
     }
   }
 
@@ -626,22 +877,69 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     return _buildVideoSurface(_videoController, fullscreen: false);
   }
 
+  Future<void> _resumeFromPlaybackRecord() async {
+    final record = _playbackRecord;
+    if (!_isRestorablePlaybackRecord(record)) return;
+    final restored = await _seekToPlaybackProgress(
+      record!.position,
+      _openMediaSerial,
+    );
+    if (!mounted) return;
+    if (restored) {
+      _lastDanmakuSec = -1;
+      _showPlayerHint('已跳转到 ${_formatDuration(record.position)}');
+    } else {
+      _showPlayerHint('无法跳转到上次进度', isError: true);
+    }
+  }
+
   List<DandanplayEpisode> _matchCandidates = [];
   bool _isAutoMatched = false;
 
-  Future<void> _autoMatchDanmaku() async {
+  Future<String> _normalizedAnimeName() async {
     String animeName = widget.animeName;
     try {
       animeName = await ChineseConverter.convertToSimplifiedChinese(
         widget.animeName,
       );
     } catch (_) {}
+    return animeName;
+  }
+
+  Future<void> _loadSavedDanmakuOrAutoMatch(int serial) async {
+    final animeName = await _normalizedAnimeName();
+    if (!mounted || serial != _danmakuLoadSerial) return;
     final chapterName = _removeParentheses(_currentChapterName);
     _setupSearchSegments(animeName, chapterName);
 
+    final record = _playbackRecord ?? await _loadPlaybackRecord(serial);
+    if (!mounted || serial != _danmakuLoadSerial) return;
+
+    final boundEpisodeId = record?.danmakuEpisodeId;
+    if (boundEpisodeId != null) {
+      await _loadDanmakuForEpisode(
+        boundEpisodeId,
+        silent: true,
+        saveBinding: false,
+        serial: serial,
+      );
+      return;
+    }
+
+    await _autoMatchDanmaku(serial: serial, setupSearch: false);
+  }
+
+  Future<void> _autoMatchDanmaku({int? serial, bool setupSearch = true}) async {
+    final animeName = await _normalizedAnimeName();
+    if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
+    final chapterName = _removeParentheses(_currentChapterName);
+    if (setupSearch) {
+      _setupSearchSegments(animeName, chapterName);
+    }
+
     if (!_user.isAutoMatchDanmaku) return;
     try {
-      if (!mounted) return;
+      if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
       setState(() {
         _matchCandidates = [];
         _isAutoMatched = false;
@@ -651,7 +949,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
       if (!mounted) return;
       final response = await DandanplayApi().getRawMatch(fileName);
-      if (!mounted) return;
+      if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
 
       if (response == null || response['success'] != true) return;
 
@@ -669,8 +967,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
 
       if (matches.isEmpty || response['isMatched'] != true) return;
 
-      await _loadDanmakuForEpisode(matches.first.episodeId, silent: true);
-      if (!mounted) return;
+      await _loadDanmakuForEpisode(
+        matches.first.episodeId,
+        silent: true,
+        saveBinding: false,
+        serial: serial,
+      );
+      if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
       setState(() {
         _isAutoMatched = true;
         _matchCandidates = [matches.first];
@@ -692,7 +995,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     );
     _syncSearchText();
     // 如果有缓存，直接显示
-    _doInlineSearch(showLoading: false);
+    unawaited(_doInlineSearch(showLoading: false));
   }
 
   void _syncSearchText() {
@@ -703,12 +1006,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
   }
 
   Future<void> _matchDanmaku() async {
-    String animeName = widget.animeName;
-    try {
-      animeName = await ChineseConverter.convertToSimplifiedChinese(
-        widget.animeName,
-      );
-    } catch (_) {}
+    final animeName = await _normalizedAnimeName();
     final chapterName = _removeParentheses(_currentChapterName);
     _setupSearchSegments(animeName, chapterName);
   }
@@ -746,29 +1044,40 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
           _inlineSearching = false;
           _hasSearched = true;
         });
-        if (showLoading) showToast(context, '搜索失败: $e', isError: true);
+        if (showLoading) _showPlayerHint('搜索失败: $e', isError: true);
       }
     }
   }
 
   void _forceRefreshSearch() {
-    if (!DandanplayApi().clearCache()) {
-      showToast(context, '不要频繁刷新！', isError: true);
+    if (!DandanplayApi().clearSearchCache()) {
+      _showPlayerHint('不要频繁刷新！', isError: true);
       return;
     }
     _doInlineSearch();
   }
 
-  Future<void> _loadDanmakuForEpisode(
+  Future<bool> _loadDanmakuForEpisode(
     int episodeId, {
     bool silent = false,
+    bool saveBinding = true,
+    int? serial,
   }) async {
+    final targetChapterUuid = _currentChapterUuid;
+    final targetChapterName = _currentChapterName;
+    bool isCurrentRequest() =>
+        mounted &&
+        (serial != null
+            ? serial == _danmakuLoadSerial
+            : targetChapterUuid == _currentChapterUuid);
+
+    if (!isCurrentRequest()) return false;
     if (!silent && mounted) {
       setState(() => _loadingDanmakuEpisodeId = episodeId);
     }
     try {
       final comments = await DandanplayApi().getComments(episodeId);
-      if (!mounted) return;
+      if (!isCurrentRequest()) return false;
       final blocklist = _user.danmakuBlocklist;
       final items = <DanmakuContentItem>[];
       final filteredComments = <dynamic>[];
@@ -787,7 +1096,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         );
         filteredComments.add(c);
       }
-      if (!mounted) return;
+      if (!isCurrentRequest()) return false;
       setState(() {
         _loadingDanmakuEpisodeId = null;
         _selectedDanmakuEpisodeId = episodeId;
@@ -798,13 +1107,41 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
         }
       });
       _lastDanmakuSec = -1;
-      // if (!silent) showToast(context, '共加载了 ${items.length} 条弹幕');
+      if (saveBinding) {
+        await AnimePlaybackHistory.saveDanmakuEpisode(
+          pathWord: widget.pathWord,
+          chapterUuid: targetChapterUuid,
+          chapterName: targetChapterName,
+          episodeId: episodeId,
+        );
+        if (mounted && targetChapterUuid == _currentChapterUuid) {
+          setState(() {
+            _playbackRecord = AnimePlaybackRecord(
+              chapterUuid: targetChapterUuid,
+              chapterName: targetChapterName,
+              position: _playbackRecord?.position ?? Duration.zero,
+              duration: _playbackRecord?.duration ?? Duration.zero,
+              danmakuEpisodeId: episodeId,
+              updatedAt: DateTime.now(),
+            );
+          });
+        }
+      }
+      // if (!silent) _showPlayerHint('共加载了 ${items.length} 条弹幕');
+      return true;
     } catch (e) {
       debugPrint('LoadDanmaku error: $e');
-      if (mounted && _loadingDanmakuEpisodeId == episodeId) {
+      final currentRequest = serial != null
+          ? serial == _danmakuLoadSerial
+          : targetChapterUuid == _currentChapterUuid;
+      if (!mounted || !currentRequest) return false;
+      if (_loadingDanmakuEpisodeId == episodeId) {
         setState(() => _loadingDanmakuEpisodeId = null);
       }
-      if (!silent) showToast(context, '加载弹幕失败: $e', isError: true);
+      if (!silent) {
+        _showPlayerHint('加载弹幕失败: $e', isError: true);
+      }
+      return false;
     }
   }
 
@@ -861,6 +1198,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
       chapters: _chapters,
       currentChapterUuid: _currentChapterUuid,
       onChapterSelected: _openChapter,
+      title: _title,
       onFullscreen: fullscreen
           ? () => Navigator.maybePop(context)
           : _fullscreen,
@@ -938,6 +1276,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
     final cs = Theme.of(context).colorScheme;
     return PopScope(
       onPopInvokedWithResult: (_, _) {
+        unawaited(_savePlaybackProgress(force: true, updateState: false));
         _player.pause();
       },
       child: Scaffold(
@@ -966,6 +1305,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                               requiresLogin: _requiresLogin,
                               onLogin: _goLogin,
                               onRetry: () => _load(),
+                              onLogCopied: () => _showPlayerHint('日志已复制到剪贴板'),
                             ),
                     ),
                     if (_showLoadingOverlay)
@@ -1013,11 +1353,21 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                       _DanmakuMatchPanel(
                         isAutoMatched: _isAutoMatched,
                         candidates: _matchCandidates,
-                        onSelect: _loadDanmakuForEpisode,
+                        onSelect: (episodeId) =>
+                            unawaited(_loadDanmakuForEpisode(episodeId)),
                         danmakuVisible: _danmakuVisible,
                         hasDanmaku: _danmakuItems.isNotEmpty,
                       ),
                       const SizedBox(height: 12),
+                      if (_isRestorablePlaybackRecord(_playbackRecord)) ...[
+                        _PlaybackProgressHint(
+                          record: _playbackRecord!,
+                          restored: _playbackProgressRestored,
+                          onResume: () =>
+                              unawaited(_resumeFromPlaybackRecord()),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       _InlineSearchPanel(
                         segments: _searchSegments,
                         selectedIndices: _selectedSegmentIndices,
@@ -1032,7 +1382,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage> {
                         onSearch: _doInlineSearch,
                         onRefresh: _forceRefreshSearch,
                         onSelectResult: (ep) =>
-                            _loadDanmakuForEpisode(ep.episodeId),
+                            unawaited(_loadDanmakuForEpisode(ep.episodeId)),
                       ),
                       const SizedBox(height: 24),
                     ],

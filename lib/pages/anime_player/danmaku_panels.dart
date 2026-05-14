@@ -89,6 +89,76 @@ class _CollapsiblePlayerCardState extends State<_CollapsiblePlayerCard> {
   }
 }
 
+class _PlaybackProgressHint extends StatelessWidget {
+  final AnimePlaybackRecord record;
+  final bool restored;
+  final VoidCallback onResume;
+
+  const _PlaybackProgressHint({
+    required this.record,
+    required this.restored,
+    required this.onResume,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final progressText = record.duration > Duration.zero
+        ? '${_formatDuration(record.position)} / ${_formatDuration(record.duration)}'
+        : _formatDuration(record.position);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cs.secondaryContainer.withValues(alpha: 0.38),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.secondary.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.history, color: cs.secondary, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '上次看到',
+                  style: tt.labelMedium?.copyWith(
+                    color: cs.onSecondaryContainer,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  restored ? '$progressText（已自动继续）' : progressText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodyMedium?.copyWith(
+                    color: cs.onSecondaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onResume,
+            icon: const Icon(Icons.replay_10, size: 18),
+            label: const Text('跳转'),
+            style: TextButton.styleFrom(
+              foregroundColor: cs.secondary,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DanmakuMatchPanel extends StatelessWidget {
   final bool isAutoMatched;
   final List<DandanplayEpisode> candidates;

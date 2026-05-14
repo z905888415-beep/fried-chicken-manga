@@ -46,6 +46,7 @@ class _VideoPlayerSurface extends StatefulWidget {
   final ValueChanged<AnimeChapter> onChapterSelected;
   final bool danmakuVisible;
   final Widget? danmakuView;
+  final String title;
 
   const _VideoPlayerSurface({
     required this.controller,
@@ -59,6 +60,7 @@ class _VideoPlayerSurface extends StatefulWidget {
     required this.currentChapterUuid,
     required this.onChapterSelected,
     required this.danmakuVisible,
+    required this.title,
     this.danmakuView,
   });
 
@@ -369,6 +371,57 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                             _hidePlaylist();
                             widget.onChapterSelected(chapter);
                           },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (widget.fullscreen)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible,
+                    child: AnimatedOpacity(
+                      opacity: _controlsVisible ? 1 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Listener(
+                        onPointerDown: (_) => _showControls(),
+                        child: DecoratedBox(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [Colors.transparent, Colors.black87],
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 8, 16, 16),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  tooltip: '退出全屏',
+                                  onPressed: widget.onFullscreen,
+                                  icon: const Icon(Icons.arrow_back),
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    widget.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),

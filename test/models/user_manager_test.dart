@@ -46,4 +46,19 @@ void main() {
 
     expect(user.animeHomeBannerCollapsed, isTrue);
   });
+
+  test(
+    'anime playback progress setting defaults to enabled and persists',
+    () async {
+      final user = UserManager();
+      await user.init();
+
+      expect(user.animePlaybackProgressEnabled, isTrue);
+
+      await user.setAnimePlaybackProgressEnabled(false);
+      await user.init();
+
+      expect(user.animePlaybackProgressEnabled, isFalse);
+    },
+  );
 }

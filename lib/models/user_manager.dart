@@ -110,6 +110,8 @@ class UserManager extends ChangeNotifier {
   static const _keyApiRoute = 'api_route';
   static const _keyAnimeHomeBannerCollapsed = 'anime_home_banner_collapsed';
   static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
+  static const _keyAnimePlaybackProgressEnabled =
+      'anime_playback_progress_enabled';
   static const _keyAutoMatchDanmaku = 'auto_match_danmaku';
   static const _keyDanmakuEnabled = 'danmaku_enabled';
   static const _keyDanmakuFontSize = 'danmaku_font_size';
@@ -162,6 +164,7 @@ class UserManager extends ChangeNotifier {
   int _apiRoute = 0; // 0=线路1(默认), 1=线路2
   bool _animeHomeBannerCollapsed = false;
   int _animeSkipSeconds = 86;
+  bool _animePlaybackProgressEnabled = true;
   bool _autoMatchDanmaku = false;
   bool _danmakuEnabled = true;
   double _danmakuFontSize = 16;
@@ -229,6 +232,7 @@ class UserManager extends ChangeNotifier {
   int get apiRoute => _apiRoute;
   bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
   int get animeSkipSeconds => _animeSkipSeconds;
+  bool get animePlaybackProgressEnabled => _animePlaybackProgressEnabled;
   bool get isAutoMatchDanmaku => _autoMatchDanmaku;
   bool get danmakuEnabled => _danmakuEnabled;
   double get danmakuFontSize => _danmakuFontSize;
@@ -327,6 +331,8 @@ class UserManager extends ChangeNotifier {
     _animeHomeBannerCollapsed =
         prefs.getBool(_keyAnimeHomeBannerCollapsed) ?? false;
     _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
+    _animePlaybackProgressEnabled =
+        prefs.getBool(_keyAnimePlaybackProgressEnabled) ?? true;
     _autoMatchDanmaku = prefs.getBool(_keyAutoMatchDanmaku) ?? false;
     _danmakuEnabled = prefs.getBool(_keyDanmakuEnabled) ?? true;
     _danmakuFontSize = prefs.getDouble(_keyDanmakuFontSize) ?? 16;
@@ -752,6 +758,14 @@ class UserManager extends ChangeNotifier {
     _animeSkipSeconds = seconds;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyAnimeSkipSeconds, seconds);
+    notifyListeners();
+  }
+
+  Future<void> setAnimePlaybackProgressEnabled(bool enabled) async {
+    if (_animePlaybackProgressEnabled == enabled) return;
+    _animePlaybackProgressEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAnimePlaybackProgressEnabled, enabled);
     notifyListeners();
   }
 

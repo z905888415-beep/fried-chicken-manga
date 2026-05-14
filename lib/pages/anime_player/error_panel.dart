@@ -6,6 +6,7 @@ class _ErrorPanel extends StatelessWidget {
   final bool requiresLogin;
   final VoidCallback onLogin;
   final VoidCallback onRetry;
+  final VoidCallback onLogCopied;
 
   const _ErrorPanel({
     required this.message,
@@ -13,6 +14,7 @@ class _ErrorPanel extends StatelessWidget {
     required this.requiresLogin,
     required this.onLogin,
     required this.onRetry,
+    required this.onLogCopied,
   });
 
   @override
@@ -97,7 +99,7 @@ class _ErrorPanel extends StatelessWidget {
               if (rawError != null) {
                 await Clipboard.setData(ClipboardData(text: rawError!));
                 if (context.mounted) {
-                  showToast(context, '日志已复制到剪贴板');
+                  onLogCopied();
                 }
               }
             },
