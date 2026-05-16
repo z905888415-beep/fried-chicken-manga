@@ -36,6 +36,96 @@ class DandanplayComment {
   });
 }
 
+class DandanplayAnimeSearchItem {
+  final int animeId;
+  final String bangumiId;
+  final String animeTitle;
+  final String? typeDescription;
+  final String? imageUrl;
+  final int episodeCount;
+  final double rating;
+  final String? startDate;
+
+  DandanplayAnimeSearchItem({
+    required this.animeId,
+    required this.bangumiId,
+    required this.animeTitle,
+    this.typeDescription,
+    this.imageUrl,
+    this.episodeCount = 0,
+    this.rating = 0,
+    this.startDate,
+  });
+
+  factory DandanplayAnimeSearchItem.fromJson(Map<String, dynamic> json) =>
+      DandanplayAnimeSearchItem(
+        animeId: json['animeId'] as int? ?? 0,
+        bangumiId: json['bangumiId']?.toString() ?? '',
+        animeTitle: json['animeTitle']?.toString() ?? '',
+        typeDescription: json['typeDescription']?.toString(),
+        imageUrl: json['imageUrl']?.toString(),
+        episodeCount: json['episodeCount'] as int? ?? 0,
+        rating: (json['rating'] as num?)?.toDouble() ?? 0,
+        startDate: json['startDate']?.toString(),
+      );
+}
+
+class DandanplayBangumiEpisode {
+  final int episodeId;
+  final String episodeTitle;
+  final String episodeNumber;
+
+  DandanplayBangumiEpisode({
+    required this.episodeId,
+    required this.episodeTitle,
+    required this.episodeNumber,
+  });
+
+  factory DandanplayBangumiEpisode.fromJson(Map<String, dynamic> json) =>
+      DandanplayBangumiEpisode(
+        episodeId: json['episodeId'] as int? ?? 0,
+        episodeTitle: json['episodeTitle']?.toString() ?? '',
+        episodeNumber: json['episodeNumber']?.toString() ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+    'episodeId': episodeId,
+    'episodeTitle': episodeTitle,
+    'episodeNumber': episodeNumber,
+  };
+}
+
+class DandanplayBangumi {
+  final int animeId;
+  final String bangumiId;
+  final String animeTitle;
+  final String? imageUrl;
+  final List<DandanplayBangumiEpisode> episodes;
+
+  DandanplayBangumi({
+    required this.animeId,
+    required this.bangumiId,
+    required this.animeTitle,
+    this.imageUrl,
+    this.episodes = const [],
+  });
+
+  factory DandanplayBangumi.fromJson(Map<String, dynamic> json) {
+    final episodes = (json['episodes'] as List?)
+            ?.map((e) =>
+                DandanplayBangumiEpisode.fromJson(Map<String, dynamic>.from(e)))
+            .toList() ??
+        const <DandanplayBangumiEpisode>[];
+    return DandanplayBangumi(
+      animeId: json['animeId'] as int? ?? 0,
+      bangumiId: json['bangumiId']?.toString() ?? '',
+      animeTitle: json['animeTitle']?.toString() ?? '',
+      imageUrl: json['imageUrl']?.toString(),
+      episodes: episodes,
+    );
+  }
+}
+
 class DandanplayApi {
   static const _baseUrl = 'https://api.dandanplay.net';
 
@@ -184,6 +274,55 @@ class DandanplayApi {
     return [];
   }
 
+  /// 按关键词搜索动漫列表（不含 episodes，仅返回动漫基本信息）
+  Future<List<DandanplayAnimeSearchItem>> searchAnime(String keyword) async {
+    final key = _cacheKey('/api/v2/search/anime', {'keyword': keyword});
+    final cached = _getCache<List<DandanplayAnimeSearchItem>>(key);
+    if (cached != null) return cached;
+
+    try {
+      final response = await _dio.get(
+        '/api/v2/search/anime',
+        queryParameters: {'keyword': keyword},
+      );
+      final data = response.data;
+      if (data is Map && data['success'] == true) {
+        final animes = (data['animes'] as List?) ?? const [];
+        final results = animes
+            .map((e) =>
+                DandanplayAnimeSearchItem.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+        _setCache(key, results, _ttlSearch);
+        return results;
+      }
+    } catch (e) {
+      debugPrint('Dandanplay searchAnime error: $e');
+    }
+    return [];
+  }
+
+  /// 获取番剧详情（含所有 episodes）
+  Future<DandanplayBangumi?> getBangumi(int animeId) async {
+    final key = _cacheKey('/api/v2/bangumi/$animeId');
+    final cached = _getCache<DandanplayBangumi>(key);
+    if (cached != null) return cached;
+
+    try {
+      final response = await _dio.get('/api/v2/bangumi/$animeId');
+      final data = response.data;
+      if (data is Map && data['success'] == true && data['bangumi'] is Map) {
+        final bangumi = DandanplayBangumi.fromJson(
+          Map<String, dynamic>.from(data['bangumi']),
+        );
+        _setCache(key, bangumi, _ttlSearch);
+        return bangumi;
+      }
+    } catch (e) {
+      debugPrint('Dandanplay getBangumi error: $e');
+    }
+    return null;
+  }
+
   bool _clearCacheWhere(bool Function(String key) shouldRemove) {
     final now = DateTime.now();
     if (_lastClearTime != null &&
@@ -201,7 +340,9 @@ class DandanplayApi {
     return _clearCacheWhere(
       (key) =>
           key.startsWith('/api/v2/match') ||
-          key.startsWith('/api/v2/search/episodes'),
+          key.startsWith('/api/v2/search/episodes') ||
+          key.startsWith('/api/v2/search/anime') ||
+          key.startsWith('/api/v2/bangumi/'),
     );
   }
 

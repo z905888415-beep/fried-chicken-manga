@@ -4,10 +4,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
 import '../utils/anime_download_manager.dart';
 import '../utils/anime_playback_history.dart';
+import '../utils/chinese_converter.dart';
 import '../utils/data_cache.dart';
+import '../utils/dandanplay_binding_store.dart';
 import '../utils/toast.dart';
 import 'anime_player_page.dart';
 import 'download_center_page.dart';
@@ -23,46 +26,69 @@ class AnimeDetailPage extends StatefulWidget {
   State<AnimeDetailPage> createState() => _AnimeDetailPageState();
 }
 
-class _AnimeDetailPageState extends State<AnimeDetailPage> {
+class _AnimeDetailPageState extends State<AnimeDetailPage>
+    with SingleTickerProviderStateMixin {
   static const _watchedCompleteRemainingThreshold = Duration(minutes: 3);
+  static const _detailCacheTtl = Duration(days: 3);
+  static const _tabIntro = 0;
+  static const _tabEpisodes = 1;
 
   final _api = ApiClient();
   final _cache = DataCache();
   final _downloads = AnimeDownloadManager();
+  final _dandanplayBindingStore = DandanplayBindingStore();
+  late final TabController _tabController;
   Anime? _anime;
   List<AnimeChapter> _chapters = [];
   int _chapterTotal = 0;
-  bool _loadingDetail = true;
+  int _currentTab = _tabEpisodes;
+  bool _loadingDetail = false;
+  bool _detailReady = false;
   bool _loadingChapters = true;
   bool _briefExpanded = false;
   bool _isCollected = false;
   bool _collectSubmitting = false;
   DateTime? _refreshedAt;
   AnimePlaybackRecord? _latestPlaybackRecord;
-  String? _error;
+  DandanplayBindingRecord? _dandanplayBinding;
+  DandanplayBangumi? _dandanplayBangumi;
+  bool _loadingDandanplayBangumi = false;
+  String? _dandanplayBangumiError;
+  Map<String, int?> _danmakuEpisodeBindings = {};
+  int _dandanplayBangumiSerial = 0;
+  String? _detailError;
+  String? _chapterError;
 
   // 批量下载选择
   final Set<String> _selectedUuids = {};
   bool _selectionMode = false;
   StreamSubscription<String>? _errorSub;
 
-  String get _cacheKey => 'anime_detail_${widget.pathWord}';
+  String get _detailCacheKey => 'anime_detail_info_v2_${widget.pathWord}';
+  bool get _isIntroTab => _currentTab == _tabIntro;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: _tabEpisodes,
+    )..addListener(_onTabChanged);
     _anime = widget.initialAnime;
-    _loadingDetail = widget.initialAnime == null;
     _downloads.addListener(_onDownloadsChanged);
     _errorSub = _downloads.onError.listen((msg) {
       if (mounted) showToast(context, msg, isError: true);
     });
-    _loadFromCache();
-    _load();
+    unawaited(_loadDandanplayBinding());
+    unawaited(_loadDetail());
+    unawaited(_loadChapters());
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
     _errorSub?.cancel();
     _downloads.removeListener(_onDownloadsChanged);
     super.dispose();
@@ -72,72 +98,62 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _loadFromCache() async {
-    final cached = await _cache.get(_cacheKey);
-    if (!mounted || cached is! Map) return;
-    final animeJson = cached['anime'];
-    if (animeJson is! Map) return;
-
-    setState(() {
-      _anime = Anime.fromJson(Map<String, dynamic>.from(animeJson));
-      _chapters =
-          (cached['chapters'] as List?)
-              ?.map((e) => AnimeChapter.fromJson(Map<String, dynamic>.from(e)))
-              .toList() ??
-          const [];
-      _chapterTotal = cached['chapterTotal'] as int? ?? _chapters.length;
-      _isCollected = cached['isCollected'] == true;
-      _refreshedAt = DateTime.tryParse(cached['refreshedAt']?.toString() ?? '');
-      _loadingDetail = false;
-      _loadingChapters = false;
-    });
-    unawaited(_loadLatestPlaybackRecord());
+  void _onTabChanged() {
+    if (_currentTab == _tabController.index) return;
+    _currentTab = _tabController.index;
+    if (_currentTab == _tabIntro) {
+      unawaited(_ensureDetailLoaded());
+    }
+    if (_currentTab != _tabEpisodes && _selectionMode) {
+      _exitSelectionMode();
+      return;
+    }
+    if (mounted) setState(() {});
   }
 
-  Future<void> _saveCache() async {
+  Future<void> _saveDetailCache() async {
     final anime = _anime;
     if (anime == null) return;
-    await _cache.put(_cacheKey, {
+    await _cache.put(_detailCacheKey, {
       'anime': anime.toJson(),
-      'chapters': _chapters
-          .map(
-            (e) => {
-              'name': e.name,
-              'uuid': e.uuid,
-              'v_cover': e.vCover,
-              'lines': e.lines
-                  .map(
-                    (line) => {
-                      'name': line.name,
-                      'path_word': line.pathWord,
-                      'config': line.config,
-                    },
-                  )
-                  .toList(),
-            },
-          )
-          .toList(),
-      'chapterTotal': _chapterTotal,
       'isCollected': _isCollected,
       if (_refreshedAt != null) 'refreshedAt': _refreshedAt!.toIso8601String(),
-    });
+    }, ttl: _detailCacheTtl);
   }
 
-  Future<void> _load() async {
-    if (_anime == null) {
+  Future<void> _ensureDetailLoaded() async {
+    if (_detailReady || _loadingDetail) return;
+    await _loadDetail();
+  }
+
+  Future<void> _loadDetail({bool forceRefresh = false}) async {
+    if (_loadingDetail) return;
+    try {
+      if (!forceRefresh) {
+        final cached = await _cache.get(_detailCacheKey);
+        if (cached is Map) {
+          final animeJson = cached['anime'];
+          if (animeJson is Map) {
+            if (!mounted) return;
+            setState(() {
+              _anime = Anime.fromJson(Map<String, dynamic>.from(animeJson));
+              _isCollected = cached['isCollected'] == true;
+              _refreshedAt = DateTime.tryParse(
+                cached['refreshedAt']?.toString() ?? '',
+              );
+              _detailReady = true;
+              _detailError = null;
+            });
+            return;
+          }
+        }
+      }
+
       setState(() {
         _loadingDetail = true;
-        _error = null;
+        _detailError = null;
       });
-    }
-
-    try {
-      final results = await Future.wait<dynamic>([
-        _api.getAnimeDetail(widget.pathWord),
-        _api.getAnimeChapters(widget.pathWord),
-      ]);
-      final detail = results[0] as Anime;
-      final chapters = results[1] as ({List<AnimeChapter> list, int total});
+      final detail = await _api.getAnimeDetail(widget.pathWord);
       AnimeQuery? query;
       try {
         query = await _api.getAnimeQuery(widget.pathWord);
@@ -149,30 +165,62 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
       final refreshedAt = DateTime.now();
       setState(() {
         _anime = detail;
-        _chapters = chapters.list;
-        _chapterTotal = chapters.total;
-        _isCollected = query?.isCollected ?? false;
+        _isCollected = query?.isCollected ?? _isCollected;
         _refreshedAt = refreshedAt;
+        _detailReady = true;
         _loadingDetail = false;
-        _loadingChapters = false;
-        _error = null;
+        _detailError = null;
       });
-      await _saveCache();
-      unawaited(_loadLatestPlaybackRecord());
+      await _saveDetailCache();
     } catch (e) {
-      debugPrint('AnimeDetailPage load error: $e');
+      debugPrint('AnimeDetailPage load detail error: $e');
       if (!mounted) return;
       setState(() {
         _loadingDetail = false;
-        _loadingChapters = false;
-        _error = e.toString();
+        _detailError = e.toString();
       });
+      if (_detailReady) {
+        showToast(context, '简介刷新失败', isError: true);
+      }
     }
   }
 
-  Future<void> _refresh() async {
+  Future<void> _loadChapters() async {
+    setState(() {
+      _loadingChapters = true;
+      _chapterError = null;
+    });
+    try {
+      final chapters = await _api.getAnimeChapters(widget.pathWord);
+      if (!mounted) return;
+      setState(() {
+        _chapters = chapters.list;
+        _chapterTotal = chapters.total;
+        _loadingChapters = false;
+        _chapterError = null;
+      });
+      unawaited(_loadLatestPlaybackRecord());
+      _syncDandanplayBindingsAfterChaptersLoaded();
+    } catch (e) {
+      debugPrint('AnimeDetailPage load chapters error: $e');
+      if (!mounted) return;
+      setState(() {
+        _loadingChapters = false;
+        _chapterError = e.toString();
+      });
+      if (_chapters.isNotEmpty) {
+        showToast(context, '选集刷新失败', isError: true);
+      }
+    }
+  }
+
+  Future<void> _refreshCurrentTab() async {
     _exitSelectionMode();
-    await _load();
+    if (_isIntroTab) {
+      await _loadDetail(forceRefresh: true);
+      return;
+    }
+    await _loadChapters();
   }
 
   String? get _refreshedAtText {
@@ -214,6 +262,257 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
       return bTime.compareTo(aTime);
     });
     return records.first;
+  }
+
+  Future<void> _loadDandanplayBinding() async {
+    final binding = await _dandanplayBindingStore.getByPathWord(
+      widget.pathWord,
+    );
+    if (!mounted) return;
+    setState(() => _dandanplayBinding = binding);
+    if (binding != null) {
+      unawaited(_loadDandanplayBangumi(binding, applySequentialIfEmpty: true));
+    }
+  }
+
+  String get _currentAnimeTitle {
+    final title = _anime?.name ?? widget.initialAnime?.name ?? widget.pathWord;
+    return title.trim().isEmpty ? widget.pathWord : title.trim();
+  }
+
+  Future<String> _simplifiedDandanplayKeyword(String text) async {
+    try {
+      return await ChineseConverter.convertToSimplifiedChinese(text);
+    } catch (_) {
+      return text;
+    }
+  }
+
+  Future<void> _showDandanplayBindingDialog() async {
+    final animeTitle = _currentAnimeTitle;
+    final initialKeyword = await _simplifiedDandanplayKeyword(animeTitle);
+    if (!mounted) return;
+
+    final result = await showDialog<_DandanplayBindingDialogResult>(
+      context: context,
+      builder: (_) => _DandanplayBindingDialog(
+        initialKeyword: initialKeyword,
+        currentBinding: _dandanplayBinding,
+        pathWord: widget.pathWord,
+        localTitle: animeTitle,
+        localUuid: _anime?.uuid ?? widget.initialAnime?.uuid,
+      ),
+    );
+    if (!mounted || result == null) return;
+
+    if (result.clear) {
+      await _dandanplayBindingStore.removeByPathWord(widget.pathWord);
+      await _clearDandanplayChapterBindings();
+      if (!mounted) return;
+      setState(() {
+        _dandanplayBinding = null;
+        _dandanplayBangumi = null;
+        _dandanplayBangumiError = null;
+        _danmakuEpisodeBindings = {};
+      });
+      showToast(context, '已清除弹弹play绑定');
+      return;
+    }
+
+    final record = result.record;
+    if (record == null) return;
+    await _dandanplayBindingStore.save(record);
+    if (!mounted) return;
+    setState(() {
+      _dandanplayBinding = record;
+      _dandanplayBangumi = null;
+      _dandanplayBangumiError = null;
+      _danmakuEpisodeBindings = {};
+    });
+    await _loadDandanplayBangumi(record, applySequential: true);
+    if (!mounted) return;
+    showToast(context, '已绑定 ${record.animeTitle}');
+  }
+
+  void _syncDandanplayBindingsAfterChaptersLoaded() {
+    final binding = _dandanplayBinding;
+    if (binding == null || _chapters.isEmpty) return;
+    final bangumi = _dandanplayBangumi;
+    if (bangumi != null) {
+      unawaited(
+        _loadDandanplayEpisodeBindings(bangumi, applySequentialIfEmpty: true),
+      );
+      return;
+    }
+    unawaited(_loadDandanplayBangumi(binding, applySequentialIfEmpty: true));
+  }
+
+  Future<void> _loadDandanplayBangumi(
+    DandanplayBindingRecord binding, {
+    bool applySequential = false,
+    bool applySequentialIfEmpty = false,
+  }) async {
+    final serial = ++_dandanplayBangumiSerial;
+    setState(() {
+      _loadingDandanplayBangumi = true;
+      _dandanplayBangumiError = null;
+    });
+
+    final bangumi = await DandanplayApi().getBangumi(binding.animeId);
+    if (!mounted ||
+        serial != _dandanplayBangumiSerial ||
+        _dandanplayBinding?.animeId != binding.animeId) {
+      return;
+    }
+
+    if (bangumi == null) {
+      setState(() {
+        _dandanplayBangumi = null;
+        _loadingDandanplayBangumi = false;
+        _dandanplayBangumiError = '弹弹play剧集加载失败';
+      });
+      return;
+    }
+
+    setState(() {
+      _dandanplayBangumi = bangumi;
+      _loadingDandanplayBangumi = false;
+      _dandanplayBangumiError = null;
+    });
+
+    if (_chapters.isEmpty) return;
+    if (applySequential) {
+      await _applySequentialDandanplayBindings(bangumi.episodes);
+      return;
+    }
+    await _loadDandanplayEpisodeBindings(
+      bangumi,
+      applySequentialIfEmpty: applySequentialIfEmpty,
+    );
+  }
+
+  Future<void> _loadDandanplayEpisodeBindings(
+    DandanplayBangumi bangumi, {
+    bool applySequentialIfEmpty = false,
+  }) async {
+    final bindings = await _readDandanplayEpisodeBindings();
+    if (!mounted) return;
+    final hasAnyBinding = bindings.values.any((episodeId) => episodeId != null);
+    if (applySequentialIfEmpty &&
+        !hasAnyBinding &&
+        bangumi.episodes.isNotEmpty) {
+      await _applySequentialDandanplayBindings(bangumi.episodes);
+      return;
+    }
+    setState(() => _danmakuEpisodeBindings = bindings);
+  }
+
+  Future<Map<String, int?>> _readDandanplayEpisodeBindings() async {
+    final entries = await Future.wait(
+      _chapters.map((chapter) async {
+        final record = await AnimePlaybackHistory.get(
+          pathWord: widget.pathWord,
+          chapterUuid: chapter.uuid,
+        );
+        return MapEntry(chapter.uuid, record?.danmakuEpisodeId);
+      }),
+    );
+    return Map<String, int?>.fromEntries(entries);
+  }
+
+  Future<void> _applySequentialDandanplayBindings(
+    List<DandanplayBangumiEpisode> episodes,
+  ) async {
+    final validEpisodes = _uniqueDandanplayEpisodes(episodes);
+    final nextBindings = <String, int?>{};
+
+    await Future.wait(
+      _chapters.indexed.map((entry) async {
+        final index = entry.$1;
+        final chapter = entry.$2;
+        final episode = index < validEpisodes.length
+            ? validEpisodes[index]
+            : null;
+        nextBindings[chapter.uuid] = episode?.episodeId;
+        if (episode == null) {
+          await AnimePlaybackHistory.clearDanmakuEpisode(
+            pathWord: widget.pathWord,
+            chapterUuid: chapter.uuid,
+            chapterName: chapter.name,
+          );
+          return;
+        }
+        await AnimePlaybackHistory.saveDanmakuEpisode(
+          pathWord: widget.pathWord,
+          chapterUuid: chapter.uuid,
+          chapterName: chapter.name,
+          episodeId: episode.episodeId,
+        );
+      }),
+    );
+
+    if (!mounted) return;
+    setState(() => _danmakuEpisodeBindings = nextBindings);
+  }
+
+  Future<void> _clearDandanplayChapterBindings() async {
+    await Future.wait(
+      _chapters.map(
+        (chapter) => AnimePlaybackHistory.clearDanmakuEpisode(
+          pathWord: widget.pathWord,
+          chapterUuid: chapter.uuid,
+          chapterName: chapter.name,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateDandanplayEpisodeBinding(
+    AnimeChapter chapter,
+    int? episodeId,
+  ) async {
+    setState(() {
+      _danmakuEpisodeBindings = {
+        ..._danmakuEpisodeBindings,
+        chapter.uuid: episodeId,
+      };
+    });
+    if (episodeId == null) {
+      await AnimePlaybackHistory.clearDanmakuEpisode(
+        pathWord: widget.pathWord,
+        chapterUuid: chapter.uuid,
+        chapterName: chapter.name,
+      );
+      return;
+    }
+    await AnimePlaybackHistory.saveDanmakuEpisode(
+      pathWord: widget.pathWord,
+      chapterUuid: chapter.uuid,
+      chapterName: chapter.name,
+      episodeId: episodeId,
+    );
+  }
+
+  List<DandanplayBangumiEpisode> _uniqueDandanplayEpisodes(
+    List<DandanplayBangumiEpisode> episodes,
+  ) {
+    final seen = <int>{};
+    return episodes
+        .where(
+          (episode) => episode.episodeId > 0 && seen.add(episode.episodeId),
+        )
+        .toList();
+  }
+
+  DandanplayBangumiEpisode? _findDandanplayEpisode(
+    List<DandanplayBangumiEpisode> episodes,
+    int? episodeId,
+  ) {
+    if (episodeId == null) return null;
+    for (final episode in episodes) {
+      if (episode.episodeId == episodeId) return episode;
+    }
+    return null;
   }
 
   AnimeChapter? get _latestPlaybackChapter {
@@ -328,9 +627,20 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     });
   }
 
-  Future<void> _batchDownload() async {
+  Future<Anime?> _ensureAnimeForDownload() async {
     final anime = _anime;
-    if (anime == null || _selectedUuids.isEmpty) return;
+    if (anime != null) return anime;
+    await _loadDetail();
+    return _anime;
+  }
+
+  Future<void> _batchDownload() async {
+    if (_selectedUuids.isEmpty) return;
+    final anime = await _ensureAnimeForDownload();
+    if (anime == null) {
+      if (mounted) showToast(context, '动漫信息加载失败，无法下载', isError: true);
+      return;
+    }
 
     await _downloads.init();
     if (!mounted) return;
@@ -363,37 +673,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     _exitSelectionMode();
   }
 
-  Future<void> _downloadSingle(AnimeChapter chapter) async {
-    final anime = _anime;
-    if (anime == null) return;
-    await _downloads.init();
-    if (!mounted) return;
-
-    final line = _resolveChapterLine(chapter);
-    if (line == null || line.isEmpty) {
-      showToast(context, '当前选集暂无可用线路，无法下载', isError: true);
-      return;
-    }
-
-    if (_downloads.isDownloaded(widget.pathWord, chapter.uuid)) {
-      showToast(context, '该集已下载');
-      return;
-    }
-
-    if (_downloads.isInQueue(widget.pathWord, chapter.uuid)) {
-      showToast(context, '该集已在下载队列中');
-      return;
-    }
-
-    await _downloads.enqueueChapters(
-      pathWord: widget.pathWord,
-      anime: anime,
-      chapters: [chapter],
-      line: line,
-    );
-    if (mounted) showToast(context, '已添加到下载队列');
-  }
-
   Future<void> _toggleCollect() async {
     final anime = _anime;
     final cartoonId = anime?.uuid;
@@ -411,14 +690,14 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
 
     try {
       await _api.toggleAnimeCollect(cartoonId, collect: nextState);
-      await _saveCache();
+      await _saveDetailCache();
       if (!mounted) return;
       showToast(context, nextState ? '已收藏' : '已取消收藏');
     } catch (e) {
       debugPrint('AnimeDetailPage toggleCollect error: $e');
       if (!mounted) return;
       setState(() => _isCollected = !nextState);
-      await _saveCache();
+      await _saveDetailCache();
       if (!mounted) return;
       showToast(context, '收藏状态修改失败', isError: true);
     } finally {
@@ -545,6 +824,285 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     return '${duration.inMinutes}:$seconds';
   }
 
+  List<Widget> _buildIntroSlivers(
+    Anime? anime,
+    double hp,
+    TextTheme tt,
+    ColorScheme cs,
+  ) {
+    if (anime == null) {
+      if (_loadingDetail) {
+        return const [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ),
+        ];
+      }
+      return [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Center(
+              child: Text(
+                _detailError == null ? '暂无简介信息' : '简介加载失败，下拉重试',
+                style: tt.bodyMedium,
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(hp, 18, hp, 0),
+          child: _AnimeInfoPanel(
+            anime: anime,
+            isCollected: _isCollected,
+            collectSubmitting: _collectSubmitting,
+            briefExpanded: _briefExpanded,
+            refreshedAtText: _refreshedAtText,
+            onToggleCollect: _toggleCollect,
+            onToggleBrief: () {
+              setState(() => _briefExpanded = !_briefExpanded);
+            },
+          ),
+        ),
+      ),
+      if (_detailError != null)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
+            child: Text(
+              '简介刷新失败，当前显示缓存内容',
+              style: tt.bodySmall?.copyWith(color: cs.error),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  List<Widget> _buildEpisodeSlivers(double hp, TextTheme tt, ColorScheme cs) {
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(hp, 24, hp, 12),
+          child: Row(
+            children: [
+              Icon(Icons.video_library_outlined, color: cs.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _selectionMode
+                      ? '已选 ${_selectedUuids.length} 集'
+                      : '选集 ($_chapterTotal)',
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (_selectionMode) ...[
+                TextButton(onPressed: _selectAll, child: const Text('全选未下载')),
+                const SizedBox(width: 4),
+                FilledButton.tonal(
+                  onPressed: _selectedUuids.isEmpty ? null : _batchDownload,
+                  child: const Text('下载选中'),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: _exitSelectionMode,
+                  icon: const Icon(Icons.close),
+                  tooltip: '取消',
+                ),
+              ] else ...[
+                FilledButton.tonalIcon(
+                  onPressed: _showDandanplayBindingDialog,
+                  icon: Icon(
+                    _dandanplayBinding == null
+                        ? Icons.link_rounded
+                        : Icons.check_circle_outline_rounded,
+                    size: 18,
+                  ),
+                  label: Text(_dandanplayBinding == null ? '绑定弹弹play' : '已绑定'),
+                ),
+                if (_chapters.isNotEmpty) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    onPressed: () => setState(() => _selectionMode = true),
+                    icon: const Icon(Icons.checklist),
+                    tooltip: '批量选择',
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+      if (_chapterError != null && _chapters.isEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Center(child: Text('选集加载失败，下拉重试', style: tt.bodyMedium)),
+          ),
+        )
+      else if (_loadingChapters)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        )
+      else if (_chapters.isEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Center(child: Text('暂无选集', style: tt.bodyMedium)),
+          ),
+        )
+      else if (_dandanplayBinding != null)
+        ..._buildBoundEpisodeSlivers(hp, tt, cs)
+      else ...[
+        if (_chapterError != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(hp, 0, hp, 12),
+              child: Text(
+                '选集刷新失败，当前显示上次结果',
+                style: tt.bodySmall?.copyWith(color: cs.error),
+              ),
+            ),
+          ),
+        SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: hp),
+          sliver: SliverGrid(
+            delegate: SliverChildBuilderDelegate((_, i) {
+              final chapter = _chapters[i];
+              final selected = _selectedUuids.contains(chapter.uuid);
+              final downloaded = _downloads.isDownloaded(
+                widget.pathWord,
+                chapter.uuid,
+              );
+              final taskInfo = _downloads.taskInfo(
+                widget.pathWord,
+                chapter.uuid,
+              );
+              final inQueue = taskInfo != null;
+
+              return _AnimeChapterCard(
+                chapter: chapter,
+                selected: selected,
+                selectionMode: _selectionMode,
+                isDownloaded: downloaded,
+                isDownloading:
+                    taskInfo?.status == DownloadTaskStatus.downloading,
+                isQueued:
+                    inQueue &&
+                    taskInfo.status != DownloadTaskStatus.downloading,
+                progress: _downloads.progressOf(widget.pathWord, chapter.uuid),
+                onTap: () {
+                  if (_selectionMode) {
+                    _toggleSelection(chapter.uuid);
+                    return;
+                  }
+                  _openChapter(chapter);
+                },
+                onLongPress: () => _enterSelectionMode(chapter.uuid),
+              );
+            }, childCount: _chapters.length),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 120,
+              mainAxisExtent: 52,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+            ),
+          ),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _buildBoundEpisodeSlivers(
+    double hp,
+    TextTheme tt,
+    ColorScheme cs,
+  ) {
+    final bangumi = _dandanplayBangumi;
+    final episodes = bangumi == null
+        ? const <DandanplayBangumiEpisode>[]
+        : _uniqueDandanplayEpisodes(bangumi.episodes);
+
+    return [
+      if (_chapterError != null)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(hp, 0, hp, 12),
+            child: Text(
+              '选集刷新失败，当前显示上次结果',
+              style: tt.bodySmall?.copyWith(color: cs.error),
+            ),
+          ),
+        ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(hp, 0, hp, 12),
+          child: _DandanplayBindingSummary(
+            binding: _dandanplayBinding!,
+            loading: _loadingDandanplayBangumi,
+            error: _dandanplayBangumiError,
+            episodeCount: episodes.length,
+            onRebind: _showDandanplayBindingDialog,
+          ),
+        ),
+      ),
+      if (_loadingDandanplayBangumi && episodes.isEmpty)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        )
+      else
+        SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: hp),
+          sliver: SliverList.separated(
+            itemCount: _chapters.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (_, index) {
+              final chapter = _chapters[index];
+              final selectedEpisodeId = _danmakuEpisodeBindings[chapter.uuid];
+              final selectedEpisode = _findDandanplayEpisode(
+                episodes,
+                selectedEpisodeId,
+              );
+              return _BoundAnimeChapterRow(
+                chapter: chapter,
+                selected: _selectedUuids.contains(chapter.uuid),
+                selectionMode: _selectionMode,
+                isDownloaded: _downloads.isDownloaded(
+                  widget.pathWord,
+                  chapter.uuid,
+                ),
+                episodes: episodes,
+                selectedEpisodeId: selectedEpisode?.episodeId,
+                onTap: () {
+                  if (_selectionMode) {
+                    _toggleSelection(chapter.uuid);
+                    return;
+                  }
+                  _openChapter(chapter);
+                },
+                onLongPress: () => _enterSelectionMode(chapter.uuid),
+                onEpisodeChanged: (episodeId) =>
+                    _updateDandanplayEpisodeBinding(chapter, episodeId),
+              );
+            },
+          ),
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final anime = _anime;
@@ -554,11 +1112,11 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     final contentWidth = screenWidth < 900 ? screenWidth : 900.0;
     final hp = (screenWidth - contentWidth) / 2 + 16;
 
-    if (_loadingDetail && anime == null) {
+    if (_loadingChapters && anime == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    if (_error != null && anime == null) {
+    if (_chapterError != null && anime == null) {
       return Scaffold(
         appBar: AppBar(),
         body: Center(
@@ -567,9 +1125,12 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
             children: [
               Icon(Icons.cloud_off, size: 64, color: cs.onSurfaceVariant),
               const SizedBox(height: 16),
-              Text('加载失败', style: tt.titleMedium),
+              Text('选集加载失败', style: tt.titleMedium),
               const SizedBox(height: 8),
-              FilledButton.tonal(onPressed: _load, child: const Text('重试')),
+              FilledButton.tonal(
+                onPressed: _loadChapters,
+                child: const Text('重试'),
+              ),
             ],
           ),
         ),
@@ -579,7 +1140,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
     return Scaffold(
       floatingActionButton: _buildFloatingActions(cs),
       body: RefreshIndicator(
-        onRefresh: _refresh,
+        onRefresh: _refreshCurrentTab,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -602,137 +1163,656 @@ class _AnimeDetailPageState extends State<AnimeDetailPage> {
             ),
             if (_loadingDetail)
               const SliverToBoxAdapter(child: LinearProgressIndicator()),
-            if (anime != null)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(hp, 18, hp, 0),
-                  child: _AnimeInfoPanel(
-                    anime: anime,
-                    isCollected: _isCollected,
-                    collectSubmitting: _collectSubmitting,
-                    briefExpanded: _briefExpanded,
-                    refreshedAtText: _refreshedAtText,
-                    onToggleCollect: _toggleCollect,
-                    onToggleBrief: () {
-                      setState(() => _briefExpanded = !_briefExpanded);
-                    },
-                  ),
-                ),
-              ),
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(hp, 24, hp, 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.video_library_outlined, color: cs.primary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        _selectionMode
-                            ? '已选 ${_selectedUuids.length} 集'
-                            : '选集 ($_chapterTotal)',
-                        style: tt.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    if (_selectionMode) ...[
-                      TextButton(
-                        onPressed: _selectAll,
-                        child: const Text('全选未下载'),
-                      ),
-                      const SizedBox(width: 4),
-                      FilledButton.tonal(
-                        onPressed: _selectedUuids.isEmpty
-                            ? null
-                            : _batchDownload,
-                        child: const Text('下载选中'),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        onPressed: _exitSelectionMode,
-                        icon: const Icon(Icons.close),
-                        tooltip: '取消',
-                      ),
-                    ] else if (_chapters.isNotEmpty)
-                      IconButton(
-                        onPressed: () => setState(() => _selectionMode = true),
-                        icon: const Icon(Icons.checklist),
-                        tooltip: '批量选择',
-                      ),
+                padding: EdgeInsets.fromLTRB(hp, 18, hp, 0),
+                child: TabBar(
+                  controller: _tabController,
+                  tabs: [
+                    const Tab(text: '简介'),
+                    Tab(text: '选集 ($_chapterTotal)'),
                   ],
                 ),
               ),
             ),
-            if (_loadingChapters)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              )
-            else if (_chapters.isEmpty)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Center(child: Text('暂无选集', style: tt.bodyMedium)),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: hp),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 180,
-                    childAspectRatio: 1.45,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                  ),
-                  delegate: SliverChildBuilderDelegate((_, i) {
-                    final chapter = _chapters[i];
-                    final selected = _selectedUuids.contains(chapter.uuid);
-                    final downloaded = _downloads.isDownloaded(
-                      widget.pathWord,
-                      chapter.uuid,
-                    );
-                    final taskInfo = _downloads.taskInfo(
-                      widget.pathWord,
-                      chapter.uuid,
-                    );
-                    final inQueue = taskInfo != null;
-
-                    return _AnimeChapterCard(
-                      chapter: chapter,
-                      selected: selected,
-                      selectionMode: _selectionMode,
-                      isDownloaded: downloaded,
-                      isDownloading:
-                          taskInfo?.status == DownloadTaskStatus.downloading,
-                      isQueued:
-                          inQueue &&
-                          taskInfo.status != DownloadTaskStatus.downloading,
-                      progress: _downloads.progressOf(
-                        widget.pathWord,
-                        chapter.uuid,
-                      ),
-                      onTap: () {
-                        if (_selectionMode) {
-                          _toggleSelection(chapter.uuid);
-                          return;
-                        }
-                        _openChapter(chapter);
-                      },
-                      onLongPress: () => _enterSelectionMode(chapter.uuid),
-                      onDownload: () => _downloadSingle(chapter),
-                    );
-                  }, childCount: _chapters.length),
-                ),
-              ),
+            ...(_isIntroTab
+                ? _buildIntroSlivers(anime, hp, tt, cs)
+                : _buildEpisodeSlivers(hp, tt, cs)),
             const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
           ],
         ),
       ),
     );
+  }
+}
+
+class _DandanplayBindingDialogResult {
+  final DandanplayBindingRecord? record;
+  final bool clear;
+
+  const _DandanplayBindingDialogResult._({this.record, this.clear = false});
+
+  const _DandanplayBindingDialogResult.bind(DandanplayBindingRecord record)
+    : this._(record: record);
+
+  const _DandanplayBindingDialogResult.clear() : this._(clear: true);
+}
+
+class _DandanplayBindingDialog extends StatefulWidget {
+  final String initialKeyword;
+  final DandanplayBindingRecord? currentBinding;
+  final String pathWord;
+  final String localTitle;
+  final String? localUuid;
+
+  const _DandanplayBindingDialog({
+    required this.initialKeyword,
+    required this.currentBinding,
+    required this.pathWord,
+    required this.localTitle,
+    this.localUuid,
+  });
+
+  @override
+  State<_DandanplayBindingDialog> createState() =>
+      _DandanplayBindingDialogState();
+}
+
+class _DandanplayBindingDialogState extends State<_DandanplayBindingDialog> {
+  late final TextEditingController _controller;
+  final _api = DandanplayApi();
+  List<DandanplayAnimeSearchItem> _results = [];
+  bool _searching = false;
+  bool _searched = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialKeyword);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_search());
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final rawKeyword = _controller.text.trim();
+    if (rawKeyword.isEmpty || _searching) return;
+    setState(() {
+      _searching = true;
+      _searched = true;
+      _error = null;
+    });
+
+    try {
+      final keyword = await ChineseConverter.convertToSimplifiedChinese(
+        rawKeyword,
+      );
+      if (!mounted) return;
+      if (keyword != rawKeyword) {
+        _controller.value = TextEditingValue(
+          text: keyword,
+          selection: TextSelection.collapsed(offset: keyword.length),
+        );
+      }
+      final results = await _api.searchAnime(keyword);
+      if (!mounted) return;
+      setState(() {
+        _results = results;
+        _searching = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _results = [];
+        _searching = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _bind(DandanplayAnimeSearchItem item) {
+    Navigator.pop(
+      context,
+      _DandanplayBindingDialogResult.bind(
+        DandanplayBindingRecord(
+          pathWord: widget.pathWord,
+          localTitle: widget.localTitle,
+          localUuid: widget.localUuid,
+          animeId: item.animeId,
+          bangumiId: item.bangumiId,
+          animeTitle: item.animeTitle,
+          imageUrl: item.imageUrl,
+          boundAt: DateTime.now(),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final dialogHeight = (size.height * 0.68).clamp(360.0, 620.0);
+
+    return AlertDialog(
+      title: const Text('绑定弹弹play'),
+      content: SizedBox(
+        width: 540,
+        height: dialogHeight,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.currentBinding != null) ...[
+              _CurrentDandanplayBinding(record: widget.currentBinding!),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: _controller,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                labelText: '搜索关键词',
+                border: const OutlineInputBorder(),
+                isDense: true,
+                suffixIcon: IconButton(
+                  onPressed: _searching ? null : _search,
+                  icon: _searching
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.search),
+                  tooltip: '搜索',
+                ),
+              ),
+              onSubmitted: (_) => _search(),
+            ),
+            const SizedBox(height: 12),
+            Expanded(child: _buildResults()),
+          ],
+        ),
+      ),
+      actions: [
+        if (widget.currentBinding != null)
+          TextButton.icon(
+            onPressed: () => Navigator.pop(
+              context,
+              const _DandanplayBindingDialogResult.clear(),
+            ),
+            icon: const Icon(Icons.link_off_rounded),
+            label: const Text('清除绑定'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResults() {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    if (_searching) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Text(
+          '搜索失败：$_error',
+          textAlign: TextAlign.center,
+          style: tt.bodyMedium?.copyWith(color: cs.error),
+        ),
+      );
+    }
+    if (_results.isEmpty) {
+      return Center(
+        child: Text(
+          _searched ? '未找到相关番剧' : '输入关键词后点击搜索',
+          style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+        ),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListView.separated(
+        itemCount: _results.length,
+        separatorBuilder: (_, _) =>
+            Divider(height: 1, color: cs.outlineVariant),
+        itemBuilder: (_, index) {
+          final item = _results[index];
+          final selected = widget.currentBinding?.animeId == item.animeId;
+          return _DandanplayAnimeResultTile(
+            item: item,
+            selected: selected,
+            hasBinding: widget.currentBinding != null,
+            onTap: selected ? null : () => _bind(item),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CurrentDandanplayBinding extends StatelessWidget {
+  final DandanplayBindingRecord record;
+
+  const _CurrentDandanplayBinding({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.primaryContainer.withValues(alpha: 0.36),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.check_circle_outline_rounded, color: cs.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '当前绑定',
+                  style: tt.labelMedium?.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  record.animeTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '#${record.animeId}',
+            style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DandanplayAnimeResultTile extends StatelessWidget {
+  final DandanplayAnimeSearchItem item;
+  final bool selected;
+  final bool hasBinding;
+  final VoidCallback? onTap;
+
+  const _DandanplayAnimeResultTile({
+    required this.item,
+    required this.selected,
+    required this.hasBinding,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final imageUrl = item.imageUrl?.trim() ?? '';
+    final meta = _metaText();
+
+    return Material(
+      color: selected
+          ? cs.primaryContainer.withValues(alpha: 0.24)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: imageUrl.isEmpty
+                    ? Container(
+                        width: 52,
+                        height: 72,
+                        color: cs.surfaceContainerHighest,
+                        child: Icon(
+                          Icons.movie_outlined,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      )
+                    : CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        width: 52,
+                        height: 72,
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) =>
+                            Container(color: cs.surfaceContainerHighest),
+                        errorWidget: (_, _, _) => Container(
+                          color: cs.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.broken_image,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.animeTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                    if (meta.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        meta,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonalIcon(
+                        onPressed: onTap,
+                        icon: Icon(
+                          selected ? Icons.check_rounded : Icons.link_rounded,
+                          size: 16,
+                        ),
+                        label: Text(
+                          selected ? '已绑定' : (hasBinding ? '重新绑定' : '绑定'),
+                        ),
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _metaText() {
+    final parts = <String>[
+      if ((item.typeDescription ?? '').isNotEmpty) item.typeDescription!,
+      if (item.episodeCount > 0) '${item.episodeCount} 集',
+      if (item.rating > 0) '评分 ${item.rating.toStringAsFixed(1)}',
+      ?_startYear,
+    ];
+    return parts.join(' · ');
+  }
+
+  String? get _startYear {
+    final value = item.startDate;
+    if (value == null || value.isEmpty) return null;
+    return DateTime.tryParse(value)?.year.toString();
+  }
+}
+
+class _DandanplayBindingSummary extends StatelessWidget {
+  final DandanplayBindingRecord binding;
+  final bool loading;
+  final String? error;
+  final int episodeCount;
+  final VoidCallback onRebind;
+
+  const _DandanplayBindingSummary({
+    required this.binding,
+    required this.loading,
+    required this.error,
+    required this.episodeCount,
+    required this.onRebind,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final statusText = error != null
+        ? error!
+        : loading
+        ? '正在加载弹弹play剧集'
+        : '可选弹幕 $episodeCount 集';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.subtitles_outlined, color: cs.primary, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  binding.animeTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  statusText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodySmall?.copyWith(
+                    color: error == null ? cs.onSurfaceVariant : cs.error,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onRebind,
+            icon: const Icon(Icons.manage_search_rounded, size: 18),
+            label: const Text('重新绑定'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BoundAnimeChapterRow extends StatelessWidget {
+  final AnimeChapter chapter;
+  final bool selected;
+  final bool selectionMode;
+  final bool isDownloaded;
+  final List<DandanplayBangumiEpisode> episodes;
+  final int? selectedEpisodeId;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final ValueChanged<int?> onEpisodeChanged;
+
+  const _BoundAnimeChapterRow({
+    required this.chapter,
+    required this.selected,
+    required this.selectionMode,
+    required this.isDownloaded,
+    required this.episodes,
+    required this.selectedEpisodeId,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onEpisodeChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final itemValues = <int?>[null, ...episodes.map((e) => e.episodeId)];
+    final currentValue = itemValues.contains(selectedEpisodeId)
+        ? selectedEpisodeId
+        : null;
+
+    return Material(
+      color: selected
+          ? cs.primaryContainer.withValues(alpha: 0.26)
+          : cs.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: selected ? cs.primary : cs.outlineVariant,
+          width: selected ? 1.4 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final dropdownWidth = (constraints.maxWidth * 0.46)
+                  .clamp(180.0, 340.0)
+                  .toDouble();
+              return Row(
+                children: [
+                  Icon(
+                    selectionMode
+                        ? selected
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked
+                        : Icons.play_circle_outline_rounded,
+                    color: selectionMode && selected
+                        ? cs.primary
+                        : cs.onSurfaceVariant,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            chapter.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: tt.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (isDownloaded) ...[
+                          const SizedBox(width: 8),
+                          Icon(
+                            Icons.download_done_rounded,
+                            color: Colors.green.shade600,
+                            size: 18,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: dropdownWidth,
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: currentValue,
+                      isExpanded: true,
+                      menuMaxHeight: 360,
+                      decoration: const InputDecoration(
+                        labelText: '弹幕',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('未绑定'),
+                        ),
+                        for (final episode in episodes)
+                          DropdownMenuItem<int?>(
+                            value: episode.episodeId,
+                            child: Text(
+                              _formatDandanplayEpisodeLabel(episode),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      selectedItemBuilder: (context) => [
+                        const Text(
+                          '未绑定',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        for (final episode in episodes)
+                          Text(
+                            _formatDandanplayEpisodeLabel(episode),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                      onChanged: episodes.isEmpty ? null : onEpisodeChanged,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatDandanplayEpisodeLabel(
+    DandanplayBangumiEpisode episode,
+  ) {
+    final number = episode.episodeNumber.trim();
+    final title = episode.episodeTitle.trim();
+    if (number.isEmpty && title.isEmpty) return '#${episode.episodeId}';
+    if (number.isEmpty) return title;
+    if (title.isEmpty || title == number) return '第 $number 集';
+    return '第 $number 集 · $title';
   }
 }
 
@@ -963,7 +2043,6 @@ class _AnimeChapterCard extends StatelessWidget {
   final AnimeChapterDownloadProgress? progress;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  final VoidCallback onDownload;
 
   const _AnimeChapterCard({
     required this.chapter,
@@ -975,132 +2054,116 @@ class _AnimeChapterCard extends StatelessWidget {
     required this.progress,
     required this.onTap,
     required this.onLongPress,
-    required this.onDownload,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: selected
-              ? BorderSide(color: cs.primary, width: 2)
-              : BorderSide.none,
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CachedNetworkImage(
-              imageUrl: chapter.vCover,
-              fit: BoxFit.cover,
-              placeholder: (_, _) => Container(
-                color: cs.surfaceContainerHighest,
-                child: Icon(Icons.movie_outlined, color: cs.onSurfaceVariant),
-              ),
-              errorWidget: (_, _, _) => Container(
-                color: cs.surfaceContainerHighest,
-                child: Icon(Icons.broken_image, color: cs.onSurfaceVariant),
-              ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.72),
-                  ],
-                ),
-              ),
-            ),
-            if (selectionMode)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Icon(
-                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                  color: selected ? cs.primary : Colors.white70,
-                  size: 22,
-                ),
-              ),
-            if (isDownloading && progress != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: LinearProgressIndicator(
-                  value: progress!.ratio,
-                  backgroundColor: Colors.transparent,
-                  color: cs.primary,
-                ),
-              ),
-            Positioned(
-              left: 10,
-              right: selectionMode ? 10 : 36,
-              bottom: 8,
-              child: Text(
-                chapter.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.labelLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (!selectionMode)
-              Positioned(right: 4, bottom: 4, child: _buildDownloadButton(cs)),
-          ],
+    final backgroundColor = selected
+        ? cs.secondaryContainer
+        : cs.surfaceContainerLow;
+    final foregroundColor = selected ? cs.onSecondaryContainer : cs.onSurface;
+    final subtitle = isDownloaded
+        ? '已下载'
+        : isDownloading && progress != null
+        ? '下载 ${progress!.completed}/${progress!.total}'
+        : isQueued
+        ? '排队中'
+        : null;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: selected ? cs.primary : Colors.transparent,
+          width: 1.4,
         ),
       ),
-    );
-  }
-
-  Widget _buildDownloadButton(ColorScheme cs) {
-    if (isDownloaded) {
-      return const Padding(
-        padding: EdgeInsets.all(6),
-        child: Icon(Icons.download_done, color: Colors.greenAccent, size: 18),
-      );
-    }
-    if (isDownloading) {
-      return const Padding(
-        padding: EdgeInsets.all(6),
-        child: SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-        ),
-      );
-    }
-    if (isQueued) {
-      return const Padding(
-        padding: EdgeInsets.all(6),
-        child: Icon(
-          Icons.hourglass_bottom,
-          color: Colors.orangeAccent,
-          size: 18,
-        ),
-      );
-    }
-    return Material(
-      color: Colors.white24,
-      borderRadius: BorderRadius.circular(6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: onDownload,
-        child: const Padding(
-          padding: EdgeInsets.all(6),
-          child: Icon(Icons.download_outlined, color: Colors.white, size: 18),
-        ),
+      child: Stack(
+        children: [
+          Material(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: onTap,
+              onLongPress: onLongPress,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        chapter.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: tt.bodySmall?.copyWith(
+                          color: foregroundColor,
+                          fontWeight: selected ? FontWeight.bold : null,
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          textAlign: TextAlign.center,
+                          style: tt.labelSmall?.copyWith(
+                            color: selected
+                                ? foregroundColor.withValues(alpha: 0.8)
+                                : cs.onSurfaceVariant,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (selectionMode)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Icon(
+                selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                color: selected ? cs.primary : cs.onSurfaceVariant,
+                size: 16,
+              ),
+            )
+          else if (isDownloaded)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Icon(
+                Icons.download_done_rounded,
+                color: Colors.green.shade600,
+                size: 16,
+              ),
+            ),
+          if (isDownloading && progress != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(10),
+                ),
+                child: LinearProgressIndicator(
+                  minHeight: 3,
+                  value: progress!.ratio,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

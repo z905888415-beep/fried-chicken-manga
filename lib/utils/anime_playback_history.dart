@@ -104,6 +104,32 @@ class AnimePlaybackHistory {
     );
   }
 
+  static Future<void> clearDanmakuEpisode({
+    required String pathWord,
+    required String chapterUuid,
+    required String chapterName,
+  }) async {
+    if (!_isValidKey(pathWord, chapterUuid)) return;
+    final existing = await get(pathWord: pathWord, chapterUuid: chapterUuid);
+    if (existing == null) return;
+    if (existing.position == Duration.zero &&
+        existing.duration == Duration.zero) {
+      await remove(pathWord: pathWord, chapterUuid: chapterUuid);
+      return;
+    }
+    await _save(
+      pathWord: pathWord,
+      chapterUuid: chapterUuid,
+      record: AnimePlaybackRecord(
+        chapterUuid: chapterUuid,
+        chapterName: chapterName,
+        position: existing.position,
+        duration: existing.duration,
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
   static Future<void> remove({
     required String pathWord,
     required String chapterUuid,

@@ -73,6 +73,60 @@ void main() {
     );
   });
 
+  test('clear danmaku binding preserves progress', () async {
+    await AnimePlaybackHistory.saveProgress(
+      pathWord: 'anime-a',
+      chapterUuid: 'chapter-3',
+      chapterName: '第3集',
+      position: const Duration(minutes: 10),
+      duration: const Duration(minutes: 24),
+    );
+    await AnimePlaybackHistory.saveDanmakuEpisode(
+      pathWord: 'anime-a',
+      chapterUuid: 'chapter-3',
+      chapterName: '第3集',
+      episodeId: 12345,
+    );
+
+    await AnimePlaybackHistory.clearDanmakuEpisode(
+      pathWord: 'anime-a',
+      chapterUuid: 'chapter-3',
+      chapterName: '第3集',
+    );
+
+    final record = await AnimePlaybackHistory.get(
+      pathWord: 'anime-a',
+      chapterUuid: 'chapter-3',
+    );
+
+    expect(record?.position, const Duration(minutes: 10));
+    expect(record?.duration, const Duration(minutes: 24));
+    expect(record?.danmakuEpisodeId, isNull);
+  });
+
+  test('clear danmaku binding removes danmaku-only record', () async {
+    await AnimePlaybackHistory.saveDanmakuEpisode(
+      pathWord: 'anime-a',
+      chapterUuid: 'chapter-3',
+      chapterName: '第3集',
+      episodeId: 12345,
+    );
+
+    await AnimePlaybackHistory.clearDanmakuEpisode(
+      pathWord: 'anime-a',
+      chapterUuid: 'chapter-3',
+      chapterName: '第3集',
+    );
+
+    expect(
+      await AnimePlaybackHistory.get(
+        pathWord: 'anime-a',
+        chapterUuid: 'chapter-3',
+      ),
+      isNull,
+    );
+  });
+
   test('latest progress for anime returns newest non-zero progress', () async {
     await AnimePlaybackHistory.saveProgress(
       pathWord: 'anime-a',

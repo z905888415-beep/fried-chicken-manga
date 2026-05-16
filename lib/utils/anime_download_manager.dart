@@ -241,8 +241,9 @@ class AnimeDownloadManager extends ChangeNotifier {
     final task = _findTask(pathWord, chapterUuid);
     if (task == null) return;
     if (task.status != DownloadTaskStatus.paused &&
-        task.status != DownloadTaskStatus.failed)
+        task.status != DownloadTaskStatus.failed) {
       return;
+    }
 
     task.status = DownloadTaskStatus.pending;
     task.errorMessage = null;
