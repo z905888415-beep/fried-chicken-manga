@@ -5,6 +5,7 @@ class _CollapsiblePlayerCard extends StatefulWidget {
   final String title;
   final Widget child;
   final bool initiallyExpanded;
+  final int collapseRevision;
   final Widget? trailing;
 
   const _CollapsiblePlayerCard({
@@ -12,6 +13,7 @@ class _CollapsiblePlayerCard extends StatefulWidget {
     required this.title,
     required this.child,
     this.initiallyExpanded = false,
+    this.collapseRevision = 0,
     this.trailing,
   });
 
@@ -26,6 +28,14 @@ class _CollapsiblePlayerCardState extends State<_CollapsiblePlayerCard> {
   void initState() {
     super.initState();
     _expanded = widget.initiallyExpanded;
+  }
+
+  @override
+  void didUpdateWidget(covariant _CollapsiblePlayerCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.collapseRevision != widget.collapseRevision) {
+      _expanded = false;
+    }
   }
 
   @override
@@ -159,96 +169,6 @@ class _PlaybackProgressHint extends StatelessWidget {
   }
 }
 
-class _DanmakuMatchPanel extends StatelessWidget {
-  final bool isAutoMatched;
-  final List<DandanplayEpisode> candidates;
-  final ValueChanged<int> onSelect;
-  final bool danmakuVisible;
-  final bool hasDanmaku;
-
-  const _DanmakuMatchPanel({
-    required this.isAutoMatched,
-    required this.candidates,
-    required this.onSelect,
-    required this.danmakuVisible,
-    required this.hasDanmaku,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    if (candidates.isEmpty && (!danmakuVisible || hasDanmaku)) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: hasDanmaku
-            ? cs.primaryContainer.withValues(alpha: 0.45)
-            : Colors.orange.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: hasDanmaku
-              ? cs.primary.withValues(alpha: 0.25)
-              : Colors.orange.withValues(alpha: 0.35),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                hasDanmaku
-                    ? Icons.check_circle_outline
-                    : Icons.warning_amber_rounded,
-                size: 18,
-                color: hasDanmaku ? cs.primary : Colors.orange.shade800,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  hasDanmaku ? '弹幕已加载' : '未加载弹幕，请在下方选择',
-                  style: tt.labelLarge?.copyWith(
-                    color: hasDanmaku ? cs.primary : Colors.orange.shade900,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (candidates.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final ep in candidates)
-                  ActionChip(
-                    avatar: isAutoMatched && candidates.indexOf(ep) == 0
-                        ? const Icon(Icons.auto_awesome, size: 16)
-                        : const Icon(Icons.check, size: 16),
-                    label: Text('${ep.animeTitle} - ${ep.episodeTitle}'),
-                    labelStyle: tt.labelMedium?.copyWith(
-                      color: cs.onPrimaryContainer,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    backgroundColor: cs.primaryContainer,
-                    onPressed: () => onSelect(ep.episodeId),
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _InlineSearchPanel extends StatelessWidget {
   final List<String> segments;
   final Set<int> selectedIndices;
@@ -258,6 +178,9 @@ class _InlineSearchPanel extends StatelessWidget {
   final bool hasSearched;
   final int? selectedEpisodeId;
   final int? loadingEpisodeId;
+  final int loadedDanmakuCount;
+  final bool collapsedByBinding;
+  final int collapseRevision;
   final ValueChanged<int> onToggleSegment;
   final VoidCallback onSearch;
   final VoidCallback onRefresh;
@@ -272,6 +195,9 @@ class _InlineSearchPanel extends StatelessWidget {
     required this.hasSearched,
     required this.selectedEpisodeId,
     required this.loadingEpisodeId,
+    required this.loadedDanmakuCount,
+    required this.collapsedByBinding,
+    required this.collapseRevision,
     required this.onToggleSegment,
     required this.onSearch,
     required this.onRefresh,
@@ -283,11 +209,13 @@ class _InlineSearchPanel extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final hasResults = results.isNotEmpty;
+    final title = loadedDanmakuCount > 0 ? '弹幕搜索（$loadedDanmakuCount）' : '弹幕搜索';
 
     return _CollapsiblePlayerCard(
       icon: Icons.subtitles_outlined,
-      title: '弹幕搜索',
-      initiallyExpanded: !hasResults,
+      title: title,
+      initiallyExpanded: !hasResults && !collapsedByBinding,
+      collapseRevision: collapseRevision,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

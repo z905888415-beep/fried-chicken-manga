@@ -17,7 +17,6 @@ import '../models/user_manager.dart';
 import '../utils/anime_download_manager.dart';
 import '../utils/anime_playback_history.dart';
 import '../utils/chinese_converter.dart';
-import '../utils/data_cache.dart';
 import 'profile_page.dart';
 
 part 'anime_player/media_open_diagnosis.dart';
@@ -57,13 +56,11 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
   static const _videoUserAgent =
       'Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/110.0.5481.154 Mobile Safari/537.36';
   static const _maxPlayerLogLines = 24;
-  static const _videoLinkCacheTtl = Duration(hours: 6);
   static const _playbackProgressSaveInterval = Duration(seconds: 5);
   static const _minPlaybackProgressToSave = Duration(seconds: 3);
   static const _playbackProgressSeekTolerance = Duration(seconds: 2);
 
   final _api = ApiClient();
-  final _cache = DataCache();
   final _user = UserManager();
   final _downloads = AnimeDownloadManager();
   late final Player _player = Player(
@@ -103,6 +100,8 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
   int? _selectedDanmakuEpisodeId;
   int? _loadingDanmakuEpisodeId;
   int _danmakuLoadSerial = 0;
+  int _danmakuSearchCollapseRevision = 0;
+  bool _danmakuSearchCollapsedByBinding = false;
 
   @override
   void initState() {
@@ -196,11 +195,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       _error = null;
       _videoUrl = null;
       _danmakuItems = {};
-      _matchCandidates = [];
-      _isAutoMatched = false;
       _selectedDanmakuEpisodeId = null;
       _loadingDanmakuEpisodeId = null;
       _playbackRecord = null;
+      _danmakuSearchCollapsedByBinding = false;
     });
     unawaited(_loadPlaybackRecord(danmakuSerial));
 
@@ -212,7 +210,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         _buffering = true;
       });
       unawaited(_openMedia(widget.localVideoPath!));
-      unawaited(_loadSavedDanmakuOrAutoMatch(danmakuSerial));
+      unawaited(_loadSavedDanmakuOrSetupSearch(danmakuSerial));
       return;
     }
 
@@ -229,7 +227,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         _buffering = true;
       });
       unawaited(_openMedia(localPath));
-      unawaited(_loadSavedDanmakuOrAutoMatch(danmakuSerial));
+      unawaited(_loadSavedDanmakuOrSetupSearch(danmakuSerial));
       return;
     }
 
@@ -260,7 +258,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         _buffering = true;
       });
       unawaited(_openMedia(videoUrl));
-      unawaited(_loadSavedDanmakuOrAutoMatch(danmakuSerial));
+      unawaited(_loadSavedDanmakuOrSetupSearch(danmakuSerial));
     } catch (e) {
       debugPrint('AnimePlayerPage load error: $e');
       if (!mounted) return;
@@ -465,50 +463,13 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     }
   }
 
-  String get _videoLinkCacheKey =>
-      'anime_video_link_v1_${widget.pathWord}_${_currentChapterUuid}_$_line';
-
-  Future<AnimePlayback?> _readCachedPlayback() async {
-    final cached = await _cache.get(_videoLinkCacheKey);
-    if (cached is! Map) return null;
-
-    try {
-      final playback = AnimePlayback.fromJson(
-        Map<String, dynamic>.from(cached),
-      );
-      if (_resolveVideoUrl(playback.chapter).isEmpty) {
-        await _cache.remove(_videoLinkCacheKey);
-        return null;
-      }
-      return playback;
-    } catch (e) {
-      debugPrint('AnimePlayerPage cached playback error: $e');
-      await _cache.remove(_videoLinkCacheKey);
-      return null;
-    }
-  }
-
   Future<AnimePlayback> _getPlayback({required bool forceRefresh}) async {
-    if (forceRefresh) {
-      await _cache.remove(_videoLinkCacheKey);
-    } else {
-      final cachedPlayback = await _readCachedPlayback();
-      if (cachedPlayback != null) return cachedPlayback;
-    }
-
-    final playback = await _api.getAnimePlayback(
+    return _api.getAnimePlayback(
       widget.pathWord,
       _currentChapterUuid,
       line: _line,
+      forceRefresh: forceRefresh,
     );
-    if (_resolveVideoUrl(playback.chapter).isNotEmpty) {
-      await _cache.put(
-        _videoLinkCacheKey,
-        playback.toJson(),
-        ttl: _videoLinkCacheTtl,
-      );
-    }
-    return playback;
   }
 
   Future<void> _refreshPlayback() async {
@@ -893,9 +854,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     }
   }
 
-  List<DandanplayEpisode> _matchCandidates = [];
-  bool _isAutoMatched = false;
-
   Future<String> _normalizedAnimeName() async {
     String animeName = widget.animeName;
     try {
@@ -906,17 +864,16 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
     return animeName;
   }
 
-  Future<void> _loadSavedDanmakuOrAutoMatch(int serial) async {
-    final animeName = await _normalizedAnimeName();
-    if (!mounted || serial != _danmakuLoadSerial) return;
-    final chapterName = _removeParentheses(_currentChapterName);
-    _setupSearchSegments(animeName, chapterName);
-
+  Future<void> _loadSavedDanmakuOrSetupSearch(int serial) async {
     final record = _playbackRecord ?? await _loadPlaybackRecord(serial);
     if (!mounted || serial != _danmakuLoadSerial) return;
 
     final boundEpisodeId = record?.danmakuEpisodeId;
     if (boundEpisodeId != null) {
+      setState(() {
+        _danmakuSearchCollapsedByBinding = true;
+        _danmakuSearchCollapseRevision++;
+      });
       await _loadDanmakuForEpisode(
         boundEpisodeId,
         silent: true,
@@ -926,62 +883,10 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       return;
     }
 
-    await _autoMatchDanmaku(serial: serial, setupSearch: false);
-  }
-
-  Future<void> _autoMatchDanmaku({int? serial, bool setupSearch = true}) async {
     final animeName = await _normalizedAnimeName();
-    if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
+    if (!mounted || serial != _danmakuLoadSerial) return;
     final chapterName = _removeParentheses(_currentChapterName);
-    if (setupSearch) {
-      _setupSearchSegments(animeName, chapterName);
-    }
-
-    if (!_user.isAutoMatchDanmaku) return;
-    try {
-      if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
-      setState(() {
-        _matchCandidates = [];
-        _isAutoMatched = false;
-      });
-
-      final fileName = '$animeName $chapterName';
-
-      if (!mounted) return;
-      final response = await DandanplayApi().getRawMatch(fileName);
-      if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
-
-      if (response == null || response['success'] != true) return;
-
-      final matches = (response['matches'] as List)
-          .map(
-            (ep) => DandanplayEpisode(
-              episodeId: ep['episodeId'] as int,
-              animeTitle: ep['animeTitle'] as String,
-              episodeTitle: ep['episodeTitle'] as String,
-            ),
-          )
-          .toList();
-
-      if (!mounted) return;
-
-      if (matches.isEmpty || response['isMatched'] != true) return;
-
-      await _loadDanmakuForEpisode(
-        matches.first.episodeId,
-        silent: true,
-        saveBinding: false,
-        serial: serial,
-      );
-      if (!mounted || (serial != null && serial != _danmakuLoadSerial)) return;
-      setState(() {
-        _isAutoMatched = true;
-        _matchCandidates = [matches.first];
-        _selectedDanmakuEpisodeId = matches.first.episodeId;
-      });
-    } catch (e) {
-      debugPrint('AutoMatchDanmaku error: $e');
-    }
+    _setupSearchSegments(animeName, chapterName);
   }
 
   void _setupSearchSegments(String animeName, String chapterName) {
@@ -1003,12 +908,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         .map((i) => _searchSegments[i])
         .toList();
     _searchController.text = parts.join(' ');
-  }
-
-  Future<void> _matchDanmaku() async {
-    final animeName = await _normalizedAnimeName();
-    final chapterName = _removeParentheses(_currentChapterName);
-    _setupSearchSegments(animeName, chapterName);
   }
 
   void _toggleSearchSegment(int index) {
@@ -1191,7 +1090,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
       fullscreen: fullscreen,
       danmakuView: danmakuView,
       danmakuVisible: _danmakuVisible,
-      onMatchDanmaku: _matchDanmaku,
       onToggleDanmaku: _toggleDanmaku,
       onSkipForward: _skipForward,
       onSettings: _showSettingsPanel,
@@ -1350,15 +1248,6 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   children: [
                     if (_danmakuVisible) ...[
-                      _DanmakuMatchPanel(
-                        isAutoMatched: _isAutoMatched,
-                        candidates: _matchCandidates,
-                        onSelect: (episodeId) =>
-                            unawaited(_loadDanmakuForEpisode(episodeId)),
-                        danmakuVisible: _danmakuVisible,
-                        hasDanmaku: _danmakuItems.isNotEmpty,
-                      ),
-                      const SizedBox(height: 12),
                       if (_isRestorablePlaybackRecord(_playbackRecord)) ...[
                         _PlaybackProgressHint(
                           record: _playbackRecord!,
@@ -1377,6 +1266,12 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
                         hasSearched: _hasSearched,
                         selectedEpisodeId: _selectedDanmakuEpisodeId,
                         loadingEpisodeId: _loadingDanmakuEpisodeId,
+                        loadedDanmakuCount: _danmakuItems.values.fold<int>(
+                          0,
+                          (sum, items) => sum + items.length,
+                        ),
+                        collapsedByBinding: _danmakuSearchCollapsedByBinding,
+                        collapseRevision: _danmakuSearchCollapseRevision,
                         onToggleSegment: _toggleSearchSegment,
 
                         onSearch: _doInlineSearch,

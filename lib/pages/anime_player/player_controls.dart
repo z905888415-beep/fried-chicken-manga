@@ -39,7 +39,6 @@ class _VideoPlayerSurface extends StatefulWidget {
   final VoidCallback onSkipForward;
   final VoidCallback onSettings;
   final VoidCallback onFullscreen;
-  final VoidCallback onMatchDanmaku;
   final VoidCallback onToggleDanmaku;
   final List<AnimeChapter> chapters;
   final String currentChapterUuid;
@@ -54,7 +53,6 @@ class _VideoPlayerSurface extends StatefulWidget {
     required this.onSkipForward,
     required this.onSettings,
     required this.onFullscreen,
-    required this.onMatchDanmaku,
     required this.onToggleDanmaku,
     required this.chapters,
     required this.currentChapterUuid,

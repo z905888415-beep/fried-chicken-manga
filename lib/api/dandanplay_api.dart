@@ -3,6 +3,8 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../utils/data_cache.dart';
+
 class _CacheEntry {
   final dynamic data;
   final DateTime expiresAt;
@@ -111,9 +113,13 @@ class DandanplayBangumi {
   });
 
   factory DandanplayBangumi.fromJson(Map<String, dynamic> json) {
-    final episodes = (json['episodes'] as List?)
-            ?.map((e) =>
-                DandanplayBangumiEpisode.fromJson(Map<String, dynamic>.from(e)))
+    final episodes =
+        (json['episodes'] as List?)
+            ?.map(
+              (e) => DandanplayBangumiEpisode.fromJson(
+                Map<String, dynamic>.from(e),
+              ),
+            )
             .toList() ??
         const <DandanplayBangumiEpisode>[];
     return DandanplayBangumi(
@@ -124,6 +130,14 @@ class DandanplayBangumi {
       episodes: episodes,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'animeId': animeId,
+    'bangumiId': bangumiId,
+    'animeTitle': animeTitle,
+    if (imageUrl != null) 'imageUrl': imageUrl,
+    'episodes': episodes.map((e) => e.toJson()).toList(),
+  };
 }
 
 class DandanplayApi {
@@ -139,11 +153,12 @@ class DandanplayApi {
   factory DandanplayApi() => _instance;
 
   late final Dio _dio;
+  final DataCache _dataCache = DataCache();
   final Map<String, _CacheEntry> _cache = {};
+  final Map<int, Future<DandanplayBangumi?>> _bangumiInFlight = {};
   DateTime? _lastClearTime;
 
   // 缓存时长：根据弹弹play官方建议
-  static const _ttlMatch = Duration(hours: 6); // 匹配结果 6小时
   static const _ttlSearch = Duration(hours: 6); // 搜索结果 6小时
   static const _ttlComments = Duration(hours: 1); // 弹幕 1小时（较活跃）
 
@@ -189,54 +204,6 @@ class DandanplayApi {
         },
       ),
     );
-  }
-
-  Future<Map<String, dynamic>?> getRawMatch(
-    String fileName, {
-    String? hash,
-  }) async {
-    final key = _cacheKey('/api/v2/match', {
-      'fileName': fileName,
-      'hash': hash ?? '',
-    });
-    final cached = _getCache<Map<String, dynamic>>(key);
-    if (cached != null) return cached;
-
-    try {
-      final response = await _dio.post(
-        '/api/v2/match',
-        data: {
-          'fileName': fileName,
-          'fileHash': hash ?? '00000000000000000000000000000000',
-          'fileSize': 0,
-          'videoDuration': 0,
-          'matchMode': hash != null ? 'hashAndFileName' : 'fileNameOnly',
-        },
-      );
-      if (response.data != null) _setCache(key, response.data, _ttlMatch);
-      return response.data;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<List<DandanplayEpisode>> match(String fileName, {String? hash}) async {
-    final data = await getRawMatch(fileName, hash: hash);
-    if (data != null && data['success'] == true) {
-      final matches = data['matches'] as List;
-      final results = <DandanplayEpisode>[];
-      for (var ep in matches) {
-        results.add(
-          DandanplayEpisode(
-            episodeId: ep['episodeId'] as int,
-            animeTitle: ep['animeTitle'] as String,
-            episodeTitle: ep['episodeTitle'] as String,
-          ),
-        );
-      }
-      return results;
-    }
-    return [];
   }
 
   Future<List<DandanplayEpisode>> search(String animeName) async {
@@ -289,8 +256,11 @@ class DandanplayApi {
       if (data is Map && data['success'] == true) {
         final animes = (data['animes'] as List?) ?? const [];
         final results = animes
-            .map((e) =>
-                DandanplayAnimeSearchItem.fromJson(Map<String, dynamic>.from(e)))
+            .map(
+              (e) => DandanplayAnimeSearchItem.fromJson(
+                Map<String, dynamic>.from(e),
+              ),
+            )
             .toList();
         _setCache(key, results, _ttlSearch);
         return results;
@@ -307,6 +277,35 @@ class DandanplayApi {
     final cached = _getCache<DandanplayBangumi>(key);
     if (cached != null) return cached;
 
+    final persistentKey = _bangumiCacheKey(animeId);
+    final persistentCached = await _dataCache.get(persistentKey);
+    if (persistentCached is Map) {
+      try {
+        final bangumi = DandanplayBangumi.fromJson(
+          Map<String, dynamic>.from(persistentCached),
+        );
+        _setCache(key, bangumi, _ttlSearch);
+        return bangumi;
+      } catch (_) {
+        await _dataCache.remove(persistentKey);
+      }
+    }
+
+    final inFlight = _bangumiInFlight[animeId];
+    if (inFlight != null) return inFlight;
+
+    final request = _fetchBangumi(animeId, key);
+    _bangumiInFlight[animeId] = request;
+    try {
+      return await request;
+    } finally {
+      _bangumiInFlight.remove(animeId);
+    }
+  }
+
+  String _bangumiCacheKey(int animeId) => 'dandanplay_bangumi_v1_$animeId';
+
+  Future<DandanplayBangumi?> _fetchBangumi(int animeId, String key) async {
     try {
       final response = await _dio.get('/api/v2/bangumi/$animeId');
       final data = response.data;
@@ -315,12 +314,23 @@ class DandanplayApi {
           Map<String, dynamic>.from(data['bangumi']),
         );
         _setCache(key, bangumi, _ttlSearch);
+        await _dataCache.put(
+          _bangumiCacheKey(animeId),
+          bangumi.toJson(),
+          ttl: _ttlSearch,
+        );
         return bangumi;
       }
     } catch (e) {
       debugPrint('Dandanplay getBangumi error: $e');
     }
     return null;
+  }
+
+  Future<void> clearBangumiCache(int animeId) async {
+    _cache.remove(_cacheKey('/api/v2/bangumi/$animeId'));
+    _bangumiInFlight.remove(animeId);
+    await _dataCache.remove(_bangumiCacheKey(animeId));
   }
 
   bool _clearCacheWhere(bool Function(String key) shouldRemove) {
@@ -334,12 +344,11 @@ class DandanplayApi {
     return true;
   }
 
-  /// 清除匹配和搜索缓存，限制1分钟内只能清除一次。
+  /// 清除搜索缓存，限制1分钟内只能清除一次。
   /// 不清除弹幕评论缓存，避免影响已选弹幕来源的加载。
   bool clearSearchCache() {
     return _clearCacheWhere(
       (key) =>
-          key.startsWith('/api/v2/match') ||
           key.startsWith('/api/v2/search/episodes') ||
           key.startsWith('/api/v2/search/anime') ||
           key.startsWith('/api/v2/bangumi/'),

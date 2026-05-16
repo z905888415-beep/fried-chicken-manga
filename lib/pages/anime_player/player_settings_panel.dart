@@ -165,25 +165,6 @@ class _PlayerSettingsPanelState extends State<_PlayerSettingsPanel> {
               },
             ),
 
-            // 自动匹配弹幕
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                '自动匹配弹幕',
-                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                '播放时自动通过文件名匹配弹幕',
-                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-              ),
-              value: _user.isAutoMatchDanmaku,
-              onChanged: (v) {
-                _user.setAutoMatchDanmaku(v);
-                widget.onChanged();
-                setState(() {});
-              },
-            ),
-
             // 弹幕详细设置（弹幕开启时显示）
             if (widget.danmakuVisible) ...[
               const SizedBox(height: 4),

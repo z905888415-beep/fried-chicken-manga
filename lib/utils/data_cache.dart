@@ -43,4 +43,11 @@ class DataCache {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_prefix$key');
   }
+
+  Future<void> removeByPrefix(String keyPrefix) async {
+    final prefs = await SharedPreferences.getInstance();
+    final fullPrefix = '$_prefix$keyPrefix';
+    final keys = prefs.getKeys().where((key) => key.startsWith(fullPrefix));
+    await Future.wait(keys.map(prefs.remove));
+  }
 }

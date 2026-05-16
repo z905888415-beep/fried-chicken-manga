@@ -113,7 +113,6 @@ class UserManager extends ChangeNotifier {
   static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
   static const _keyAnimePlaybackProgressEnabled =
       'anime_playback_progress_enabled';
-  static const _keyAutoMatchDanmaku = 'auto_match_danmaku';
   static const _keyDanmakuEnabled = 'danmaku_enabled';
   static const _keyDanmakuFontSize = 'danmaku_font_size';
   static const _keyDanmakuArea = 'danmaku_area';
@@ -173,7 +172,6 @@ class UserManager extends ChangeNotifier {
   bool _animeHomeBannerCollapsed = false;
   int _animeSkipSeconds = 86;
   bool _animePlaybackProgressEnabled = true;
-  bool _autoMatchDanmaku = false;
   bool _danmakuEnabled = true;
   double _danmakuFontSize = 16;
   double _danmakuArea = 0.25;
@@ -242,7 +240,6 @@ class UserManager extends ChangeNotifier {
   bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
   int get animeSkipSeconds => _animeSkipSeconds;
   bool get animePlaybackProgressEnabled => _animePlaybackProgressEnabled;
-  bool get isAutoMatchDanmaku => _autoMatchDanmaku;
   bool get danmakuEnabled => _danmakuEnabled;
   double get danmakuFontSize => _danmakuFontSize;
   double get danmakuArea => _danmakuArea;
@@ -345,7 +342,6 @@ class UserManager extends ChangeNotifier {
     _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
     _animePlaybackProgressEnabled =
         prefs.getBool(_keyAnimePlaybackProgressEnabled) ?? true;
-    _autoMatchDanmaku = prefs.getBool(_keyAutoMatchDanmaku) ?? false;
     _danmakuEnabled = prefs.getBool(_keyDanmakuEnabled) ?? true;
     _danmakuFontSize = prefs.getDouble(_keyDanmakuFontSize) ?? 16;
     _danmakuArea = prefs.getDouble(_keyDanmakuArea) ?? 0.25;
@@ -786,14 +782,6 @@ class UserManager extends ChangeNotifier {
     _animePlaybackProgressEnabled = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAnimePlaybackProgressEnabled, enabled);
-    notifyListeners();
-  }
-
-  Future<void> setAutoMatchDanmaku(bool value) async {
-    if (_autoMatchDanmaku == value) return;
-    _autoMatchDanmaku = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyAutoMatchDanmaku, value);
     notifyListeners();
   }
 

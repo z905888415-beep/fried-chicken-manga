@@ -10,6 +10,7 @@ import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
 import '../models/comic_comment.dart';
 import '../models/user_manager.dart';
+import '../utils/data_cache.dart';
 
 class ApiClient {
   static const _hostSg = 'mapi.hotmangasg.com';
@@ -33,6 +34,7 @@ class ApiClient {
   late final Dio _dio;
   late final Dio _commentDio;
   final _user = UserManager();
+  final _cache = DataCache();
   int _hostIndex = 0;
   // 手动管理 cookie: host → {name: value}
   final Map<String, Map<String, String>> _cookies = {};
@@ -871,13 +873,62 @@ class ApiClient {
     String pathWord,
     String chapterUuid, {
     required String line,
+    bool forceRefresh = false,
   }) async {
+    final cacheKey = _animePlaybackCacheKey(pathWord, chapterUuid, line);
+    if (!forceRefresh) {
+      final cached = await _cache.get(cacheKey);
+      if (cached is Map) {
+        try {
+          final playback = AnimePlayback.fromJson(
+            Map<String, dynamic>.from(cached),
+          );
+          if (_resolveAnimeVideoUrl(playback.chapter).isNotEmpty) {
+            return playback;
+          }
+        } catch (_) {
+          await _cache.remove(cacheKey);
+        }
+      }
+    } else {
+      await _cache.remove(cacheKey);
+    }
+
     final data = await _get(
       '/api/v3/cartoon/$pathWord/chapter/$chapterUuid',
       params: {'platform': 3, 'line': line},
       host: _hostSg,
     );
-    return AnimePlayback.fromJson(data);
+    final playback = AnimePlayback.fromJson(data);
+    if (_resolveAnimeVideoUrl(playback.chapter).isNotEmpty) {
+      await _cache.put(
+        cacheKey,
+        playback.toJson(),
+        ttl: const Duration(hours: 6),
+      );
+    }
+    return playback;
+  }
+
+  Future<void> clearAnimePlaybackCache(String pathWord) async {
+    await _cache.removeByPrefix(_animePlaybackCachePrefix(pathWord));
+  }
+
+  String _animePlaybackCachePrefix(String pathWord) =>
+      'anime_video_link_v1_${pathWord}_';
+
+  String _animePlaybackCacheKey(
+    String pathWord,
+    String chapterUuid,
+    String line,
+  ) => '${_animePlaybackCachePrefix(pathWord)}${chapterUuid}_$line';
+
+  String _resolveAnimeVideoUrl(AnimePlaybackChapter chapter) {
+    if (chapter.video.isNotEmpty) return chapter.video;
+    for (final url in chapter.videoList) {
+      if (url.isNotEmpty) return url;
+    }
+    return '';
   }
 
   // ── 线路延迟测试 ──
