@@ -388,20 +388,30 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     });
 
     if (_chapters.isEmpty) return;
+    if (binding.hasAlignment &&
+        await _applyStoredDandanplayAlignment(binding, bangumi.episodes)) {
+      return;
+    }
     if (applySequential) {
       await _applySequentialDandanplayBindings(bangumi.episodes);
       return;
     }
     await _loadDandanplayEpisodeBindings(
       bangumi,
+      binding: binding,
       applySequentialIfEmpty: applySequentialIfEmpty,
     );
   }
 
   Future<void> _loadDandanplayEpisodeBindings(
     DandanplayBangumi bangumi, {
+    required DandanplayBindingRecord binding,
     bool applySequentialIfEmpty = false,
   }) async {
+    if (binding.hasAlignment &&
+        await _applyStoredDandanplayAlignment(binding, bangumi.episodes)) {
+      return;
+    }
     final bindings = await _readDandanplayEpisodeBindings();
     if (!mounted) return;
     final hasAnyBinding = bindings.values.any((episodeId) => episodeId != null);
@@ -412,6 +422,31 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       return;
     }
     setState(() => _danmakuEpisodeBindings = bindings);
+  }
+
+  Future<bool> _applyStoredDandanplayAlignment(
+    DandanplayBindingRecord binding,
+    List<DandanplayBangumiEpisode> episodes,
+  ) async {
+    final chapterUuid = binding.alignmentChapterUuid;
+    final episodeId = binding.alignmentEpisodeId;
+    if (chapterUuid == null || episodeId == null) return false;
+
+    final chapterStartIndex = _chapters.indexWhere(
+      (chapter) => chapter.uuid == chapterUuid,
+    );
+    final validEpisodes = _uniqueDandanplayEpisodes(episodes);
+    final episodeStartIndex = validEpisodes.indexWhere(
+      (episode) => episode.episodeId == episodeId,
+    );
+    if (chapterStartIndex < 0 || episodeStartIndex < 0) return false;
+
+    await _applyAlignedDandanplayBindings(
+      validEpisodes,
+      chapterStartIndex: chapterStartIndex,
+      episodeStartIndex: episodeStartIndex,
+    );
+    return true;
   }
 
   Future<Map<String, int?>> _readDandanplayEpisodeBindings() async {
@@ -439,6 +474,130 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
         final chapter = entry.$2;
         final episode = index < validEpisodes.length
             ? validEpisodes[index]
+            : null;
+        nextBindings[chapter.uuid] = episode?.episodeId;
+        if (episode == null) {
+          await AnimePlaybackHistory.clearDanmakuEpisode(
+            pathWord: widget.pathWord,
+            chapterUuid: chapter.uuid,
+            chapterName: chapter.name,
+          );
+          return;
+        }
+        await AnimePlaybackHistory.saveDanmakuEpisode(
+          pathWord: widget.pathWord,
+          chapterUuid: chapter.uuid,
+          chapterName: chapter.name,
+          episodeId: episode.episodeId,
+        );
+      }),
+    );
+
+    if (!mounted) return;
+    setState(() => _danmakuEpisodeBindings = nextBindings);
+  }
+
+  Future<void> _showDandanplayAlignmentDialog(
+    List<DandanplayBangumiEpisode> episodes,
+  ) async {
+    final binding = _dandanplayBinding;
+    if (binding == null) return;
+    final validEpisodes = _uniqueDandanplayEpisodes(episodes);
+    if (_chapters.isEmpty || validEpisodes.isEmpty) return;
+    final result = await showDialog<_DandanplayAlignmentResult>(
+      context: context,
+      builder: (_) => _DandanplayAlignmentDialog(
+        chapters: _chapters,
+        episodes: validEpisodes,
+        initialChapterIndex: _defaultAlignmentChapterIndex(binding),
+        initialEpisodeIndex: _defaultAlignmentEpisodeIndex(
+          validEpisodes,
+          binding,
+        ),
+        hasExistingAlignment: binding.hasAlignment,
+      ),
+    );
+    if (!mounted || result == null) return;
+
+    if (result.clear) {
+      final updatedBinding = binding.withoutAlignment();
+      await _dandanplayBindingStore.save(updatedBinding);
+      if (!mounted) return;
+      setState(() => _dandanplayBinding = updatedBinding);
+      await _applySequentialDandanplayBindings(validEpisodes);
+      if (mounted) showToast(context, '已清除对齐');
+      return;
+    }
+
+    final chapterIndex = result.chapterIndex;
+    final episodeIndex = result.episodeIndex;
+    if (chapterIndex == null || episodeIndex == null) return;
+    final updatedBinding = binding.withAlignment(
+      chapterUuid: _chapters[chapterIndex].uuid,
+      episodeId: validEpisodes[episodeIndex].episodeId,
+    );
+    await _dandanplayBindingStore.save(updatedBinding);
+    if (!mounted) return;
+    setState(() => _dandanplayBinding = updatedBinding);
+    await _applyAlignedDandanplayBindings(
+      validEpisodes,
+      chapterStartIndex: chapterIndex,
+      episodeStartIndex: episodeIndex,
+    );
+    if (mounted) showToast(context, '已重新对齐弹幕');
+  }
+
+  int _defaultAlignmentChapterIndex(DandanplayBindingRecord binding) {
+    final chapterUuid = binding.alignmentChapterUuid;
+    if (chapterUuid != null) {
+      final savedIndex = _chapters.indexWhere(
+        (chapter) => chapter.uuid == chapterUuid,
+      );
+      if (savedIndex >= 0) return savedIndex;
+    }
+    final index = _chapters.indexWhere(
+      (chapter) => RegExp(r'第\s*0*1\s*[集话話]').hasMatch(chapter.name),
+    );
+    return index < 0 ? 0 : index;
+  }
+
+  int _defaultAlignmentEpisodeIndex(
+    List<DandanplayBangumiEpisode> episodes,
+    DandanplayBindingRecord binding,
+  ) {
+    final episodeId = binding.alignmentEpisodeId;
+    if (episodeId != null) {
+      final savedIndex = episodes.indexWhere(
+        (episode) => episode.episodeId == episodeId,
+      );
+      if (savedIndex >= 0) return savedIndex;
+    }
+    final index = episodes.indexWhere(
+      (episode) => RegExp(
+        r'第\s*0*1\s*[集话話]',
+      ).hasMatch(_formatDandanplayEpisodeLabel(episode)),
+    );
+    return index < 0 ? 0 : index;
+  }
+
+  Future<void> _applyAlignedDandanplayBindings(
+    List<DandanplayBangumiEpisode> episodes, {
+    required int chapterStartIndex,
+    required int episodeStartIndex,
+  }) async {
+    final nextBindings = <String, int?>{};
+
+    await Future.wait(
+      _chapters.indexed.map((entry) async {
+        final chapterIndex = entry.$1;
+        final chapter = entry.$2;
+        final episodeIndex =
+            episodeStartIndex + chapterIndex - chapterStartIndex;
+        final episode =
+            chapterIndex >= chapterStartIndex &&
+                episodeIndex >= 0 &&
+                episodeIndex < episodes.length
+            ? episodes[episodeIndex]
             : null;
         nextBindings[chapter.uuid] = episode?.episodeId;
         if (episode == null) {
@@ -894,6 +1053,10 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   }
 
   List<Widget> _buildEpisodeSlivers(double hp, TextTheme tt, ColorScheme cs) {
+    final boundEpisodes = _dandanplayBangumi == null
+        ? const <DandanplayBangumiEpisode>[]
+        : _uniqueDandanplayEpisodes(_dandanplayBangumi!.episodes);
+
     return [
       SliverToBoxAdapter(
         child: Padding(
@@ -925,17 +1088,25 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
                     tooltip: '取消',
                   ),
                 ] else ...[
-                  FilledButton.tonalIcon(
-                    onPressed: _showDandanplayBindingDialog,
-                    icon: Icon(
-                      _dandanplayBinding == null
-                          ? Icons.link_rounded
-                          : Icons.check_circle_outline_rounded,
-                      size: 18,
+                  if (_dandanplayBinding == null)
+                    FilledButton.tonalIcon(
+                      onPressed: _showDandanplayBindingDialog,
+                      icon: const Icon(Icons.link_rounded, size: 18),
+                      label: const Text('绑定弹幕'),
+                      style: _episodeActionButtonStyle(),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: boundEpisodes.isEmpty
+                          ? null
+                          : () => _showDandanplayAlignmentDialog(boundEpisodes),
+                      icon: const Icon(
+                        Icons.align_horizontal_left_rounded,
+                        size: 18,
+                      ),
+                      label: const Text('对齐'),
+                      style: _episodeOutlinedActionButtonStyle(),
                     ),
-                    label: Text(_dandanplayBinding == null ? '绑定弹幕' : '已绑定'),
-                    style: _episodeActionButtonStyle(),
-                  ),
                   if (_chapters.isNotEmpty)
                     FilledButton.tonalIcon(
                       onPressed: () => setState(() => _selectionMode = true),
@@ -1034,6 +1205,15 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
 
   ButtonStyle _episodeActionButtonStyle() {
     return FilledButton.styleFrom(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  ButtonStyle _episodeOutlinedActionButtonStyle() {
+    return OutlinedButton.styleFrom(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       visualDensity: VisualDensity.compact,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -1665,15 +1845,168 @@ class _DandanplayBindingSummary extends StatelessWidget {
               ],
             ),
           ),
-          TextButton.icon(
-            onPressed: onRebind,
-            icon: const Icon(Icons.manage_search_rounded, size: 18),
-            label: const Text('重新绑定'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: onRebind,
+                icon: const Icon(Icons.manage_search_rounded, size: 18),
+                label: const Text('重新绑定'),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
+}
+
+class _DandanplayAlignmentResult {
+  final int? chapterIndex;
+  final int? episodeIndex;
+  final bool clear;
+
+  const _DandanplayAlignmentResult.align({
+    required int this.chapterIndex,
+    required int this.episodeIndex,
+  }) : clear = false;
+
+  const _DandanplayAlignmentResult.clear()
+    : chapterIndex = null,
+      episodeIndex = null,
+      clear = true;
+}
+
+class _DandanplayAlignmentDialog extends StatefulWidget {
+  final List<AnimeChapter> chapters;
+  final List<DandanplayBangumiEpisode> episodes;
+  final int initialChapterIndex;
+  final int initialEpisodeIndex;
+  final bool hasExistingAlignment;
+
+  const _DandanplayAlignmentDialog({
+    required this.chapters,
+    required this.episodes,
+    required this.initialChapterIndex,
+    required this.initialEpisodeIndex,
+    required this.hasExistingAlignment,
+  });
+
+  @override
+  State<_DandanplayAlignmentDialog> createState() =>
+      _DandanplayAlignmentDialogState();
+}
+
+class _DandanplayAlignmentDialogState
+    extends State<_DandanplayAlignmentDialog> {
+  late int _chapterIndex;
+  late int _episodeIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _chapterIndex = widget.initialChapterIndex.clamp(
+      0,
+      widget.chapters.length - 1,
+    );
+    _episodeIndex = widget.initialEpisodeIndex.clamp(
+      0,
+      widget.episodes.length - 1,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('对齐弹幕'),
+      content: SizedBox(
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<int>(
+              initialValue: _chapterIndex,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: '视频第一集',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final entry in widget.chapters.indexed)
+                  DropdownMenuItem<int>(
+                    value: entry.$1,
+                    child: Text(
+                      entry.$2.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _chapterIndex = value);
+              },
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<int>(
+              initialValue: _episodeIndex,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: '弹幕第一集',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final entry in widget.episodes.indexed)
+                  DropdownMenuItem<int>(
+                    value: entry.$1,
+                    child: Text(
+                      _formatDandanplayEpisodeLabel(entry.$2),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _episodeIndex = value);
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (widget.hasExistingAlignment)
+          TextButton(
+            onPressed: () => Navigator.pop(
+              context,
+              const _DandanplayAlignmentResult.clear(),
+            ),
+            child: const Text('清除对齐'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(
+            context,
+            _DandanplayAlignmentResult.align(
+              chapterIndex: _chapterIndex,
+              episodeIndex: _episodeIndex,
+            ),
+          ),
+          child: const Text('确定'),
+        ),
+      ],
+    );
+  }
+}
+
+String _formatDandanplayEpisodeLabel(DandanplayBangumiEpisode episode) {
+  final number = episode.episodeNumber.trim();
+  final title = episode.episodeTitle.trim();
+  if (title.isNotEmpty) return title;
+  if (number.isNotEmpty) return number;
+  return '#${episode.episodeId}';
 }
 
 class _BoundAnimeChapterRow extends StatelessWidget {
@@ -1822,16 +2155,6 @@ class _BoundAnimeChapterRow extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  static String _formatDandanplayEpisodeLabel(
-    DandanplayBangumiEpisode episode,
-  ) {
-    final number = episode.episodeNumber.trim();
-    final title = episode.episodeTitle.trim();
-    if (title.isNotEmpty) return title;
-    if (number.isNotEmpty) return number;
-    return '#${episode.episodeId}';
   }
 }
 

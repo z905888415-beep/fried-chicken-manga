@@ -11,6 +11,8 @@ class DandanplayBindingRecord {
   final String animeTitle;
   final String? imageUrl;
   final DateTime boundAt;
+  final String? alignmentChapterUuid;
+  final int? alignmentEpisodeId;
 
   const DandanplayBindingRecord({
     required this.pathWord,
@@ -21,6 +23,8 @@ class DandanplayBindingRecord {
     required this.boundAt,
     this.localUuid,
     this.imageUrl,
+    this.alignmentChapterUuid,
+    this.alignmentEpisodeId,
   });
 
   factory DandanplayBindingRecord.fromJson(Map<String, dynamic> json) {
@@ -32,9 +36,17 @@ class DandanplayBindingRecord {
       bangumiId: json['bangumiId']?.toString() ?? '',
       animeTitle: json['animeTitle']?.toString() ?? '',
       imageUrl: json['imageUrl']?.toString(),
-      boundAt: DateTime.tryParse(json['boundAt']?.toString() ?? '') ??
+      boundAt:
+          DateTime.tryParse(json['boundAt']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      alignmentChapterUuid: json['alignmentChapterUuid']?.toString(),
+      alignmentEpisodeId: _parseInt(json['alignmentEpisodeId']),
     );
+  }
+
+  static int? _parseInt(Object? value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
   }
 
   Map<String, dynamic> toJson() => {
@@ -46,7 +58,44 @@ class DandanplayBindingRecord {
     'animeTitle': animeTitle,
     if (imageUrl != null) 'imageUrl': imageUrl,
     'boundAt': boundAt.toIso8601String(),
+    if (alignmentChapterUuid != null)
+      'alignmentChapterUuid': alignmentChapterUuid,
+    if (alignmentEpisodeId != null) 'alignmentEpisodeId': alignmentEpisodeId,
   };
+
+  bool get hasAlignment =>
+      alignmentChapterUuid != null && alignmentEpisodeId != null;
+
+  DandanplayBindingRecord withAlignment({
+    required String chapterUuid,
+    required int episodeId,
+  }) {
+    return DandanplayBindingRecord(
+      pathWord: pathWord,
+      localTitle: localTitle,
+      localUuid: localUuid,
+      animeId: animeId,
+      bangumiId: bangumiId,
+      animeTitle: animeTitle,
+      imageUrl: imageUrl,
+      boundAt: boundAt,
+      alignmentChapterUuid: chapterUuid,
+      alignmentEpisodeId: episodeId,
+    );
+  }
+
+  DandanplayBindingRecord withoutAlignment() {
+    return DandanplayBindingRecord(
+      pathWord: pathWord,
+      localTitle: localTitle,
+      localUuid: localUuid,
+      animeId: animeId,
+      bangumiId: bangumiId,
+      animeTitle: animeTitle,
+      imageUrl: imageUrl,
+      boundAt: boundAt,
+    );
+  }
 }
 
 class DandanplayBindingStore {

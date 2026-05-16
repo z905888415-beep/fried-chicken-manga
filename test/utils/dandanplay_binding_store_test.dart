@@ -23,7 +23,12 @@ void main() {
       boundAt: DateTime(2026, 4, 6, 12),
     );
 
-    await store.save(record);
+    final alignedRecord = record.withAlignment(
+      chapterUuid: 'chapter-1',
+      episodeId: 901,
+    );
+
+    await store.save(alignedRecord);
 
     final loaded = await store.getByPathWord('witch_hat_atelier');
     expect(loaded, isNotNull);
@@ -34,6 +39,16 @@ void main() {
     expect(loaded.bangumiId, '17305');
     expect(loaded.animeTitle, '尖帽子的魔法工房');
     expect(loaded.imageUrl, record.imageUrl);
+    expect(loaded.hasAlignment, isTrue);
+    expect(loaded.alignmentChapterUuid, 'chapter-1');
+    expect(loaded.alignmentEpisodeId, 901);
+
+    await store.save(loaded.withoutAlignment());
+    final withoutAlignment = await store.getByPathWord('witch_hat_atelier');
+    expect(withoutAlignment, isNotNull);
+    expect(withoutAlignment!.hasAlignment, isFalse);
+    expect(withoutAlignment.alignmentChapterUuid, isNull);
+    expect(withoutAlignment.alignmentEpisodeId, isNull);
 
     await store.removeByPathWord('witch_hat_atelier');
 
