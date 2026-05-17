@@ -441,7 +441,11 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
             ],
           ),
           const SizedBox(height: 8),
-          _buildCommentText(comment, bodyStyle: bodyStyle),
+          _buildCommentText(
+            comment,
+            bodyStyle: bodyStyle,
+            backgroundColor: cs.surfaceContainerLow,
+          ),
           if (canExpandReplies) ...[
             const SizedBox(height: 10),
             _buildCommentActions(cs, tt, comment, replyState),
@@ -459,7 +463,6 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
     ComicComment comment,
     _ComicReplyState replyState,
   ) {
-    final loadingInitial = replyState.loading && replyState.replies.isEmpty;
     final actionStyle = tt.bodyMedium?.copyWith(
       color: cs.onSurfaceVariant,
       fontWeight: FontWeight.w500,
@@ -473,23 +476,13 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (loadingInitial)
-              SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.onSurfaceVariant,
-                ),
-              )
-            else
-              Icon(
-                replyState.expanded
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 18,
-                color: cs.onSurfaceVariant,
-              ),
+            Icon(
+              replyState.expanded
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: cs.onSurfaceVariant,
+            ),
             const SizedBox(width: 2),
             Text(
               replyState.expanded ? '收起回复' : '展开 ${comment.replyCount} 条回复',
@@ -519,8 +512,14 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
         children: [
           if (replyState.loading && replies.isEmpty)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                children: [
+                  _ComicReplySkeleton(),
+                  SizedBox(height: 12),
+                  _ComicReplySkeleton(),
+                ],
+              ),
             ),
           if (replyState.error != null && replies.isEmpty)
             Padding(
@@ -679,7 +678,11 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                 ],
               ),
               const SizedBox(height: 4),
-              _buildCommentText(reply, bodyStyle: bodyStyle),
+              _buildCommentText(
+                reply,
+                bodyStyle: bodyStyle,
+                backgroundColor: cs.surfaceContainerLow,
+              ),
             ],
           ),
         ),
@@ -704,11 +707,13 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
   Widget _buildCommentText(
     ComicComment comment, {
     required TextStyle? bodyStyle,
+    required Color backgroundColor,
   }) {
     return _ExpandableCommentText(
       key: ValueKey('comic-comment-text-${comment.id}'),
       text: comment.comment,
       style: bodyStyle,
+      backgroundColor: backgroundColor,
     );
   }
 }
@@ -802,11 +807,13 @@ class _ComicCommentAvatar extends StatelessWidget {
 class _ExpandableCommentText extends StatefulWidget {
   final String text;
   final TextStyle? style;
+  final Color backgroundColor;
 
   const _ExpandableCommentText({
     super.key,
     required this.text,
     required this.style,
+    required this.backgroundColor,
   });
 
   @override
@@ -820,7 +827,6 @@ class _ExpandableCommentTextState extends State<_ExpandableCommentText> {
   double _lastLayoutWidth = 0;
 
   void _checkOverflow(double maxWidth) {
-    if (_expanded || _isOverflowing) return;
     if (maxWidth <= 0) return;
     if ((maxWidth - _lastLayoutWidth).abs() < 1) return;
     _lastLayoutWidth = maxWidth;
@@ -830,14 +836,31 @@ class _ExpandableCommentTextState extends State<_ExpandableCommentText> {
       textDirection: Directionality.of(context),
       maxLines: _maxLines,
     )..layout(maxWidth: maxWidth);
-    if (textPainter.didExceedMaxLines) {
-      setState(() => _isOverflowing = true);
+
+    final nextOverflowing = textPainter.didExceedMaxLines;
+    if (nextOverflowing != _isOverflowing) {
+      setState(() {
+        _isOverflowing = nextOverflowing;
+        if (!nextOverflowing) _expanded = false;
+      });
     }
+  }
+
+  void _toggleExpanded() {
+    if (!_isOverflowing) return;
+    setState(() => _expanded = !_expanded);
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final baseFontSize = widget.style?.fontSize ?? 14.0;
+    final hintStyle = widget.style?.copyWith(
+      color: cs.primary,
+      fontWeight: FontWeight.w700,
+      fontSize: baseFontSize > 13 ? baseFontSize - 1 : baseFontSize,
+      height: 1.2,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -845,49 +868,108 @@ class _ExpandableCommentTextState extends State<_ExpandableCommentText> {
           if (mounted) _checkOverflow(constraints.maxWidth);
         });
 
-        if (!_expanded && _isOverflowing) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SelectableText(
-                widget.text,
-                maxLines: _maxLines,
-                style: widget.style,
-              ),
-              GestureDetector(
-                onTap: () => setState(() => _expanded = true),
-                child: Text(
-                  '展开全文',
-                  style: widget.style?.copyWith(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          );
+        if (!_isOverflowing) {
+          return Text(widget.text, style: widget.style);
         }
-        if (_expanded) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SelectableText(widget.text, style: widget.style),
-              GestureDetector(
-                onTap: () => setState(() => _expanded = false),
-                child: Text(
-                  '收起',
-                  style: widget.style?.copyWith(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w600,
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: _toggleExpanded,
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Stack(
+                    children: [
+                      Text(
+                        widget.text,
+                        maxLines: _expanded ? null : _maxLines,
+                        style: widget.style,
+                      ),
+                      if (!_expanded)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: IgnorePointer(
+                            child: Container(
+                              height: 56,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    widget.backgroundColor.withValues(alpha: 0),
+                                    widget.backgroundColor.withValues(
+                                      alpha: 0.96,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                ),
+                  if (!_expanded) ...[
+                    const SizedBox(height: 8),
+                    IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: widget.backgroundColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('展开全文', style: hintStyle),
+                              const SizedBox(width: 2),
+                              Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                size: 16,
+                                color: cs.primary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_expanded) ...[
+                    const SizedBox(height: 8),
+                    IgnorePointer(
+                      child: Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('收起', style: hintStyle),
+                            const SizedBox(width: 2),
+                            Icon(
+                              Icons.keyboard_arrow_up_rounded,
+                              size: 16,
+                              color: cs.primary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            ],
-          );
-        }
-        return SelectableText(widget.text, style: widget.style);
+            ),
+          ),
+        );
       },
     );
   }
@@ -960,6 +1042,77 @@ class _ComicCommentSkeleton extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ComicReplySkeleton extends StatelessWidget {
+  const _ComicReplySkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final placeholderColor = cs.onSurfaceVariant.withValues(alpha: 0.2);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: placeholderColor,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 86,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: placeholderColor,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    width: 40,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: placeholderColor,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: placeholderColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: MediaQuery.sizeOf(context).width * 0.36,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: placeholderColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

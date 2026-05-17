@@ -53,7 +53,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   DandanplayBindingRecord? _dandanplayBinding;
   DandanplayBangumi? _dandanplayBangumi;
   bool _loadingDandanplayBangumi = false;
-  String? _dandanplayBangumiError;
   Map<String, int?> _danmakuEpisodeBindings = {};
   int _dandanplayBangumiSerial = 0;
   String? _detailError;
@@ -233,7 +232,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     if (!mounted) return;
     setState(() {
       _dandanplayBangumi = null;
-      _dandanplayBangumiError = null;
     });
   }
 
@@ -326,7 +324,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       setState(() {
         _dandanplayBinding = null;
         _dandanplayBangumi = null;
-        _dandanplayBangumiError = null;
         _danmakuEpisodeBindings = {};
       });
       showToast(context, '已清除弹弹play绑定');
@@ -340,7 +337,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     setState(() {
       _dandanplayBinding = record;
       _dandanplayBangumi = null;
-      _dandanplayBangumiError = null;
       _danmakuEpisodeBindings = {};
     });
     await _loadDandanplayBangumi(record, applySequential: true);
@@ -362,7 +358,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     final serial = ++_dandanplayBangumiSerial;
     setState(() {
       _loadingDandanplayBangumi = true;
-      _dandanplayBangumiError = null;
     });
 
     final bangumi = await DandanplayApi().getBangumi(binding.animeId);
@@ -376,7 +371,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       setState(() {
         _dandanplayBangumi = null;
         _loadingDandanplayBangumi = false;
-        _dandanplayBangumiError = '弹弹play剧集加载失败';
       });
       return;
     }
@@ -384,7 +378,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     setState(() {
       _dandanplayBangumi = bangumi;
       _loadingDandanplayBangumi = false;
-      _dandanplayBangumiError = null;
     });
 
     if (_chapters.isEmpty) return;
@@ -1061,63 +1054,41 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       SliverToBoxAdapter(
         child: Padding(
           padding: EdgeInsets.fromLTRB(hp, 24, hp, 12),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              alignment: WrapAlignment.start,
-              children: [
-                if (_selectionMode) ...[
-                  Text(
-                    '已选 ${_selectedUuids.length} 集',
-                    style: tt.bodyMedium?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  TextButton(onPressed: _selectAll, child: const Text('全选未下载')),
-                  FilledButton.tonal(
-                    onPressed: _selectedUuids.isEmpty ? null : _batchDownload,
-                    child: const Text('下载选中'),
-                  ),
-                  IconButton(
-                    onPressed: _exitSelectionMode,
-                    icon: const Icon(Icons.close),
-                    tooltip: '取消',
-                  ),
-                ] else ...[
-                  if (_dandanplayBinding == null)
-                    FilledButton.tonalIcon(
-                      onPressed: _showDandanplayBindingDialog,
-                      icon: const Icon(Icons.link_rounded, size: 18),
-                      label: const Text('绑定弹幕'),
-                      style: _episodeActionButtonStyle(),
-                    )
-                  else
-                    OutlinedButton.icon(
-                      onPressed: boundEpisodes.isEmpty
-                          ? null
-                          : () => _showDandanplayAlignmentDialog(boundEpisodes),
-                      icon: const Icon(
-                        Icons.align_horizontal_left_rounded,
-                        size: 18,
+          child: _selectionMode
+              ? Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    alignment: WrapAlignment.start,
+                    children: [
+                      Text(
+                        '已选 ${_selectedUuids.length} 集',
+                        style: tt.bodyMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      label: const Text('对齐'),
-                      style: _episodeOutlinedActionButtonStyle(),
-                    ),
-                  if (_chapters.isNotEmpty)
-                    FilledButton.tonalIcon(
-                      onPressed: () => setState(() => _selectionMode = true),
-                      icon: const Icon(Icons.checklist),
-                      label: const Text('多选'),
-                      style: _episodeActionButtonStyle(),
-                    ),
-                ],
-              ],
-            ),
-          ),
+                      TextButton(
+                        onPressed: _selectAll,
+                        child: const Text('全选未下载'),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: _selectedUuids.isEmpty
+                            ? null
+                            : _batchDownload,
+                        child: const Text('下载选中'),
+                      ),
+                      IconButton(
+                        onPressed: _exitSelectionMode,
+                        icon: const Icon(Icons.close),
+                        tooltip: '取消',
+                      ),
+                    ],
+                  ),
+                )
+              : _buildEpisodeActionBar(boundEpisodes),
         ),
       ),
       if (_chapterError != null && _chapters.isEmpty)
@@ -1205,19 +1176,81 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
 
   ButtonStyle _episodeActionButtonStyle() {
     return FilledButton.styleFrom(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
     );
   }
 
-  ButtonStyle _episodeOutlinedActionButtonStyle() {
-    return OutlinedButton.styleFrom(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  Widget _buildEpisodeActionBar(List<DandanplayBangumiEpisode> boundEpisodes) {
+    final buttons = <({int flex, Widget child})>[
+      if (_dandanplayBinding == null)
+        (
+          flex: 3,
+          child: FilledButton.tonalIcon(
+            onPressed: _showDandanplayBindingDialog,
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: const Text(
+              '绑定弹幕',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: _episodeActionButtonStyle(),
+          ),
+        )
+      else ...[
+        (
+          flex: 3,
+          child: FilledButton.tonalIcon(
+            onPressed: _showDandanplayBindingDialog,
+            icon: const Icon(Icons.manage_search_rounded, size: 18),
+            label: const Text(
+              '重新绑定',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: _episodeActionButtonStyle(),
+          ),
+        ),
+        (
+          flex: 2,
+          child: FilledButton.tonalIcon(
+            onPressed: boundEpisodes.isEmpty
+                ? null
+                : () => _showDandanplayAlignmentDialog(boundEpisodes),
+            icon: const Icon(Icons.align_horizontal_left_rounded, size: 18),
+            label: const Text(
+              '对齐',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: _episodeActionButtonStyle(),
+          ),
+        ),
+      ],
+      if (_chapters.isNotEmpty)
+        (
+          flex: 2,
+          child: FilledButton.tonalIcon(
+            onPressed: () => setState(() => _selectionMode = true),
+            icon: const Icon(Icons.download_for_offline_outlined, size: 18),
+            label: const Text(
+              '下载',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: _episodeActionButtonStyle(),
+          ),
+        ),
+    ];
+
+    return Row(
+      children: [
+        for (var i = 0; i < buttons.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(flex: buttons[i].flex, child: buttons[i].child),
+        ],
+      ],
     );
   }
 
@@ -1242,18 +1275,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
             ),
           ),
         ),
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(hp, 0, hp, 12),
-          child: _DandanplayBindingSummary(
-            binding: _dandanplayBinding!,
-            loading: _loadingDandanplayBangumi,
-            error: _dandanplayBangumiError,
-            episodeCount: episodes.length,
-            onRebind: _showDandanplayBindingDialog,
-          ),
-        ),
-      ),
       if (_loadingDandanplayBangumi && episodes.isEmpty)
         const SliverToBoxAdapter(
           child: Padding(
@@ -1345,6 +1366,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
             SliverAppBar(
               pinned: true,
               expandedHeight: 280,
+              foregroundColor: Colors.white,
               title: Text(
                 anime?.name ?? '动漫详情',
                 maxLines: 1,
@@ -1784,81 +1806,6 @@ class _DandanplayAnimeResultTile extends StatelessWidget {
     final value = item.startDate;
     if (value == null || value.isEmpty) return null;
     return DateTime.tryParse(value)?.year.toString();
-  }
-}
-
-class _DandanplayBindingSummary extends StatelessWidget {
-  final DandanplayBindingRecord binding;
-  final bool loading;
-  final String? error;
-  final int episodeCount;
-  final VoidCallback onRebind;
-
-  const _DandanplayBindingSummary({
-    required this.binding,
-    required this.loading,
-    required this.error,
-    required this.episodeCount,
-    required this.onRebind,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    final statusText = error != null
-        ? error!
-        : loading
-        ? '正在加载弹弹play剧集'
-        : '可选弹幕 $episodeCount 集';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: cs.outlineVariant),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.subtitles_outlined, color: cs.primary, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  binding.animeTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  statusText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tt.bodySmall?.copyWith(
-                    color: error == null ? cs.onSurfaceVariant : cs.error,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TextButton.icon(
-                onPressed: onRebind,
-                icon: const Icon(Icons.manage_search_rounded, size: 18),
-                label: const Text('重新绑定'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 }
 

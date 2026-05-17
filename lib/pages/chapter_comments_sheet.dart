@@ -392,7 +392,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                     final buttonStyle = FilledButton.styleFrom(
                       backgroundColor: buttonBackgroundColor,
                       foregroundColor: buttonForegroundColor,
-                      elevation: 0,
+                      elevation: 6,
+                      shadowColor: Colors.black.withValues(alpha: 0.22),
                       minimumSize: const Size(0, 52),
                       maximumSize: const Size.fromHeight(52),
                       fixedSize: const Size.fromHeight(52),

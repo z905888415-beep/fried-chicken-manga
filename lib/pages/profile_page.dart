@@ -25,6 +25,19 @@ const _appDisclaimerItems = [
 
 const _appDisclaimerFooter = '继续使用本应用，即表示您已阅读、理解并同意上述说明；如您不同意，请立即停止使用并卸载本应用。';
 
+List<BoxShadow> _profileCardShadow(ColorScheme cs) => [
+  BoxShadow(
+    color: Colors.black.withValues(alpha: 0.08),
+    blurRadius: 18,
+    offset: const Offset(0, 6),
+  ),
+  BoxShadow(
+    color: cs.shadow.withValues(alpha: 0.04),
+    blurRadius: 6,
+    offset: const Offset(0, 2),
+  ),
+];
+
 enum _SwitchAccountSheetAction { addAccount }
 
 class ProfilePage extends StatefulWidget {
@@ -316,6 +329,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   Card(
                     color: cs.surfaceContainerLow,
+                    shadowColor: Colors.black.withValues(alpha: 0.08),
+                    elevation: 4,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Column(
@@ -391,6 +406,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   const SizedBox(height: 12),
                   Card(
                     color: cs.surfaceContainerLow,
+                    shadowColor: Colors.black.withValues(alpha: 0.08),
+                    elevation: 4,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Column(
@@ -400,7 +417,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               icon: Icons.download_done_rounded,
                               color: Color(0xFFFFA24C),
                             ),
-                            title: const Text('本地下载中心'),
+                            title: const Text('下载中心'),
                             subtitle: const Text('查看和管理已下载的资源'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.push(
@@ -435,6 +452,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   const SizedBox(height: 12),
                   Card(
                     color: cs.surfaceContainerLow,
+                    shadowColor: Colors.black.withValues(alpha: 0.08),
+                    elevation: 4,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: ListTile(
@@ -463,6 +482,8 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _buildLoginCard(ColorScheme cs, TextTheme tt) {
     return Card(
       color: cs.surfaceContainerLow,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      elevation: 4,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: _goLogin,
@@ -504,6 +525,8 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _buildUserCard(ColorScheme cs, TextTheme tt) {
     return Card(
       color: cs.surfaceContainerLow,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      elevation: 4,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () {
@@ -789,6 +812,7 @@ class _LoginPageState extends State<LoginPage> {
             : cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: isSelected ? cs.primary : cs.outlineVariant),
+        boxShadow: _profileCardShadow(cs),
       ),
       child: Material(
         color: Colors.transparent,
@@ -1502,6 +1526,8 @@ class DisclaimerPage extends StatelessWidget {
           const SizedBox(height: 16),
           Card(
             color: cs.surfaceContainerLow,
+            shadowColor: Colors.black.withValues(alpha: 0.08),
+            elevation: 4,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -1615,6 +1641,8 @@ class _AboutPageState extends State<AboutPage> {
               const SizedBox(height: 32),
               Card(
                 color: cs.surfaceContainerLow,
+                shadowColor: Colors.black.withValues(alpha: 0.08),
+                elevation: 4,
                 child: Column(
                   children: [
                     ListTile(
