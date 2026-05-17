@@ -1106,7 +1106,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                '更新于 ${comic.datetimeUpdated}',
+                                _formatRelativeTime(comic.datetimeUpdated!),
                                 style: tt.bodySmall?.copyWith(
                                   color: cs.onSurfaceVariant,
                                 ),
@@ -1144,7 +1144,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             ),
           ),
           // ── 分组切换 ──
-          if (comic.groups != null && comic.groups!.length > 1)
+          if (comic.groups != null && comic.groups!.isNotEmpty)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -1180,59 +1180,60 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
               child: Row(
                 children: [
-                  Icon(Icons.list, size: 20, color: cs.primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    '章节 ($_chapterTotal)',
-                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const Spacer(),
-                  if (_totalPages > 1) ...[
-                    ...List.generate(_totalPages, (i) {
-                      final isSelected = i == _chapterPage;
-                      final pageButtonShape = RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      );
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: isSelected
-                            ? FilledButton(
-                                onPressed: () {},
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(38, 38),
-                                  maximumSize: const Size(38, 38),
-                                  fixedSize: const Size(38, 38),
-                                  padding: EdgeInsets.zero,
-                                  backgroundColor: cs.primary,
-                                  foregroundColor: cs.onPrimary,
-                                  disabledBackgroundColor: cs.primary,
-                                  disabledForegroundColor: cs.onPrimary,
-                                  shape: pageButtonShape,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: Text('${i + 1}'),
-                              )
-                            : FilledButton.tonal(
-                                onPressed: () => _loadChapterPage(i),
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(38, 38),
-                                  maximumSize: const Size(38, 38),
-                                  fixedSize: const Size(38, 38),
-                                  padding: EdgeInsets.zero,
-                                  backgroundColor: cs.surfaceContainerHigh,
-                                  foregroundColor: cs.onSurfaceVariant,
-                                  shape: pageButtonShape,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: Text('${i + 1}'),
-                              ),
-                      );
-                    }),
-                  ],
+                  if (_totalPages > 1)
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: List.generate(_totalPages, (i) {
+                            final isSelected = i == _chapterPage;
+                            final pageButtonShape = RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            );
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              child: isSelected
+                                  ? FilledButton(
+                                      onPressed: () {},
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size(38, 38),
+                                        maximumSize: const Size(38, 38),
+                                        fixedSize: const Size(38, 38),
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: cs.primary,
+                                        foregroundColor: cs.onPrimary,
+                                        disabledBackgroundColor: cs.primary,
+                                        disabledForegroundColor: cs.onPrimary,
+                                        shape: pageButtonShape,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      child: Text('${i + 1}'),
+                                    )
+                                  : FilledButton.tonal(
+                                      onPressed: () => _loadChapterPage(i),
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size(38, 38),
+                                        maximumSize: const Size(38, 38),
+                                        fixedSize: const Size(38, 38),
+                                        padding: EdgeInsets.zero,
+                                        backgroundColor: cs.surfaceContainerHigh,
+                                        foregroundColor: cs.onSurfaceVariant,
+                                        shape: pageButtonShape,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      child: Text('${i + 1}'),
+                                    ),
+                            );
+                          }),
+                        ),
+                      ),
+                    )
+                  else
+                    const Spacer(),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    padding: const EdgeInsets.only(left: 8),
                     child: FilledButton.tonal(
                       onPressed: () => setState(() => _reversed = !_reversed),
                       style: FilledButton.styleFrom(
@@ -1296,6 +1297,23 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     if (n >= 100000000) return '${(n / 100000000).toStringAsFixed(1)}亿';
     if (n >= 10000) return '${(n / 10000).toStringAsFixed(1)}万';
     return n.toString();
+  }
+
+  static String _formatRelativeTime(String raw) {
+    if (raw.isEmpty) return '';
+    final normalized = raw.replaceFirst(' ', 'T');
+    final parsed = DateTime.tryParse(normalized);
+    if (parsed == null) return raw;
+    final now = DateTime.now();
+    final localTime = parsed.isUtc ? parsed.toLocal() : parsed;
+    final diff = now.difference(localTime);
+    if (diff.isNegative) return '刚刚';
+    if (diff.inSeconds < 60) return '刚刚';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
+    if (diff.inHours < 24) return '${diff.inHours}小时前';
+    if (diff.inDays < 30) return '${diff.inDays}天前';
+    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}个月前';
+    return '${(diff.inDays / 365).floor()}年前';
   }
 }
 
