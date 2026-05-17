@@ -66,6 +66,10 @@ class UserManager extends ChangeNotifier {
   factory UserManager() => _instance;
   UserManager._();
 
+  static const double minDarkModeCoverBrightness = 0.55;
+  static const double maxDarkModeCoverBrightness = 1.0;
+  static const double defaultDarkModeCoverBrightness = 0.85;
+
   static const _keyToken = 'user_token';
   static const _keyUsername = 'user_username';
   static const _keyNickname = 'user_nickname';
@@ -78,6 +82,7 @@ class UserManager extends ChangeNotifier {
   static const _keyThemeColor = 'theme_color';
   static const _keyThemeVariant = 'theme_variant';
   static const _keyCustomThemeColor = 'custom_theme_color';
+  static const _keyDarkModeCoverBrightness = 'dark_mode_cover_brightness';
   static const _keyBottomNavShowLabels = 'bottom_nav_show_labels';
   static const _keyNavOrder = 'nav_order';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
@@ -134,6 +139,7 @@ class UserManager extends ChangeNotifier {
   String _themeColor = appThemeOptions.first.id;
   DynamicSchemeVariant _themeVariant = appThemeVariantOptions.first.variant;
   int _customThemeColorValue = defaultCustomThemeColor.toARGB32();
+  double _darkModeCoverBrightness = defaultDarkModeCoverBrightness;
   bool _bottomNavShowLabels = true;
   List<String> _navOrder = const [
     'comic',
@@ -194,6 +200,7 @@ class UserManager extends ChangeNotifier {
   String get themeColor => _themeColor;
   DynamicSchemeVariant get themeVariant => _themeVariant;
   Color get customThemeColor => Color(_customThemeColorValue);
+  double get darkModeCoverBrightness => _darkModeCoverBrightness;
   bool get bottomNavShowLabels => _bottomNavShowLabels;
   List<String> get navOrder => _navOrder;
   AppThemeOption get themeOption {
@@ -299,6 +306,10 @@ class UserManager extends ChangeNotifier {
     _customThemeColorValue =
         prefs.getInt(_keyCustomThemeColor) ??
         defaultCustomThemeColor.toARGB32();
+    _darkModeCoverBrightness = _normalizeDarkModeCoverBrightness(
+      prefs.getDouble(_keyDarkModeCoverBrightness) ??
+          defaultDarkModeCoverBrightness,
+    );
     _bottomNavShowLabels = prefs.getBool(_keyBottomNavShowLabels) ?? true;
     _navOrder =
         prefs.getStringList(_keyNavOrder) ??
@@ -546,6 +557,16 @@ class UserManager extends ChangeNotifier {
     await prefs.setString(_keyThemeColor, customThemeOptionId);
 
     if (shouldNotify) notifyListeners();
+  }
+
+  Future<void> setDarkModeCoverBrightness(double value) async {
+    final nextValue = _normalizeDarkModeCoverBrightness(value);
+    if (_darkModeCoverBrightness == nextValue) return;
+
+    _darkModeCoverBrightness = nextValue;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyDarkModeCoverBrightness, nextValue);
+    notifyListeners();
   }
 
   Future<void> setBottomNavShowLabels(bool enabled) async {
@@ -858,5 +879,12 @@ class UserManager extends ChangeNotifier {
       nickname: info['nickname']?.toString() ?? _nickname ?? '',
       avatar: info['avatar']?.toString() ?? _avatar ?? '',
     );
+  }
+
+  static double _normalizeDarkModeCoverBrightness(double value) {
+    return value.clamp(
+          minDarkModeCoverBrightness,
+          maxDarkModeCoverBrightness,
+        ).toDouble();
   }
 }

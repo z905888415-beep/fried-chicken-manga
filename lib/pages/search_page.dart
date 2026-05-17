@@ -6,6 +6,7 @@ import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/comic.dart' as m;
 import '../models/user_manager.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_card_skeleton.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
@@ -616,30 +617,32 @@ class _AnimeGridItem extends StatelessWidget {
             child: Card(
               clipBehavior: Clip.antiAlias,
               margin: EdgeInsets.zero,
-              child: CachedNetworkImage(
-                imageUrl: anime.cover,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                fadeInDuration: Duration.zero,
-                fadeOutDuration: Duration.zero,
-                placeholder: (_, _) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                    child: Icon(
-                      Icons.movie_outlined,
-                      color: cs.onSurfaceVariant,
-                      size: 32,
+              child: CoverBrightnessFilter(
+                child: CachedNetworkImage(
+                  imageUrl: anime.cover,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  placeholder: (_, _) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.movie_outlined,
+                        color: cs.onSurfaceVariant,
+                        size: 32,
+                      ),
                     ),
                   ),
-                ),
-                errorWidget: (_, _, _) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                    child: Icon(
-                      Icons.broken_image,
-                      color: cs.onSurfaceVariant,
-                      size: 32,
+                  errorWidget: (_, _, _) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Center(
+                      child: Icon(
+                        Icons.broken_image,
+                        color: cs.onSurfaceVariant,
+                        size: 32,
+                      ),
                     ),
                   ),
                 ),
@@ -685,30 +688,32 @@ class _ComicGridItem extends StatelessWidget {
               Card(
                 clipBehavior: Clip.antiAlias,
                 margin: EdgeInsets.zero,
-                child: CachedNetworkImage(
-                  imageUrl: comic.cover,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                  fadeInDuration: Duration.zero,
-                  fadeOutDuration: Duration.zero,
-                  placeholder: (_, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                      child: Icon(
-                        Icons.image,
-                        color: cs.onSurfaceVariant,
-                        size: 32,
+                child: CoverBrightnessFilter(
+                  child: CachedNetworkImage(
+                    imageUrl: comic.cover,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fadeInDuration: Duration.zero,
+                    fadeOutDuration: Duration.zero,
+                    placeholder: (_, _) => Container(
+                      color: cs.surfaceContainerHighest,
+                      child: Center(
+                        child: Icon(
+                          Icons.image,
+                          color: cs.onSurfaceVariant,
+                          size: 32,
+                        ),
                       ),
                     ),
-                  ),
-                  errorWidget: (_, _, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                      child: Icon(
-                        Icons.broken_image,
-                        color: cs.onSurfaceVariant,
-                        size: 32,
+                    errorWidget: (_, _, _) => Container(
+                      color: cs.surfaceContainerHighest,
+                      child: Center(
+                        child: Icon(
+                          Icons.broken_image,
+                          color: cs.onSurfaceVariant,
+                          size: 32,
+                        ),
                       ),
                     ),
                   ),

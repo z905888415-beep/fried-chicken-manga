@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../api/dandanplay_api.dart';
 import '../models/anime.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/anime_download_manager.dart';
 import '../utils/anime_playback_history.dart';
 import '../utils/chinese_converter.dart';
@@ -1859,18 +1860,20 @@ class _DandanplayAnimeResultTile extends StatelessWidget {
                           color: cs.onSurfaceVariant,
                         ),
                       )
-                    : CachedNetworkImage(
-                        imageUrl: imageUrl,
-                        width: 52,
-                        height: 72,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) =>
-                            Container(color: cs.surfaceContainerHighest),
-                        errorWidget: (_, _, _) => Container(
-                          color: cs.surfaceContainerHighest,
-                          child: Icon(
-                            Icons.broken_image,
-                            color: cs.onSurfaceVariant,
+                    : CoverBrightnessFilter(
+                        child: CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          width: 52,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) =>
+                              Container(color: cs.surfaceContainerHighest),
+                          errorWidget: (_, _, _) => Container(
+                            color: cs.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.broken_image,
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
                         ),
                       ),
@@ -2284,11 +2287,13 @@ class _AnimeDetailHeader extends StatelessWidget {
               Card(
                 clipBehavior: Clip.antiAlias,
                 margin: EdgeInsets.zero,
-                child: CachedNetworkImage(
-                  imageUrl: intro.cover,
-                  width: 96,
-                  height: 124,
-                  fit: BoxFit.cover,
+                child: CoverBrightnessFilter(
+                  child: CachedNetworkImage(
+                    imageUrl: intro.cover,
+                    width: 96,
+                    height: 124,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(width: 14),
@@ -2602,16 +2607,16 @@ class _AnimeIntroViewData {
           : ((metadataMap['话数'] ?? '').isNotEmpty
                 ? null
                 : (bangumi.episodes.isNotEmpty
-                ? (
-                    icon: Icons.video_collection_outlined,
-                    text: '共 ${bangumi.episodes.length} 集',
-                  )
-                : (fallbackAnime != null && fallbackAnime.count > 0
                       ? (
                           icon: Icons.video_collection_outlined,
-                          text: '共 ${fallbackAnime.count} 集',
+                          text: '共 ${bangumi.episodes.length} 集',
                         )
-                      : null))),
+                      : (fallbackAnime != null && fallbackAnime.count > 0
+                            ? (
+                                icon: Icons.video_collection_outlined,
+                                text: '共 ${fallbackAnime.count} 集',
+                              )
+                            : null))),
       headerMetadata: [
         if ((metadataMap['放送星期'] ?? '').isNotEmpty)
           (icon: Icons.calendar_today_outlined, text: metadataMap['放送星期']!),

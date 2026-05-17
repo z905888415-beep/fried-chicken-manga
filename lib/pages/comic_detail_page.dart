@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/chapter.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
 import '../utils/download_manager.dart';
@@ -986,25 +987,27 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                     ComicHeroTags.cover,
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: CachedNetworkImage(
-                        imageUrl: comic.cover,
-                        width: 120,
-                        height: 160,
-                        fit: BoxFit.cover,
-                        fadeInDuration: Duration.zero,
-                        fadeOutDuration: Duration.zero,
-                        placeholder: (_, _) => Container(
+                      child: CoverBrightnessFilter(
+                        child: CachedNetworkImage(
+                          imageUrl: comic.cover,
                           width: 120,
                           height: 160,
-                          color: cs.surfaceContainerHighest,
-                        ),
-                        errorWidget: (_, _, _) => Container(
-                          width: 120,
-                          height: 160,
-                          color: cs.surfaceContainerHighest,
-                          child: Icon(
-                            Icons.broken_image,
-                            color: cs.onSurfaceVariant,
+                          fit: BoxFit.cover,
+                          fadeInDuration: Duration.zero,
+                          fadeOutDuration: Duration.zero,
+                          placeholder: (_, _) => Container(
+                            width: 120,
+                            height: 160,
+                            color: cs.surfaceContainerHighest,
+                          ),
+                          errorWidget: (_, _, _) => Container(
+                            width: 120,
+                            height: 160,
+                            color: cs.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.broken_image,
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
                         ),
                       ),

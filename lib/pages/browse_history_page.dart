@@ -6,6 +6,7 @@ import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/user_manager.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/toast.dart';
 import 'anime_detail_page.dart';
@@ -672,24 +673,26 @@ class _HistoryCover extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
-      child: CachedNetworkImage(
-        imageUrl: imageUrl,
-        fit: BoxFit.cover,
-        fadeInDuration: Duration.zero,
-        fadeOutDuration: Duration.zero,
-        placeholder: (_, _) => Container(
-          color: cs.surfaceContainerHighest,
-          child: Center(
-            child: Icon(icon, color: cs.onSurfaceVariant, size: 28),
+      child: CoverBrightnessFilter(
+        child: CachedNetworkImage(
+          imageUrl: imageUrl,
+          fit: BoxFit.cover,
+          fadeInDuration: Duration.zero,
+          fadeOutDuration: Duration.zero,
+          placeholder: (_, _) => Container(
+            color: cs.surfaceContainerHighest,
+            child: Center(
+              child: Icon(icon, color: cs.onSurfaceVariant, size: 28),
+            ),
           ),
-        ),
-        errorWidget: (_, _, _) => Container(
-          color: cs.surfaceContainerHighest,
-          child: Center(
-            child: Icon(
-              Icons.broken_image,
-              color: cs.onSurfaceVariant,
-              size: 28,
+          errorWidget: (_, _, _) => Container(
+            color: cs.surfaceContainerHighest,
+            child: Center(
+              child: Icon(
+                Icons.broken_image,
+                color: cs.onSurfaceVariant,
+                size: 28,
+              ),
             ),
           ),
         ),

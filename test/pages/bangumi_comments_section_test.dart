@@ -82,7 +82,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('Bangumi 评论'), findsOneWidget);
     expect(find.text('Alice'), findsOneWidget);
     expect(find.text('第一页评论'), findsOneWidget);
     expect(find.text('2小时前'), findsOneWidget);

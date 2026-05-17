@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_card_skeleton.dart';
 import 'anime_detail_page.dart';
 import 'home_page.dart';
@@ -242,17 +243,19 @@ class _AnimeGridCard extends StatelessWidget {
             child: Card(
               clipBehavior: Clip.antiAlias,
               margin: EdgeInsets.zero,
-              child: CachedNetworkImage(
-                imageUrl: anime.cover,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                fadeInDuration: Duration.zero,
-                fadeOutDuration: Duration.zero,
-                placeholder: (_, _) =>
-                    _ImagePlaceholder(icon: Icons.movie_outlined),
-                errorWidget: (_, _, _) =>
-                    _ImagePlaceholder(icon: Icons.broken_image),
+              child: CoverBrightnessFilter(
+                child: CachedNetworkImage(
+                  imageUrl: anime.cover,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  placeholder: (_, _) =>
+                      _ImagePlaceholder(icon: Icons.movie_outlined),
+                  errorWidget: (_, _, _) =>
+                      _ImagePlaceholder(icon: Icons.broken_image),
+                ),
               ),
             ),
           ),

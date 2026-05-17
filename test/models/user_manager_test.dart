@@ -73,4 +73,19 @@ void main() {
 
     expect(user.animeFeatureEnabled, isFalse);
   });
+
+  test('dark mode cover brightness defaults and persists', () async {
+    final user = UserManager();
+    await user.init();
+
+    expect(
+      user.darkModeCoverBrightness,
+      UserManager.defaultDarkModeCoverBrightness,
+    );
+
+    await user.setDarkModeCoverBrightness(0.7);
+    await user.init();
+
+    expect(user.darkModeCoverBrightness, 0.7);
+  });
 }

@@ -5,6 +5,7 @@ import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/user_manager.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/comic_card_skeleton.dart';
 import '../utils/toast.dart';
@@ -602,22 +603,24 @@ class _AnimeBookshelfCard extends StatelessWidget {
             child: Card(
               clipBehavior: Clip.antiAlias,
               margin: EdgeInsets.zero,
-              child: CachedNetworkImage(
-                imageUrl: anime.cover,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                fadeInDuration: Duration.zero,
-                fadeOutDuration: Duration.zero,
-                placeholder: (_, _) => _ImagePlaceholder(
-                  icon: Icons.movie_outlined,
-                  color: cs.surfaceContainerHighest,
-                  iconColor: cs.onSurfaceVariant,
-                ),
-                errorWidget: (_, _, _) => _ImagePlaceholder(
-                  icon: Icons.broken_image,
-                  color: cs.surfaceContainerHighest,
-                  iconColor: cs.onSurfaceVariant,
+              child: CoverBrightnessFilter(
+                child: CachedNetworkImage(
+                  imageUrl: anime.cover,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  placeholder: (_, _) => _ImagePlaceholder(
+                    icon: Icons.movie_outlined,
+                    color: cs.surfaceContainerHighest,
+                    iconColor: cs.onSurfaceVariant,
+                  ),
+                  errorWidget: (_, _, _) => _ImagePlaceholder(
+                    icon: Icons.broken_image,
+                    color: cs.surfaceContainerHighest,
+                    iconColor: cs.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),

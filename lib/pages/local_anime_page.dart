@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../utils/cover_brightness_filter.dart';
 import '../utils/anime_download_manager.dart';
 import '../utils/toast.dart';
 import 'anime_detail_page.dart';
@@ -248,7 +249,12 @@ class _LocalAnimeCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                       child: SizedBox.expand(
                         child: coverPath != null && File(coverPath).existsSync()
-                            ? Image.file(File(coverPath), fit: BoxFit.cover)
+                            ? CoverBrightnessFilter(
+                                child: Image.file(
+                                  File(coverPath),
+                                  fit: BoxFit.cover,
+                                ),
+                              )
                             : ColoredBox(
                                 color: cs.surfaceContainerHighest,
                                 child: Icon(
@@ -515,7 +521,12 @@ class _LocalAnimeDetailPageState extends State<LocalAnimeDetailPage> {
                       child:
                           info.coverPath != null &&
                               File(info.coverPath!).existsSync()
-                          ? Image.file(File(info.coverPath!), fit: BoxFit.cover)
+                          ? CoverBrightnessFilter(
+                              child: Image.file(
+                                File(info.coverPath!),
+                                fit: BoxFit.cover,
+                              ),
+                            )
                           : ColoredBox(
                               color: cs.surfaceContainerHighest,
                               child: Icon(

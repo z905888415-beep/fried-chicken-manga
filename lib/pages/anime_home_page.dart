@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
+import '../utils/cover_brightness_filter.dart';
 import '../utils/data_cache.dart';
 import '../utils/toast.dart';
 import 'anime_detail_page.dart';
@@ -449,14 +450,16 @@ class _AnimeBannerCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            CachedNetworkImage(
-              imageUrl: item.cover,
-              fit: BoxFit.cover,
-              fadeInDuration: Duration.zero,
-              fadeOutDuration: Duration.zero,
-              placeholder: (_, _) => _ImagePlaceholder(icon: Icons.movie),
-              errorWidget: (_, _, _) =>
-                  _ImagePlaceholder(icon: Icons.broken_image),
+            CoverBrightnessFilter(
+              child: CachedNetworkImage(
+                imageUrl: item.cover,
+                fit: BoxFit.cover,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
+                placeholder: (_, _) => _ImagePlaceholder(icon: Icons.movie),
+                errorWidget: (_, _, _) =>
+                    _ImagePlaceholder(icon: Icons.broken_image),
+              ),
             ),
             DecoratedBox(
               decoration: BoxDecoration(
@@ -594,15 +597,17 @@ class _AnimeCard extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    CachedNetworkImage(
-                      imageUrl: anime.cover,
-                      fit: BoxFit.cover,
-                      fadeInDuration: Duration.zero,
-                      fadeOutDuration: Duration.zero,
-                      placeholder: (_, _) =>
-                          _ImagePlaceholder(icon: Icons.movie_outlined),
-                      errorWidget: (_, _, _) =>
-                          _ImagePlaceholder(icon: Icons.broken_image),
+                    CoverBrightnessFilter(
+                      child: CachedNetworkImage(
+                        imageUrl: anime.cover,
+                        fit: BoxFit.cover,
+                        fadeInDuration: Duration.zero,
+                        fadeOutDuration: Duration.zero,
+                        placeholder: (_, _) =>
+                            _ImagePlaceholder(icon: Icons.movie_outlined),
+                        errorWidget: (_, _, _) =>
+                            _ImagePlaceholder(icon: Icons.broken_image),
+                      ),
                     ),
                   ],
                 ),

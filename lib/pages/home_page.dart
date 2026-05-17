@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
+import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
 import 'comic_detail_page.dart';
@@ -313,30 +314,32 @@ class _RecommendCard extends StatelessWidget {
                 Card(
                   clipBehavior: Clip.antiAlias,
                   margin: EdgeInsets.zero,
-                  child: CachedNetworkImage(
-                    imageUrl: comic.cover,
-                    fit: BoxFit.cover,
-                    width: _cardWidth,
-                    height: double.infinity,
-                    fadeInDuration: Duration.zero,
-                    fadeOutDuration: Duration.zero,
-                    placeholder: (_, _) => Container(
-                      color: cs.surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.image,
-                          color: cs.onSurfaceVariant,
-                          size: 32,
+                  child: CoverBrightnessFilter(
+                    child: CachedNetworkImage(
+                      imageUrl: comic.cover,
+                      fit: BoxFit.cover,
+                      width: _cardWidth,
+                      height: double.infinity,
+                      fadeInDuration: Duration.zero,
+                      fadeOutDuration: Duration.zero,
+                      placeholder: (_, _) => Container(
+                        color: cs.surfaceContainerHighest,
+                        child: Center(
+                          child: Icon(
+                            Icons.image,
+                            color: cs.onSurfaceVariant,
+                            size: 32,
+                          ),
                         ),
                       ),
-                    ),
-                    errorWidget: (_, _, _) => Container(
-                      color: cs.surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.broken_image,
-                          color: cs.onSurfaceVariant,
-                          size: 32,
+                      errorWidget: (_, _, _) => Container(
+                        color: cs.surfaceContainerHighest,
+                        child: Center(
+                          child: Icon(
+                            Icons.broken_image,
+                            color: cs.onSurfaceVariant,
+                            size: 32,
+                          ),
                         ),
                       ),
                     ),
@@ -407,30 +410,32 @@ class ComicCard extends StatelessWidget {
               Card(
                 clipBehavior: Clip.antiAlias,
                 margin: EdgeInsets.zero,
-                child: CachedNetworkImage(
-                  imageUrl: comic.cover,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                  fadeInDuration: Duration.zero,
-                  fadeOutDuration: Duration.zero,
-                  placeholder: (_, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                      child: Icon(
-                        Icons.image,
-                        color: cs.onSurfaceVariant,
-                        size: 32,
+                child: CoverBrightnessFilter(
+                  child: CachedNetworkImage(
+                    imageUrl: comic.cover,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fadeInDuration: Duration.zero,
+                    fadeOutDuration: Duration.zero,
+                    placeholder: (_, _) => Container(
+                      color: cs.surfaceContainerHighest,
+                      child: Center(
+                        child: Icon(
+                          Icons.image,
+                          color: cs.onSurfaceVariant,
+                          size: 32,
+                        ),
                       ),
                     ),
-                  ),
-                  errorWidget: (_, _, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                      child: Icon(
-                        Icons.broken_image,
-                        color: cs.onSurfaceVariant,
-                        size: 32,
+                    errorWidget: (_, _, _) => Container(
+                      color: cs.surfaceContainerHighest,
+                      child: Center(
+                        child: Icon(
+                          Icons.broken_image,
+                          color: cs.onSurfaceVariant,
+                          size: 32,
+                        ),
                       ),
                     ),
                   ),

@@ -161,8 +161,9 @@ class DandanplayBangumi {
         const <String>[];
     final ratingDetails = <String, double>{};
     if (json['ratingDetails'] is Map) {
-      for (final entry
-          in Map<String, dynamic>.from(json['ratingDetails']).entries) {
+      for (final entry in Map<String, dynamic>.from(
+        json['ratingDetails'],
+      ).entries) {
         ratingDetails[entry.key] = (entry.value as num?)?.toDouble() ?? 0;
       }
     }
@@ -545,17 +546,19 @@ class DandanplayApi {
     }
 
     try {
-      final response = await _dio.get(endpoint, queryParameters: {'page': page});
+      final response = await _dio.get(
+        endpoint,
+        queryParameters: {'page': page},
+      );
       final data = response.data;
       if (data is Map && data['success'] == true) {
-        final comments =
-            (data['comments'] as List? ?? const [])
-                .map(
-                  (item) => DandanplayBangumiComment.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ),
-                )
-                .toList(growable: false);
+        final comments = (data['comments'] as List? ?? const [])
+            .map(
+              (item) => DandanplayBangumiComment.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
+            .toList(growable: false);
         final result = DandanplayBangumiCommentsPage(
           count: data['count'] as int? ?? comments.length,
           hasMore: data['hasMore'] == true,
@@ -564,7 +567,9 @@ class DandanplayApi {
         _setCache(key, result, _ttlComments);
         return result;
       }
-      throw StateError(data is Map ? data['errorMessage']?.toString() ?? '未知错误' : '响应格式错误');
+      throw StateError(
+        data is Map ? data['errorMessage']?.toString() ?? '未知错误' : '响应格式错误',
+      );
     } catch (e) {
       debugPrint('Dandanplay get bangumi comments error: $e');
       throw Exception('获取番剧评论失败');

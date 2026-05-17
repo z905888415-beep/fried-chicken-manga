@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/user_manager.dart';
 import '../utils/anime_download_manager.dart';
+import '../utils/cover_brightness_filter.dart';
 import 'local_comics_page.dart';
 import 'local_anime_page.dart';
 
@@ -171,10 +172,12 @@ class _QueueTaskCard extends StatelessWidget {
                     width: 48,
                     height: 64,
                     child: task.cover != null && task.cover!.isNotEmpty
-                        ? Image.network(
-                            task.cover!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => _placeholder(cs),
+                        ? CoverBrightnessFilter(
+                            child: Image.network(
+                              task.cover!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => _placeholder(cs),
+                            ),
                           )
                         : _placeholder(cs),
                   ),

@@ -125,6 +125,8 @@ class _AppearancePageState extends State<AppearancePage> {
     final tt = Theme.of(context).textTheme;
     final selectedVariant = _user.themeVariantOption;
     final previewTheme = _buildPreviewTheme(_previewBrightness(context));
+    final coverBrightnessPercent = (_user.darkModeCoverBrightness * 100)
+        .round();
 
     return Scaffold(
       appBar: AppBar(title: const Text('外观')),
@@ -230,6 +232,66 @@ class _AppearancePageState extends State<AppearancePage> {
                       selected: {_user.themeMode},
                       onSelectionChanged: (v) => _user.setThemeMode(v.first),
                     ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerLow,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.brightness_low_outlined,
+                        color: cs.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 16),
+                      const Text('暗色模式封面亮度'),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '暗色模式下降低各个界面的卡片封面亮度',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Slider(
+                          value: _user.darkModeCoverBrightness,
+                          min: UserManager.minDarkModeCoverBrightness,
+                          max: UserManager.maxDarkModeCoverBrightness,
+                          divisions:
+                              ((UserManager.maxDarkModeCoverBrightness -
+                                          UserManager
+                                              .minDarkModeCoverBrightness) /
+                                      0.05)
+                                  .round(),
+                          label: '$coverBrightnessPercent%',
+                          onChanged: (value) {
+                            _user.setDarkModeCoverBrightness(value);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 52,
+                        child: Text(
+                          '$coverBrightnessPercent%',
+                          textAlign: TextAlign.end,
+                          style: tt.labelLarge?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
