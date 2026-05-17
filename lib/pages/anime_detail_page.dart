@@ -13,6 +13,7 @@ import '../utils/data_cache.dart';
 import '../utils/dandanplay_binding_store.dart';
 import '../utils/toast.dart';
 import 'anime_player_page.dart';
+import 'bangumi_comments_section.dart';
 import 'download_center_page.dart';
 import 'home_page.dart';
 
@@ -27,17 +28,21 @@ class AnimeDetailPage extends StatefulWidget {
 }
 
 class _AnimeDetailPageState extends State<AnimeDetailPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const _watchedCompleteRemainingThreshold = Duration(minutes: 3);
   static const _detailCacheTtl = Duration(days: 3);
+  static const _commentsScrollToTopThreshold = 480.0;
   static const _tabIntro = 0;
   static const _tabEpisodes = 1;
+  static const _tabComments = 2;
 
   final _api = ApiClient();
   final _cache = DataCache();
   final _downloads = AnimeDownloadManager();
   final _dandanplayBindingStore = DandanplayBindingStore();
-  late final TabController _tabController;
+  final _bangumiCommentsKey = GlobalKey<BangumiCommentsSectionState>();
+  final _scrollController = ScrollController();
+  TabController? _tabController;
   Anime? _anime;
   List<AnimeChapter> _chapters = [];
   int _chapterTotal = 0;
@@ -61,33 +66,70 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   // 批量下载选择
   final Set<String> _selectedUuids = {};
   bool _selectionMode = false;
+  bool _showCommentsScrollToTop = false;
   StreamSubscription<String>? _errorSub;
 
   String get _detailCacheKey => 'anime_detail_info_v2_${widget.pathWord}';
+  bool get _showCommentsTab =>
+      _dandanplayBinding?.bangumiId.trim().isNotEmpty == true;
+  List<int> get _tabKinds => _showCommentsTab
+      ? const [_tabIntro, _tabEpisodes, _tabComments]
+      : const [_tabIntro, _tabEpisodes];
   bool get _isIntroTab => _currentTab == _tabIntro;
+  bool get _isCommentsTab => _currentTab == _tabComments;
+  bool get _isEpisodeTab => _currentTab == _tabEpisodes;
+  bool get _useDandanplayIntro => _dandanplayBangumi != null;
+  _AnimeIntroViewData? get _introViewData => _useDandanplayIntro
+      ? _AnimeIntroViewData.fromDandanplay(
+          _dandanplayBangumi!,
+          fallbackAnime: _anime ?? widget.initialAnime,
+        )
+      : (_anime == null ? null : _AnimeIntroViewData.fromAnime(_anime!));
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(
-      length: 2,
-      vsync: this,
-      initialIndex: _tabEpisodes,
-    )..addListener(_onTabChanged);
+    _syncTabController();
     _anime = widget.initialAnime;
+    _scrollController.addListener(_onScrollChanged);
     _downloads.addListener(_onDownloadsChanged);
     _errorSub = _downloads.onError.listen((msg) {
       if (mounted) showToast(context, msg, isError: true);
     });
-    unawaited(_loadDandanplayBinding());
-    unawaited(_loadDetail());
+    unawaited(_initializeDetailSources());
     unawaited(_loadChapters());
+  }
+
+  Future<void> _initializeDetailSources() async {
+    await _loadDandanplayBinding();
+    if (_dandanplayBinding == null) {
+      await _loadDetail();
+    }
+  }
+
+  void _syncTabController() {
+    final tabs = _tabKinds;
+    final nextTab = tabs.contains(_currentTab) ? _currentTab : _tabEpisodes;
+    final nextIndex = tabs.indexOf(nextTab);
+    final previousController = _tabController;
+    _tabController = TabController(
+      length: tabs.length,
+      vsync: this,
+      initialIndex: nextIndex,
+    )..addListener(_onTabChanged);
+    _currentTab = nextTab;
+    if (previousController != null) {
+      previousController.removeListener(_onTabChanged);
+      previousController.dispose();
+    }
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
-    _tabController.dispose();
+    _tabController?.removeListener(_onTabChanged);
+    _tabController?.dispose();
+    _scrollController.removeListener(_onScrollChanged);
+    _scrollController.dispose();
     _errorSub?.cancel();
     _downloads.removeListener(_onDownloadsChanged);
     super.dispose();
@@ -97,9 +139,28 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     if (mounted) setState(() {});
   }
 
+  void _onScrollChanged() {
+    _updateCommentsScrollToTopVisibility();
+  }
+
+  void _updateCommentsScrollToTopVisibility() {
+    final shouldShow =
+        _isCommentsTab &&
+        _scrollController.hasClients &&
+        _scrollController.offset >= _commentsScrollToTopThreshold;
+    if (shouldShow == _showCommentsScrollToTop) return;
+    if (!mounted) return;
+    setState(() => _showCommentsScrollToTop = shouldShow);
+  }
+
   void _onTabChanged() {
-    if (_currentTab == _tabController.index) return;
-    _currentTab = _tabController.index;
+    final controller = _tabController;
+    if (controller == null) return;
+    final tabs = _tabKinds;
+    if (controller.index >= tabs.length) return;
+    final nextTab = tabs[controller.index];
+    if (_currentTab == nextTab) return;
+    _currentTab = nextTab;
     if (_currentTab == _tabIntro) {
       unawaited(_ensureDetailLoaded());
     }
@@ -107,6 +168,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       _exitSelectionMode();
       return;
     }
+    _updateCommentsScrollToTopVisibility();
     if (mounted) setState(() {});
   }
 
@@ -121,7 +183,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   }
 
   Future<void> _ensureDetailLoaded() async {
-    if (_detailReady || _loadingDetail) return;
+    if (_useDandanplayIntro || _detailReady || _loadingDetail) return;
     await _loadDetail();
   }
 
@@ -216,7 +278,20 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   Future<void> _refreshCurrentTab() async {
     _exitSelectionMode();
     if (_isIntroTab) {
+      if (_useDandanplayIntro) {
+        final binding = _dandanplayBinding;
+        if (binding != null) {
+          await DandanplayApi().clearBangumiCache(binding.animeId);
+          await _loadDandanplayBangumi(binding, applySequentialIfEmpty: true);
+        }
+        return;
+      }
       await _loadDetail(forceRefresh: true);
+      return;
+    }
+    if (_isCommentsTab) {
+      await (_bangumiCommentsKey.currentState?.reload(forceRefresh: true) ??
+          Future<void>.value());
       return;
     }
     await _clearEpisodeRefreshCaches();
@@ -281,7 +356,10 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       widget.pathWord,
     );
     if (!mounted) return;
-    setState(() => _dandanplayBinding = binding);
+    setState(() {
+      _dandanplayBinding = binding;
+      _syncTabController();
+    });
     if (binding != null) {
       unawaited(_loadDandanplayBangumi(binding, applySequentialIfEmpty: true));
     }
@@ -325,6 +403,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
         _dandanplayBinding = null;
         _dandanplayBangumi = null;
         _danmakuEpisodeBindings = {};
+        _syncTabController();
       });
       showToast(context, '已清除弹弹play绑定');
       return;
@@ -338,6 +417,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       _dandanplayBinding = record;
       _dandanplayBangumi = null;
       _danmakuEpisodeBindings = {};
+      _syncTabController();
     });
     await _loadDandanplayBangumi(record, applySequential: true);
     if (!mounted) return;
@@ -789,7 +869,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   Future<Anime?> _ensureAnimeForDownload() async {
     final anime = _anime;
     if (anime != null) return anime;
-    await _loadDetail();
+    await _loadDetail(forceRefresh: true);
     return _anime;
   }
 
@@ -955,6 +1035,25 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     );
   }
 
+  Future<void> _scrollToTop() async {
+    if (!_scrollController.hasClients) return;
+    await _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget? _buildCommentsScrollToTopFab() {
+    if (!_showCommentsScrollToTop) return null;
+    return FloatingActionButton.small(
+      heroTag: 'anime_comments_back_to_top_${widget.pathWord}',
+      onPressed: () => unawaited(_scrollToTop()),
+      tooltip: '回到顶部',
+      child: const Icon(Icons.arrow_upward_rounded),
+    );
+  }
+
   String _continueWatchingLabel(
     String chapterName,
     AnimePlaybackRecord record,
@@ -983,13 +1082,9 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     return '${duration.inMinutes}:$seconds';
   }
 
-  List<Widget> _buildIntroSlivers(
-    Anime? anime,
-    double hp,
-    TextTheme tt,
-    ColorScheme cs,
-  ) {
-    if (anime == null) {
+  List<Widget> _buildIntroSlivers(double hp, TextTheme tt, ColorScheme cs) {
+    final intro = _introViewData;
+    if (intro == null) {
       if (_loadingDetail) {
         return const [
           SliverToBoxAdapter(
@@ -1020,7 +1115,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
         child: Padding(
           padding: EdgeInsets.fromLTRB(hp, 18, hp, 0),
           child: _AnimeInfoPanel(
-            anime: anime,
+            intro: intro,
             isCollected: _isCollected,
             collectSubmitting: _collectSubmitting,
             briefExpanded: _briefExpanded,
@@ -1053,7 +1148,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     return [
       SliverToBoxAdapter(
         child: Padding(
-          padding: EdgeInsets.fromLTRB(hp, 24, hp, 12),
+          padding: EdgeInsets.fromLTRB(hp, 12, hp, 12),
           child: _selectionMode
               ? Align(
                   alignment: Alignment.centerLeft,
@@ -1171,6 +1266,39 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
           ),
         ),
       ],
+    ];
+  }
+
+  List<Widget> _buildCommentsSlivers(double hp, TextTheme tt, ColorScheme cs) {
+    final binding = _dandanplayBinding;
+    final bangumiId = binding?.bangumiId.trim() ?? '';
+    if (bangumiId.isEmpty) {
+      return [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(hp, 24, hp, 0),
+            child: Center(
+              child: Text(
+                '绑定弹弹play 后才可查看评论',
+                style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(hp, 12, hp, 0),
+          child: BangumiCommentsSection(
+            key: _bangumiCommentsKey,
+            bangumiId: bangumiId,
+            animeTitle: binding?.animeTitle ?? _currentAnimeTitle,
+          ),
+        ),
+      ),
     ];
   }
 
@@ -1325,6 +1453,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   @override
   Widget build(BuildContext context) {
     final anime = _anime;
+    final intro = _introViewData;
+    final tabController = _tabController;
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1357,10 +1487,13 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     }
 
     return Scaffold(
-      floatingActionButton: _buildFloatingActions(cs),
+      floatingActionButton: _isCommentsTab
+          ? _buildCommentsScrollToTopFab()
+          : _buildFloatingActions(cs),
       body: RefreshIndicator(
         onRefresh: _refreshCurrentTab,
         child: CustomScrollView(
+          controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverAppBar(
@@ -1368,15 +1501,15 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
               expandedHeight: 280,
               foregroundColor: Colors.white,
               title: Text(
-                anime?.name ?? '动漫详情',
+                intro?.title ?? anime?.name ?? '动漫详情',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              flexibleSpace: anime == null
+              flexibleSpace: intro == null
                   ? null
                   : FlexibleSpaceBar(
                       background: _AnimeDetailHeader(
-                        anime: anime,
+                        intro: intro,
                         isCollected: _isCollected,
                       ),
                     ),
@@ -1387,19 +1520,22 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
               child: Padding(
                 padding: EdgeInsets.fromLTRB(hp, 0, hp, 0),
                 child: TabBar(
-                  controller: _tabController,
+                  controller: tabController,
                   tabs: [
                     const Tab(text: '简介'),
                     Tab(text: '选集 ($_chapterTotal)'),
+                    if (_showCommentsTab) const Tab(text: '评论'),
                   ],
                 ),
               ),
             ),
             ...(_isIntroTab
-                ? _buildIntroSlivers(anime, hp, tt, cs)
+                ? _buildIntroSlivers(hp, tt, cs)
+                : _isCommentsTab
+                ? _buildCommentsSlivers(hp, tt, cs)
                 : _buildEpisodeSlivers(hp, tt, cs)),
             SliverPadding(
-              padding: EdgeInsets.only(bottom: _isIntroTab ? 24 : 120),
+              padding: EdgeInsets.only(bottom: _isEpisodeTab ? 120 : 24),
             ),
           ],
         ),
@@ -2106,10 +2242,10 @@ class _BoundAnimeChapterRow extends StatelessWidget {
 }
 
 class _AnimeDetailHeader extends StatelessWidget {
-  final Anime anime;
+  final _AnimeIntroViewData intro;
   final bool isCollected;
 
-  const _AnimeDetailHeader({required this.anime, required this.isCollected});
+  const _AnimeDetailHeader({required this.intro, required this.isCollected});
 
   @override
   Widget build(BuildContext context) {
@@ -2118,7 +2254,7 @@ class _AnimeDetailHeader extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         CachedNetworkImage(
-          imageUrl: anime.cover,
+          imageUrl: intro.cover,
           fit: BoxFit.cover,
           placeholder: (_, _) => Container(color: cs.surfaceContainerHighest),
           errorWidget: (_, _, _) => Container(
@@ -2149,7 +2285,7 @@ class _AnimeDetailHeader extends StatelessWidget {
                 clipBehavior: Clip.antiAlias,
                 margin: EdgeInsets.zero,
                 child: CachedNetworkImage(
-                  imageUrl: anime.cover,
+                  imageUrl: intro.cover,
                   width: 96,
                   height: 124,
                   fit: BoxFit.cover,
@@ -2162,7 +2298,7 @@ class _AnimeDetailHeader extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      anime.name,
+                      intro.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -2175,15 +2311,20 @@ class _AnimeDetailHeader extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 6,
                       children: [
-                        _HeaderPill(
-                          icon: Icons.local_fire_department,
-                          text: ComicCard.formatPopular(anime.popular),
-                        ),
-                        if (anime.count > 0)
+                        if (intro.primaryStat != null)
                           _HeaderPill(
-                            icon: Icons.video_collection_outlined,
-                            text: '共 ${anime.count} 集',
+                            icon: intro.primaryStat!.icon,
+                            text: intro.primaryStat!.text,
                           ),
+                        if (intro.secondaryStat != null)
+                          _HeaderPill(
+                            icon: intro.secondaryStat!.icon,
+                            text: intro.secondaryStat!.text,
+                          ),
+                        ...intro.headerMetadata.map(
+                          (item) =>
+                              _HeaderPill(icon: item.icon, text: item.text),
+                        ),
                         if (isCollected)
                           const _HeaderPill(icon: Icons.bookmark, text: '已收藏'),
                       ],
@@ -2220,7 +2361,7 @@ class _FabLabel extends StatelessWidget {
 }
 
 class _AnimeInfoPanel extends StatelessWidget {
-  final Anime anime;
+  final _AnimeIntroViewData intro;
   final bool isCollected;
   final bool collectSubmitting;
   final bool briefExpanded;
@@ -2229,7 +2370,7 @@ class _AnimeInfoPanel extends StatelessWidget {
   final VoidCallback onToggleBrief;
 
   const _AnimeInfoPanel({
-    required this.anime,
+    required this.intro,
     required this.isCollected,
     required this.collectSubmitting,
     required this.briefExpanded,
@@ -2242,18 +2383,7 @@ class _AnimeInfoPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final chips = <Widget>[
-      if (anime.category?['display'] != null)
-        _InfoChip(text: anime.category!['display'].toString()),
-      if (anime.cartoonType?['display'] != null)
-        _InfoChip(text: anime.cartoonType!['display'].toString()),
-      if (anime.grade?['display'] != null)
-        _InfoChip(text: anime.grade!['display'].toString()),
-      if (anime.freeType?['display'] != null)
-        _InfoChip(text: anime.freeType!['display'].toString()),
-      if (anime.bSubtitle) const _InfoChip(text: '字幕'),
-      ...anime.themes.map((e) => _InfoChip(text: e.name)),
-    ];
+    final chips = <Widget>[...intro.chips.map((item) => _InfoChip(text: item))];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2272,18 +2402,15 @@ class _AnimeInfoPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 14),
-        if (anime.company != null || anime.years != null)
+        if (intro.metaLine != null && intro.metaLine!.isNotEmpty)
           Text(
-            [
-              if (anime.company != null) anime.company!.name,
-              if (anime.years != null) anime.years!,
-            ].join(' · '),
+            intro.metaLine!,
             style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
-        if (anime.lastChapter?['name'] != null) ...[
+        if (intro.subMetaLine != null && intro.subMetaLine!.isNotEmpty) ...[
           const SizedBox(height: 6),
           Text(
-            '最新：${anime.lastChapter!['name']}',
+            intro.subMetaLine!,
             style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
         ],
@@ -2300,7 +2427,7 @@ class _AnimeInfoPanel extends StatelessWidget {
             ],
           ),
         ],
-        if (anime.brief != null && anime.brief!.isNotEmpty) ...[
+        if (intro.summary.isNotEmpty) ...[
           const SizedBox(height: 18),
           Text(
             '简介',
@@ -2310,15 +2437,225 @@ class _AnimeInfoPanel extends StatelessWidget {
           GestureDetector(
             onTap: onToggleBrief,
             child: Text(
-              anime.brief!,
+              intro.summary,
               maxLines: briefExpanded ? null : 4,
               overflow: briefExpanded ? null : TextOverflow.ellipsis,
               style: tt.bodyMedium?.copyWith(height: 1.5),
             ),
           ),
         ],
+        if (intro.extraInfoLines.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          Text(
+            '资料',
+            style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          for (final line in intro.extraInfoLines.take(8)) ...[
+            Text(
+              line,
+              style: tt.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
+        ],
       ],
     );
+  }
+}
+
+class _AnimeIntroViewData {
+  final String title;
+  final String cover;
+  final String summary;
+  final List<String> chips;
+  final String? metaLine;
+  final String? subMetaLine;
+  final List<String> extraInfoLines;
+  final ({IconData icon, String text})? primaryStat;
+  final ({IconData icon, String text})? secondaryStat;
+  final List<({IconData icon, String text})> headerMetadata;
+
+  const _AnimeIntroViewData({
+    required this.title,
+    required this.cover,
+    required this.summary,
+    this.chips = const [],
+    this.metaLine,
+    this.subMetaLine,
+    this.extraInfoLines = const [],
+    this.primaryStat,
+    this.secondaryStat,
+    this.headerMetadata = const [],
+  });
+
+  factory _AnimeIntroViewData.fromAnime(Anime anime) => _AnimeIntroViewData(
+    title: anime.name,
+    cover: anime.cover,
+    summary: anime.brief?.trim() ?? '',
+    chips: [
+      if (anime.category?['display'] != null)
+        anime.category!['display'].toString(),
+      if (anime.cartoonType?['display'] != null)
+        anime.cartoonType!['display'].toString(),
+      if (anime.grade?['display'] != null) anime.grade!['display'].toString(),
+      if (anime.freeType?['display'] != null)
+        anime.freeType!['display'].toString(),
+      if (anime.bSubtitle) '字幕',
+      ...anime.themes
+          .map((e) => e.name)
+          .where((item) => item.trim().isNotEmpty),
+    ],
+    metaLine:
+        [
+          if (anime.company != null) anime.company!.name,
+          if (anime.years != null) anime.years!,
+        ].where((item) => item.trim().isNotEmpty).join(' · ').trim().isEmpty
+        ? null
+        : [
+            if (anime.company != null) anime.company!.name,
+            if (anime.years != null) anime.years!,
+          ].where((item) => item.trim().isNotEmpty).join(' · '),
+    subMetaLine: anime.lastChapter?['name'] == null
+        ? null
+        : '最新：${anime.lastChapter!['name']}',
+    primaryStat: (
+      icon: Icons.local_fire_department,
+      text: ComicCard.formatPopular(anime.popular),
+    ),
+    secondaryStat: anime.count > 0
+        ? (icon: Icons.video_collection_outlined, text: '共 ${anime.count} 集')
+        : null,
+  );
+
+  factory _AnimeIntroViewData.fromDandanplay(
+    DandanplayBangumi bangumi, {
+    Anime? fallbackAnime,
+  }) {
+    final metadataMap = _bangumiMetadataMap(bangumi.metadata);
+    final summary = _cleanBangumiSummary(bangumi.summary, bangumi.intro);
+    final title = bangumi.animeTitle.trim().isNotEmpty
+        ? bangumi.animeTitle.trim()
+        : fallbackAnime?.name ?? '';
+    final cover = bangumi.imageUrl?.trim().isNotEmpty == true
+        ? bangumi.imageUrl!.trim()
+        : fallbackAnime?.cover ?? '';
+    final chips = <String>[];
+    void addChip(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || chips.contains(trimmed)) return;
+      chips.add(trimmed);
+    }
+
+    if ((bangumi.typeDescription ?? '').trim().isNotEmpty) {
+      addChip(bangumi.typeDescription!);
+    }
+    if (bangumi.isOnAir) addChip('连载中');
+    if (bangumi.isRestricted) addChip('受限');
+    for (final item
+        in bangumi.metadata.where((item) => item.contains(':')).take(6)) {
+      addChip(item.split(':').first);
+    }
+    final extraLines = <String>[
+      if ((bangumi.intro ?? '').trim().isNotEmpty) bangumi.intro!.trim(),
+      ...bangumi.metadata.where(
+        (item) =>
+            !_isHeaderMetadata(item) &&
+            item.trim().isNotEmpty &&
+            item.trim() != (bangumi.intro ?? '').trim(),
+      ),
+    ];
+    final episodeCountLabel = _formatEpisodeCountLabel(metadataMap['话数'] ?? '');
+
+    return _AnimeIntroViewData(
+      title: title,
+      cover: cover,
+      summary: summary,
+      chips: chips,
+      metaLine:
+          [
+            if ((metadataMap['放送开始'] ?? '').isNotEmpty) metadataMap['放送开始']!,
+            if ((metadataMap['原作'] ?? '').isNotEmpty) metadataMap['原作']!,
+          ].join(' · ').trim().isEmpty
+          ? null
+          : [
+              if ((metadataMap['放送开始'] ?? '').isNotEmpty) metadataMap['放送开始']!,
+              if ((metadataMap['原作'] ?? '').isNotEmpty) metadataMap['原作']!,
+            ].join(' · '),
+      subMetaLine: (metadataMap['导演'] ?? '').isNotEmpty
+          ? '导演：${metadataMap['导演']}'
+          : null,
+      extraInfoLines: extraLines,
+      primaryStat: bangumi.rating > 0
+          ? (icon: Icons.star_rounded, text: bangumi.rating.toStringAsFixed(1))
+          : (fallbackAnime != null
+                ? (
+                    icon: Icons.local_fire_department,
+                    text: ComicCard.formatPopular(fallbackAnime.popular),
+                  )
+                : null),
+      secondaryStat: episodeCountLabel != null
+          ? (icon: Icons.video_collection_outlined, text: episodeCountLabel)
+          : ((metadataMap['话数'] ?? '').isNotEmpty
+                ? null
+                : (bangumi.episodes.isNotEmpty
+                ? (
+                    icon: Icons.video_collection_outlined,
+                    text: '共 ${bangumi.episodes.length} 集',
+                  )
+                : (fallbackAnime != null && fallbackAnime.count > 0
+                      ? (
+                          icon: Icons.video_collection_outlined,
+                          text: '共 ${fallbackAnime.count} 集',
+                        )
+                      : null))),
+      headerMetadata: [
+        if ((metadataMap['放送星期'] ?? '').isNotEmpty)
+          (icon: Icons.calendar_today_outlined, text: metadataMap['放送星期']!),
+      ],
+    );
+  }
+
+  static Map<String, String> _bangumiMetadataMap(List<String> metadata) {
+    final result = <String, String>{};
+    for (final item in metadata) {
+      final index = item.indexOf(':');
+      if (index <= 0 || index >= item.length - 1) continue;
+      final key = item.substring(0, index).trim();
+      final value = item.substring(index + 1).trim();
+      if (key.isEmpty || value.isEmpty || result.containsKey(key)) continue;
+      result[key] = value;
+    }
+    return result;
+  }
+
+  static bool _isHeaderMetadata(String item) =>
+      item.startsWith('话数:') || item.startsWith('放送星期:');
+
+  static String? _formatEpisodeCountLabel(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty || value == '*') return null;
+    final matched = RegExp(r'\d+').firstMatch(value)?.group(0);
+    if (matched != null && matched.isNotEmpty) {
+      return '共 ${int.parse(matched)} 集';
+    }
+    return null;
+  }
+
+  static String _cleanBangumiSummary(String? summary, String? intro) {
+    final raw = (summary ?? '').trim();
+    if (raw.isEmpty) return (intro ?? '').trim();
+    final markerIndex = raw.indexOf('[简介原文]');
+    final cleaned = markerIndex >= 0 ? raw.substring(0, markerIndex) : raw;
+    final normalized = cleaned
+        .split(RegExp(r'\r?\n'))
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .join('\n\n');
+    return normalized.isNotEmpty ? normalized : (intro ?? '').trim();
   }
 }
 

@@ -102,17 +102,48 @@ class DandanplayBangumi {
   final String bangumiId;
   final String animeTitle;
   final String? imageUrl;
+  final String? type;
+  final String? typeDescription;
+  final List<String> titleAliases;
   final List<DandanplayBangumiEpisode> episodes;
+  final String? summary;
+  final String? intro;
+  final List<String> metadata;
+  final String? bangumiUrl;
+  final Map<String, double> ratingDetails;
+  final double rating;
+  final bool isOnAir;
+  final int? airDay;
+  final bool isFavorited;
+  final bool isRestricted;
 
   DandanplayBangumi({
     required this.animeId,
     required this.bangumiId,
     required this.animeTitle,
     this.imageUrl,
+    this.type,
+    this.typeDescription,
+    this.titleAliases = const [],
     this.episodes = const [],
+    this.summary,
+    this.intro,
+    this.metadata = const [],
+    this.bangumiUrl,
+    this.ratingDetails = const {},
+    this.rating = 0,
+    this.isOnAir = false,
+    this.airDay,
+    this.isFavorited = false,
+    this.isRestricted = false,
   });
 
   factory DandanplayBangumi.fromJson(Map<String, dynamic> json) {
+    final titles =
+        (json['titles'] as List?)
+            ?.map((item) => Map<String, dynamic>.from(item))
+            .toList(growable: false) ??
+        const <Map<String, dynamic>>[];
     final episodes =
         (json['episodes'] as List?)
             ?.map(
@@ -122,12 +153,41 @@ class DandanplayBangumi {
             )
             .toList() ??
         const <DandanplayBangumiEpisode>[];
+    final metadata =
+        (json['metadata'] as List?)
+            ?.map((item) => item?.toString() ?? '')
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false) ??
+        const <String>[];
+    final ratingDetails = <String, double>{};
+    if (json['ratingDetails'] is Map) {
+      for (final entry
+          in Map<String, dynamic>.from(json['ratingDetails']).entries) {
+        ratingDetails[entry.key] = (entry.value as num?)?.toDouble() ?? 0;
+      }
+    }
     return DandanplayBangumi(
       animeId: json['animeId'] as int? ?? 0,
       bangumiId: json['bangumiId']?.toString() ?? '',
       animeTitle: json['animeTitle']?.toString() ?? '',
       imageUrl: json['imageUrl']?.toString(),
+      type: json['type']?.toString(),
+      typeDescription: json['typeDescription']?.toString(),
+      titleAliases: titles
+          .map((item) => item['title']?.toString() ?? '')
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false),
       episodes: episodes,
+      summary: json['summary']?.toString(),
+      intro: json['intro']?.toString(),
+      metadata: metadata,
+      bangumiUrl: json['bangumiUrl']?.toString(),
+      ratingDetails: ratingDetails,
+      rating: (json['rating'] as num?)?.toDouble() ?? 0,
+      isOnAir: json['isOnAir'] == true,
+      airDay: json['airDay'] as int?,
+      isFavorited: json['isFavorited'] == true,
+      isRestricted: json['isRestricted'] == true,
     );
   }
 
@@ -136,8 +196,70 @@ class DandanplayBangumi {
     'bangumiId': bangumiId,
     'animeTitle': animeTitle,
     if (imageUrl != null) 'imageUrl': imageUrl,
+    if (type != null) 'type': type,
+    if (typeDescription != null) 'typeDescription': typeDescription,
+    'titles': titleAliases.map((title) => {'title': title}).toList(),
     'episodes': episodes.map((e) => e.toJson()).toList(),
+    if (summary != null) 'summary': summary,
+    if (intro != null) 'intro': intro,
+    'metadata': metadata,
+    if (bangumiUrl != null) 'bangumiUrl': bangumiUrl,
+    'ratingDetails': ratingDetails,
+    'rating': rating,
+    'isOnAir': isOnAir,
+    if (airDay != null) 'airDay': airDay,
+    'isFavorited': isFavorited,
+    'isRestricted': isRestricted,
   };
+}
+
+class DandanplayBangumiComment {
+  final int id;
+  final int userId;
+  final String externalUserId;
+  final String userName;
+  final String imageUrl;
+  final String source;
+  final String text;
+  final int rating;
+  final String updatedTime;
+
+  DandanplayBangumiComment({
+    required this.id,
+    required this.userId,
+    required this.externalUserId,
+    required this.userName,
+    required this.imageUrl,
+    required this.source,
+    required this.text,
+    required this.rating,
+    required this.updatedTime,
+  });
+
+  factory DandanplayBangumiComment.fromJson(Map<String, dynamic> json) =>
+      DandanplayBangumiComment(
+        id: json['id'] as int? ?? 0,
+        userId: json['userId'] as int? ?? 0,
+        externalUserId: json['externalUserId']?.toString() ?? '',
+        userName: json['userName']?.toString() ?? '',
+        imageUrl: json['imageUrl']?.toString() ?? '',
+        source: json['source']?.toString() ?? '',
+        text: json['text']?.toString() ?? '',
+        rating: json['rating'] as int? ?? 0,
+        updatedTime: json['updatedTime']?.toString() ?? '',
+      );
+}
+
+class DandanplayBangumiCommentsPage {
+  final int count;
+  final bool hasMore;
+  final List<DandanplayBangumiComment> comments;
+
+  const DandanplayBangumiCommentsPage({
+    required this.count,
+    required this.hasMore,
+    required this.comments,
+  });
 }
 
 class DandanplayApi {
@@ -397,5 +519,55 @@ class DandanplayApi {
       debugPrint('Dandanplay get comments error: $e');
     }
     return [];
+  }
+
+  Future<DandanplayBangumiCommentsPage> getBangumiComments(
+    String bangumiId, {
+    int page = 0,
+    bool forceRefresh = false,
+  }) async {
+    final normalizedBangumiId = bangumiId.trim();
+    if (normalizedBangumiId.isEmpty) {
+      throw ArgumentError.value(bangumiId, 'bangumiId', '不能为空');
+    }
+    if (page < 0 || page > 9) {
+      throw RangeError.range(page, 0, 9, 'page');
+    }
+
+    final endpoint =
+        '/api/v2/bangumi/${Uri.encodeComponent(normalizedBangumiId)}/comments';
+    final key = _cacheKey(endpoint, {'page': page});
+    if (!forceRefresh) {
+      final cached = _getCache<DandanplayBangumiCommentsPage>(key);
+      if (cached != null) return cached;
+    } else {
+      _cache.remove(key);
+    }
+
+    try {
+      final response = await _dio.get(endpoint, queryParameters: {'page': page});
+      final data = response.data;
+      if (data is Map && data['success'] == true) {
+        final comments =
+            (data['comments'] as List? ?? const [])
+                .map(
+                  (item) => DandanplayBangumiComment.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList(growable: false);
+        final result = DandanplayBangumiCommentsPage(
+          count: data['count'] as int? ?? comments.length,
+          hasMore: data['hasMore'] == true,
+          comments: comments,
+        );
+        _setCache(key, result, _ttlComments);
+        return result;
+      }
+      throw StateError(data is Map ? data['errorMessage']?.toString() ?? '未知错误' : '响应格式错误');
+    } catch (e) {
+      debugPrint('Dandanplay get bangumi comments error: $e');
+      throw Exception('获取番剧评论失败');
+    }
   }
 }
