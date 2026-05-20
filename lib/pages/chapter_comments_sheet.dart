@@ -54,6 +54,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   bool _showUserName = true;
   bool _showCommentTime = true;
   double _commentFontScale = 1.0;
+  bool _showFloatingButtons = true;
+  double _lastScrollOffset = 0;
 
   @override
   void initState() {
@@ -63,6 +65,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     _showUserName = _user.commentShowUserName;
     _showCommentTime = _user.commentShowTime;
     _commentFontScale = _user.commentFontScale;
+    _scrollController.addListener(_handleScrollDirection);
     if (widget.initialComments != null) {
       _comments = List<ChapterComment>.from(widget.initialComments!);
       _total = widget.initialTotal ?? _comments.length;
@@ -83,6 +86,16 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _handleScrollDirection() {
+    final offset = _scrollController.offset;
+    if (offset > _lastScrollOffset + 2 && _showFloatingButtons) {
+      setState(() => _showFloatingButtons = false);
+    } else if (offset < _lastScrollOffset - 2 && !_showFloatingButtons) {
+      setState(() => _showFloatingButtons = true);
+    }
+    _lastScrollOffset = offset;
   }
 
   void _notifyCommentsUpdated() {
@@ -383,72 +396,82 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
             Positioned(
               right: 16,
               bottom: 16,
-              child: SafeArea(
-                top: false,
-                child: Builder(
-                  builder: (context) {
-                    final buttonBackgroundColor = cs.primaryContainer;
-                    final buttonForegroundColor = cs.onPrimaryContainer;
-                    final buttonStyle = FilledButton.styleFrom(
-                      backgroundColor: buttonBackgroundColor,
-                      foregroundColor: buttonForegroundColor,
-                      elevation: 6,
-                      shadowColor: Colors.black.withValues(alpha: 0.22),
-                      minimumSize: const Size(0, 52),
-                      maximumSize: const Size.fromHeight(52),
-                      fixedSize: const Size.fromHeight(52),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    );
+              child: AnimatedSlide(
+                offset: _showFloatingButtons ? Offset.zero : const Offset(0, 1.2),
+                curve: Curves.easeInOutCubic,
+                duration: const Duration(milliseconds: 260),
+                child: AnimatedOpacity(
+                  opacity: _showFloatingButtons ? 1.0 : 0.0,
+                  curve: Curves.easeInOutCubic,
+                  duration: const Duration(milliseconds: 260),
+                  child: SafeArea(
+                    top: false,
+                    child: Builder(
+                      builder: (context) {
+                        final buttonBackgroundColor = cs.primaryContainer;
+                        final buttonForegroundColor = cs.onPrimaryContainer;
+                        final buttonStyle = FilledButton.styleFrom(
+                          backgroundColor: buttonBackgroundColor,
+                          foregroundColor: buttonForegroundColor,
+                          elevation: 6,
+                          shadowColor: Colors.black.withValues(alpha: 0.22),
+                          minimumSize: const Size(0, 52),
+                          maximumSize: const Size.fromHeight(52),
+                          fixedSize: const Size.fromHeight(52),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        );
 
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FilledButton.icon(
-                          style: buttonStyle,
-                          onPressed: () {
-                            widget.onBackToCatalog?.call();
-                            Navigator.of(context).pop('back_to_catalog');
-                          },
-                          icon: const Icon(Icons.list_rounded),
-                          label: const Text('返回目录'),
-                        ),
-                        if (widget.hasNextChapter) ...[
-                          const SizedBox(width: 8),
-                          FilledButton.icon(
-                            style: buttonStyle,
-                            onPressed: widget.onNextChapter,
-                            icon: const Icon(Icons.skip_next_rounded),
-                            label: const Text('下一话'),
-                          ),
-                        ],
-                        const SizedBox(width: 8),
-                        SizedBox.square(
-                          dimension: 52,
-                          child: FilledButton(
-                            style: buttonStyle.copyWith(
-                              padding: const WidgetStatePropertyAll(
-                                EdgeInsets.zero,
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            FilledButton.icon(
+                              style: buttonStyle,
+                              onPressed: () {
+                                widget.onBackToCatalog?.call();
+                                Navigator.of(context).pop('back_to_catalog');
+                              },
+                              icon: const Icon(Icons.list_rounded),
+                              label: const Text('返回目录'),
+                            ),
+                            if (widget.hasNextChapter) ...[
+                              const SizedBox(width: 8),
+                              FilledButton.icon(
+                                style: buttonStyle,
+                                onPressed: widget.onNextChapter,
+                                icon: const Icon(Icons.skip_next_rounded),
+                                label: const Text('下一话'),
                               ),
-                              minimumSize: const WidgetStatePropertyAll(
-                                Size.square(52),
-                              ),
-                              maximumSize: const WidgetStatePropertyAll(
-                                Size.square(52),
+                            ],
+                            const SizedBox(width: 8),
+                            SizedBox.square(
+                              dimension: 52,
+                              child: FilledButton(
+                                style: buttonStyle.copyWith(
+                                  padding: const WidgetStatePropertyAll(
+                                    EdgeInsets.zero,
+                                  ),
+                                  minimumSize: const WidgetStatePropertyAll(
+                                    Size.square(52),
+                                  ),
+                                  maximumSize: const WidgetStatePropertyAll(
+                                    Size.square(52),
+                                  ),
+                                ),
+                                onPressed: () => Navigator.of(context).maybePop(),
+                                child: const Center(
+                                  child: Icon(Icons.keyboard_arrow_down_rounded),
+                                ),
                               ),
                             ),
-                            onPressed: () => Navigator.of(context).maybePop(),
-                            child: const Center(
-                              child: Icon(Icons.keyboard_arrow_down_rounded),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                          ],
+                        );
+                      },
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -840,15 +863,18 @@ double _estimateMergedCountTagWidth(
 }) {
   final textTheme = Theme.of(context).textTheme;
   final textScaler = MediaQuery.textScalerOf(context);
+  final isHot = _isHotMergedComment(count);
+  final label = _formatMergedCount(count);
   final labelWidth = _measureTextWidth(
-    _formatMergedCount(count),
+    label,
     textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
     textScaler,
     maxWidth,
   );
-  final minWidth = compact ? 24.0 : 28.0;
-  final horizontalPadding = compact ? 12.0 : 16.0;
-  final intrinsicWidth = labelWidth + horizontalPadding;
+  final minWidth = _mergedCountTagMinWidth(compact: compact, isHot: isHot);
+  final horizontalPadding = _mergedCountTagHorizontalPadding(compact: compact);
+  final iconWidth = isHot ? _hotCommentTagIconSize(compact: compact) + 4 : 0.0;
+  final intrinsicWidth = labelWidth + horizontalPadding + iconWidth;
   return intrinsicWidth < minWidth ? minWidth : intrinsicWidth;
 }
 
@@ -895,7 +921,7 @@ class _CommentSkeletonState extends State<_CommentSkeleton>
         ),
         decoration: BoxDecoration(
           color: cs.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(_commentCardCornerRadius),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -998,7 +1024,6 @@ class _CommentCard extends StatelessWidget {
       decoration: _buildCommentCardDecoration(
         cs,
         brightness: brightness,
-        compact: compact,
         highlightAsHot: isHotMergedComment,
       ),
       child: entry.isMerged
@@ -1158,52 +1183,49 @@ class _MergedCommentCountTag extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final isHot = _isHotMergedComment(count);
-    final tagHeight = compact ? 24.0 : 28.0;
-    final gradient = isHot
-        ? LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: const [Color(0xFFFFC44D), Color(0xFFFF6B3D)],
-          )
-        : null;
-    final backgroundColor = isHot ? null : cs.primary;
-    final foregroundColor = isHot ? Colors.white : cs.onPrimary;
+    final tagHeight = _mergedCountTagHeight(compact: compact);
+    final minWidth = _mergedCountTagMinWidth(compact: compact, isHot: isHot);
+    final horizontalPadding = _mergedCountTagHorizontalPadding(
+      compact: compact,
+    );
+    final colors = _mergedCountTagColors(cs, isHot: isHot);
+    final decoration = _buildMergedCountTagDecoration(cs, isHot: isHot);
+    final label = _formatMergedCount(count);
+    final iconSize = _hotCommentTagIconSize(compact: compact);
 
     return Container(
-      constraints: BoxConstraints(
-        minWidth: compact ? 24 : 28,
-        minHeight: tagHeight,
-      ),
-      padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 8),
+      constraints: BoxConstraints(minWidth: minWidth, minHeight: tagHeight),
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding / 2),
       alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: isHot
-            ? [
-                BoxShadow(
-                  color: const Color(0xFFFF8A3D).withValues(alpha: 0.28),
-                  blurRadius: compact ? 12 : 16,
-                  offset: Offset(0, compact ? 3 : 4),
-                ),
-              ]
-            : null,
-      ),
-      child: Text(
-        _formatMergedCount(count),
-        textAlign: TextAlign.center,
-        textHeightBehavior: const TextHeightBehavior(
-          applyHeightToFirstAscent: false,
-          applyHeightToLastDescent: false,
-        ),
-        strutStyle: const StrutStyle(height: 1, forceStrutHeight: true),
-        style: tt.labelSmall?.copyWith(
-          color: foregroundColor,
-          fontWeight: FontWeight.w700,
-          letterSpacing: isHot ? 0.15 : 0,
-          height: 1,
-        ),
+      decoration: decoration,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (isHot) ...[
+            Icon(
+              Icons.local_fire_department_rounded,
+              size: iconSize,
+              color: colors.foreground,
+            ),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            textHeightBehavior: const TextHeightBehavior(
+              applyHeightToFirstAscent: false,
+              applyHeightToLastDescent: false,
+            ),
+            strutStyle: const StrutStyle(height: 1, forceStrutHeight: true),
+            style: tt.labelSmall?.copyWith(
+              color: colors.foreground,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0,
+              height: 1,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1530,13 +1552,65 @@ bool _shouldShowMergedCountTag(int count) => count > 1;
 
 bool _isHotMergedComment(int count) => count >= 10;
 
+const _commentCardCornerRadius = 10.0;
+const _hotCommentAccentColor = Color(0xFFFF7A2F);
+
+double _hotCommentTagIconSize({required bool compact}) => compact ? 14.0 : 16.0;
+
+double _mergedCountTagHeight({required bool compact}) => compact ? 24.0 : 28.0;
+
+double _mergedCountTagMinWidth({required bool compact, required bool isHot}) {
+  if (!isHot) return compact ? 24.0 : 28.0;
+  return compact ? 34.0 : 40.0;
+}
+
+double _mergedCountTagHorizontalPadding({required bool compact}) =>
+    compact ? 12.0 : 16.0;
+
+class _MergedCountTagColors {
+  final Color foreground;
+
+  const _MergedCountTagColors({required this.foreground});
+}
+
+_MergedCountTagColors _mergedCountTagColors(
+  ColorScheme colorScheme, {
+  required bool isHot,
+}) {
+  if (!isHot) {
+    return _MergedCountTagColors(foreground: colorScheme.onPrimary);
+  }
+  return const _MergedCountTagColors(foreground: _hotCommentAccentColor);
+}
+
+BoxDecoration _buildMergedCountTagDecoration(
+  ColorScheme colorScheme, {
+  required bool isHot,
+}) {
+  if (!isHot) {
+    return BoxDecoration(
+      color: colorScheme.primary,
+      borderRadius: BorderRadius.circular(999),
+    );
+  }
+
+  return BoxDecoration(
+    color: Color.lerp(
+      colorScheme.surfaceContainerLow,
+      _hotCommentAccentColor,
+      0.08,
+    ),
+    borderRadius: BorderRadius.circular(999),
+    border: Border.all(color: _hotCommentAccentColor.withValues(alpha: 0.58)),
+  );
+}
+
 BoxDecoration _buildCommentCardDecoration(
   ColorScheme colorScheme, {
   required Brightness brightness,
-  required bool compact,
   required bool highlightAsHot,
 }) {
-  final borderRadius = BorderRadius.circular(16);
+  final borderRadius = BorderRadius.circular(_commentCardCornerRadius);
   if (!highlightAsHot) {
     return BoxDecoration(
       color: colorScheme.surfaceContainerLow,
@@ -1544,37 +1618,15 @@ BoxDecoration _buildCommentCardDecoration(
     );
   }
 
-  final startColor = Color.lerp(
-    colorScheme.surfaceContainerLow,
-    const Color(0xFFFFD89A),
-    brightness == Brightness.dark ? 0.18 : 0.36,
-  )!;
-  final endColor = Color.lerp(
-    colorScheme.surfaceContainerLow,
-    const Color(0xFFFFA05C),
-    brightness == Brightness.dark ? 0.12 : 0.22,
-  )!;
-  final borderColor = const Color(
-    0xFFFFB34D,
-  ).withValues(alpha: brightness == Brightness.dark ? 0.42 : 0.7);
-
+  final surface = colorScheme.surfaceContainerLow;
   return BoxDecoration(
-    gradient: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [startColor, endColor],
-    ),
+    color: surface,
     borderRadius: borderRadius,
-    border: Border.all(color: borderColor),
-    boxShadow: [
-      BoxShadow(
-        color: const Color(
-          0xFFFF8A3D,
-        ).withValues(alpha: brightness == Brightness.dark ? 0.16 : 0.12),
-        blurRadius: compact ? 14 : 18,
-        offset: Offset(0, compact ? 4 : 6),
+    border: Border.all(
+      color: _hotCommentAccentColor.withValues(
+        alpha: brightness == Brightness.dark ? 0.48 : 0.56,
       ),
-    ],
+    ),
   );
 }
 

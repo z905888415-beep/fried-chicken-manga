@@ -216,7 +216,7 @@ class _GeneralPageState extends State<GeneralPage> {
                   SwitchListTile(
                     secondary: const Icon(Icons.movie_outlined),
                     title: const Text('动漫功能'),
-                    subtitle: Text('关闭后隐藏动漫主页、入口和筛选器', style: tt.bodySmall),
+                    subtitle: Text('关闭后隐藏动漫相关功能', style: tt.bodySmall),
                     value: _user.animeFeatureEnabled,
                     onChanged: _user.setAnimeFeatureEnabled,
                   ),
@@ -224,7 +224,7 @@ class _GeneralPageState extends State<GeneralPage> {
                   ListTile(
                     leading: const Icon(Icons.upload_file_rounded),
                     title: const Text('导出设置'),
-                    subtitle: const Text('复制持久化配置到剪贴板，包含本地阅读记录'),
+                    subtitle: const Text('复制配置到剪贴板'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: _exportSettings,
                   ),
@@ -232,7 +232,7 @@ class _GeneralPageState extends State<GeneralPage> {
                   ListTile(
                     leading: const Icon(Icons.download_for_offline_rounded),
                     title: const Text('导入设置'),
-                    subtitle: const Text('从粘贴内容覆盖导入配置，需要确认'),
+                    subtitle: const Text('粘贴导入配置'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: _importSettings,
                   ),

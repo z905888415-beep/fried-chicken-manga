@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/comic_comment.dart';
+import '../models/user_manager.dart';
 
 class ComicCommentsSheet extends StatefulWidget {
   final String comicId;
@@ -402,6 +403,9 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
   Widget _buildCommentCard(ColorScheme cs, TextTheme tt, ComicComment comment) {
     final replyState = _replyStateOf(comment.id);
     final canExpandReplies = comment.replyCount > 0;
+    final user = UserManager();
+    final showAvatar = user.commentShowAvatar;
+    final showCommentTime = user.commentShowTime;
     final userStyle = tt.labelMedium?.copyWith(
       color: cs.onSurfaceVariant.withValues(alpha: 0.78),
       fontWeight: FontWeight.w500,
@@ -426,8 +430,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
         children: [
           Row(
             children: [
-              _ComicCommentAvatar(imageUrl: comment.userAvatar, size: 28),
-              const SizedBox(width: 8),
+              if (showAvatar) ...[
+                _ComicCommentAvatar(imageUrl: comment.userAvatar, size: 28),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: Text(
                   comment.userName,
@@ -436,8 +442,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                   style: userStyle,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(_formatRelativeTime(comment.createAt), style: timeStyle),
+              if (showCommentTime) ...[
+                const SizedBox(width: 8),
+                Text(_formatRelativeTime(comment.createAt), style: timeStyle),
+              ],
             ],
           ),
           const SizedBox(height: 8),
@@ -614,6 +622,9 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
     final isReplyToOp = _isReplyToOp(reply, parentComment);
     final parentUserName = reply.parentUserName?.trim() ?? '';
     final showReplyTarget = !isReplyToOp && parentUserName.isNotEmpty;
+    final user = UserManager();
+    final showAvatar = user.commentShowAvatar;
+    final showCommentTime = user.commentShowTime;
     final userStyle = tt.labelSmall?.copyWith(
       color: cs.onSurfaceVariant.withValues(alpha: 0.78),
       fontWeight: FontWeight.w500,
@@ -634,8 +645,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ComicCommentAvatar(imageUrl: reply.userAvatar, size: 22),
-        const SizedBox(width: 8),
+        if (showAvatar) ...[
+          _ComicCommentAvatar(imageUrl: reply.userAvatar, size: 22),
+          const SizedBox(width: 8),
+        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -673,8 +686,10 @@ class _ComicCommentsSheetState extends State<ComicCommentsSheet> {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(_formatRelativeTime(reply.createAt), style: timeStyle),
+                  if (showCommentTime) ...[
+                    const SizedBox(width: 8),
+                    Text(_formatRelativeTime(reply.createAt), style: timeStyle),
+                  ],
                 ],
               ),
               const SizedBox(height: 4),

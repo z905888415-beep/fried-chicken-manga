@@ -18,7 +18,7 @@
             "name": "Debug - MuMu",
             "request": "launch",
             "type": "dart",
-            "deviceId": "127.0.0.1:16384",
+            "deviceId": "127",
             "preLaunchTask": "adb connect MuMu",
             "toolArgs": [
                 "--dart-define-from-file=.env"

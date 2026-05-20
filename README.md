@@ -85,6 +85,12 @@ flutter emulators
 flutter emulators --launch 设备ID
 ```
 
+启动
+
+```sh
+flutter run --dart-define-from-file=.env
+```
+
 ### 构建安装包
 
 在本地构建apk安装包，需要在项目根目录下创建一个`.env`文件，

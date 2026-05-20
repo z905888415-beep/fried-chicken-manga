@@ -1661,7 +1661,7 @@ class _AboutPageState extends State<AboutPage> {
                     ),
                     SwitchListTile(
                       secondary: const Icon(Icons.autorenew),
-                      title: const Text('启动时自动检查更新'),
+                      title: const Text('启动时检查更新'),
                       value: _user.autoCheckUpdate,
                       onChanged: _user.setAutoCheckUpdate,
                     ),
@@ -1669,7 +1669,6 @@ class _AboutPageState extends State<AboutPage> {
                     ListTile(
                       leading: const Icon(Icons.gavel_outlined),
                       title: const Text('免责声明'),
-                      subtitle: const Text('查看应用使用声明与内容说明'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.push(
                         context,
@@ -1682,7 +1681,6 @@ class _AboutPageState extends State<AboutPage> {
                     ListTile(
                       leading: const Icon(Icons.favorite_outline),
                       title: const Text('致谢'),
-                      subtitle: const Text('弹弹play · 繁化姬 · 依赖库'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.push(
                         context,

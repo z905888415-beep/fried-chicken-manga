@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../api/dandanplay_api.dart';
+import '../models/user_manager.dart';
 
 typedef BangumiCommentsLoader =
     Future<DandanplayBangumiCommentsPage> Function(
@@ -269,6 +270,9 @@ class _BangumiCommentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final user = UserManager();
+    final showAvatar = user.commentShowAvatar;
+    final showCommentTime = user.commentShowTime;
     final userStyle = tt.labelMedium?.copyWith(
       fontWeight: FontWeight.w500,
       color: cs.onSurfaceVariant.withValues(alpha: 0.72),
@@ -293,8 +297,10 @@ class _BangumiCommentCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _BangumiCommentAvatar(imageUrl: comment.imageUrl),
-              const SizedBox(width: 10),
+              if (showAvatar) ...[
+                _BangumiCommentAvatar(imageUrl: comment.imageUrl),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -317,9 +323,10 @@ class _BangumiCommentCard extends StatelessWidget {
                         ],
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    if (relativeTime.isNotEmpty)
+                    if (showCommentTime && relativeTime.isNotEmpty) ...[
+                      const SizedBox(height: 4),
                       Text(relativeTime, style: metaStyle),
+                    ],
                   ],
                 ),
               ),
@@ -386,8 +393,11 @@ class _BangumiRatingBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
-    const badgeBackground = Color(0xFFFFF3CD);
-    const badgeForeground = Color(0xFFB7791F);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final badgeBackground =
+        isDark ? const Color(0xFF5C4A10) : const Color(0xFFFFF3CD);
+    final badgeForeground =
+        isDark ? const Color(0xFFF5D86A) : const Color(0xFFB7791F);
     const starColor = Color(0xFFFFB800);
 
     return Container(
