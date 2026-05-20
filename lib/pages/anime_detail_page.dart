@@ -12,6 +12,7 @@ import '../utils/anime_playback_history.dart';
 import '../utils/chinese_converter.dart';
 import '../utils/data_cache.dart';
 import '../utils/dandanplay_binding_store.dart';
+import '../utils/dandanplay_episode_binding.dart';
 import '../utils/toast.dart';
 import 'anime_player_page.dart';
 import 'bangumi_comments_section.dart';
@@ -488,11 +489,12 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     }
     final bindings = await _readDandanplayEpisodeBindings();
     if (!mounted) return;
-    final hasAnyBinding = bindings.values.any((episodeId) => episodeId != null);
     if (applySequentialIfEmpty &&
-        !hasAnyBinding &&
-        bangumi.episodes.isNotEmpty) {
-      await _applySequentialDandanplayBindings(bangumi.episodes);
+        bangumi.episodes.isNotEmpty &&
+        await _applySequentialDandanplayBindingGaps(
+          bangumi.episodes,
+          bindings,
+        )) {
       return;
     }
     setState(() => _danmakuEpisodeBindings = bindings);
@@ -569,6 +571,53 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
 
     if (!mounted) return;
     setState(() => _danmakuEpisodeBindings = nextBindings);
+  }
+
+  Future<bool> _applySequentialDandanplayBindingGaps(
+    List<DandanplayBangumiEpisode> episodes,
+    Map<String, int?> currentBindings,
+  ) async {
+    final validEpisodes = _uniqueDandanplayEpisodes(episodes);
+    final nextEpisodeIds = inferSequentialDandanplayEpisodeBindings(
+      currentEpisodeIds: [
+        for (final chapter in _chapters) currentBindings[chapter.uuid],
+      ],
+      availableEpisodeIds: [
+        for (final episode in validEpisodes) episode.episodeId,
+      ],
+    );
+    final nextBindings = <String, int?>{};
+    var changed = false;
+
+    for (final entry in _chapters.indexed) {
+      final index = entry.$1;
+      final chapter = entry.$2;
+      final currentEpisodeId = currentBindings[chapter.uuid];
+      final nextEpisodeId = nextEpisodeIds[index];
+      nextBindings[chapter.uuid] = nextEpisodeId;
+      if (nextEpisodeId == currentEpisodeId) continue;
+
+      changed = true;
+      if (nextEpisodeId == null) {
+        await AnimePlaybackHistory.clearDanmakuEpisode(
+          pathWord: widget.pathWord,
+          chapterUuid: chapter.uuid,
+          chapterName: chapter.name,
+        );
+        continue;
+      }
+      await AnimePlaybackHistory.saveDanmakuEpisode(
+        pathWord: widget.pathWord,
+        chapterUuid: chapter.uuid,
+        chapterName: chapter.name,
+        episodeId: nextEpisodeId,
+      );
+    }
+
+    if (!changed) return false;
+    if (!mounted) return true;
+    setState(() => _danmakuEpisodeBindings = nextBindings);
+    return true;
   }
 
   Future<void> _showDandanplayAlignmentDialog(
