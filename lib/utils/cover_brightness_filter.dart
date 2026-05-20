@@ -16,8 +16,19 @@ class CoverBrightnessFilter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveBrightness =
-        brightness ?? UserManager().darkModeCoverBrightness;
+    final user = UserManager();
+
+    return AnimatedBuilder(
+      animation: user,
+      child: child,
+      builder: (context, child) {
+        return _buildFiltered(context, user, child!);
+      },
+    );
+  }
+
+  Widget _buildFiltered(BuildContext context, UserManager user, Widget child) {
+    final effectiveBrightness = brightness ?? user.darkModeCoverBrightness;
     if (!enabled ||
         Theme.of(context).brightness != Brightness.dark ||
         effectiveBrightness >= 0.999) {

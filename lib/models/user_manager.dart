@@ -66,7 +66,7 @@ class UserManager extends ChangeNotifier {
   factory UserManager() => _instance;
   UserManager._();
 
-  static const double minDarkModeCoverBrightness = 0.55;
+  static const double minDarkModeCoverBrightness = 0.10;
   static const double maxDarkModeCoverBrightness = 1.0;
   static const double defaultDarkModeCoverBrightness = 0.85;
 
@@ -882,9 +882,8 @@ class UserManager extends ChangeNotifier {
   }
 
   static double _normalizeDarkModeCoverBrightness(double value) {
-    return value.clamp(
-          minDarkModeCoverBrightness,
-          maxDarkModeCoverBrightness,
-        ).toDouble();
+    return value
+        .clamp(minDarkModeCoverBrightness, maxDarkModeCoverBrightness)
+        .toDouble();
   }
 }

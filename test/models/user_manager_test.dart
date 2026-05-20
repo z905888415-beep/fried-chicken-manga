@@ -88,4 +88,18 @@ void main() {
 
     expect(user.darkModeCoverBrightness, 0.7);
   });
+
+  test('dark mode cover brightness allows 10 percent minimum', () async {
+    final user = UserManager();
+    await user.init();
+
+    await user.setDarkModeCoverBrightness(0.1);
+    expect(user.darkModeCoverBrightness, 0.1);
+
+    await user.setDarkModeCoverBrightness(0.05);
+    expect(
+      user.darkModeCoverBrightness,
+      UserManager.minDarkModeCoverBrightness,
+    );
+  });
 }
