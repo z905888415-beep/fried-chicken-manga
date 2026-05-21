@@ -85,10 +85,10 @@ flutter emulators
 flutter emulators --launch 设备ID
 ```
 
-启动
+启动项目，注意最好在安卓设备上运行，其他类型的设备可能会有问题
 
 ```sh
-flutter run --dart-define-from-file=.env
+flutter run -d 设备ID --dart-define-from-file=.env
 ```
 
 ### 构建安装包
