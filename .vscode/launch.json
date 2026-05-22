@@ -28,7 +28,7 @@
             "name": "Debug - Windows",
             "request": "launch",
             "type": "dart",
-            "deviceId": "windows",
+            "deviceId": "win",
             "toolArgs": [
                 "--dart-define-from-file=.env"
             ]

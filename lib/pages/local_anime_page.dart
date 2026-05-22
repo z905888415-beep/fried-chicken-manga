@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../utils/cover_brightness_filter.dart';
 import '../utils/anime_download_manager.dart';
@@ -18,10 +19,15 @@ class LocalAnimePage extends StatefulWidget {
 }
 
 class _LocalAnimePageState extends State<LocalAnimePage> {
+  static const _downloadFolderName = 'anime_downloads';
+
   final _downloads = AnimeDownloadManager();
   final Set<String> _selectedPathWords = {};
   bool _selectionMode = false;
   bool _loading = true;
+
+  bool get _isDesktopPlatform =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   @override
   void initState() {
@@ -51,6 +57,29 @@ class _LocalAnimePageState extends State<LocalAnimePage> {
     await _downloads.init();
     if (!mounted) return;
     setState(() => _loading = false);
+  }
+
+  Future<void> _openDownloadFolder() async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final folder = Directory(
+        '${docsDir.path}${Platform.pathSeparator}$_downloadFolderName',
+      );
+      if (!await folder.exists()) {
+        await folder.create(recursive: true);
+      }
+      final path = folder.path;
+      if (Platform.isWindows) {
+        await Process.run('explorer', [path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [path]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [path]);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      showToast(context, '打开文件夹失败：$e', isError: true);
+    }
   }
 
   Future<void> _deleteSelected() async {
@@ -156,7 +185,24 @@ class _LocalAnimePageState extends State<LocalAnimePage> {
             },
           );
 
-    if (widget.embedded) return body;
+    if (widget.embedded) {
+      if (!_isDesktopPlatform) return body;
+      return Stack(
+        children: [
+          body,
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'local_anime_open_folder',
+              onPressed: _openDownloadFolder,
+              icon: const Icon(Icons.folder_open, size: 20),
+              label: const Text('打开下载位置', style: TextStyle(fontSize: 13)),
+            ),
+          ),
+        ],
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(

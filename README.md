@@ -85,7 +85,7 @@ flutter emulators
 flutter emulators --launch 设备ID
 ```
 
-启动项目，注意最好在安卓设备上运行，其他类型的设备可能会有问题
+启动项目，选择安卓设备（包括模拟器）或windows都可以，不要选择浏览器
 
 ```sh
 flutter run -d 设备ID --dart-define-from-file=.env
@@ -93,7 +93,7 @@ flutter run -d 设备ID --dart-define-from-file=.env
 
 ### 构建安装包
 
-在本地构建apk安装包，需要在项目根目录下创建一个`.env`文件，
+在本地构建apk安装包，需要在项目根目录下创建一个`.env`文件（内容参考`.env.example`，如果不需要弹幕功能可以不创建这个文件）
 
 ```sh
 flutter build apk --release --target-platform android-arm64 --dart-define-from-file=.env
