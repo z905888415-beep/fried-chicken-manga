@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
+import 'package:system_fonts/system_fonts.dart';
+import '../main.dart' show isDesktop;
 import '../models/app_theme_option.dart';
 import '../models/user_manager.dart';
 import '../utils/toast.dart';
@@ -193,6 +195,10 @@ class _AppearancePageState extends State<AppearancePage> {
               ],
             ),
           ),
+          if (isDesktop) ...[
+            const SizedBox(height: 8),
+            _DesktopFontCard(user: _user),
+          ],
           const SizedBox(height: 8),
           Card(
             color: cs.surfaceContainerLow,
@@ -609,4 +615,281 @@ class _PreviewBadge extends StatelessWidget {
 String _colorToHex(Color color) {
   final rgb = color.toARGB32() & 0xFFFFFF;
   return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+}
+
+class _DesktopFontCard extends StatefulWidget {
+  final UserManager user;
+
+  const _DesktopFontCard({required this.user});
+
+  @override
+  State<_DesktopFontCard> createState() => _DesktopFontCardState();
+}
+
+class _DesktopFontCardState extends State<_DesktopFontCard> {
+  Future<List<String>>? _fontsFuture;
+  bool _applying = false;
+
+  Future<List<String>> _loadFonts() async {
+    final list = SystemFonts().getFontList();
+    final unique = <String>{...list}.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return unique;
+  }
+
+  Future<void> _pickFont() async {
+    _fontsFuture ??= _loadFonts();
+    final selected = await showDialog<_FontPickResult>(
+      context: context,
+      builder: (ctx) => _FontPickerDialog(
+        currentFont: widget.user.desktopFontFamily,
+        fontsFuture: _fontsFuture!,
+      ),
+    );
+    if (!mounted || selected == null) return;
+
+    if (selected.useDefault) {
+      await widget.user.setDesktopFontFamily('');
+      if (mounted) showToast(context, '已恢复系统默认字体，重启应用后完全生效');
+      return;
+    }
+
+    final name = selected.fontName;
+    if (name == null || name.isEmpty) return;
+    setState(() => _applying = true);
+    try {
+      final family = await SystemFonts().loadFont(name);
+      final resolved = (family?.toString().isNotEmpty ?? false)
+          ? family.toString()
+          : name;
+      await widget.user.setDesktopFontFamily(resolved);
+      if (mounted) showToast(context, '字体已切换为 $resolved');
+    } catch (e) {
+      if (mounted) showToast(context, '加载字体失败：$e');
+    } finally {
+      if (mounted) setState(() => _applying = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final current = widget.user.desktopFontFamily;
+    final hasCustom = current.isNotEmpty;
+
+    return Card(
+      color: cs.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.font_download_outlined, color: cs.onSurfaceVariant),
+                const SizedBox(width: 16),
+                const Text('应用字体'),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Material(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: _applying ? null : _pickFont,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: cs.outlineVariant),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          hasCustom ? current : '系统默认',
+                          style: tt.bodyMedium?.copyWith(
+                            fontFamily: hasCustom ? current : null,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_applying)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        Icon(
+                          Icons.arrow_drop_down,
+                          color: cs.onSurfaceVariant,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FontPickResult {
+  final bool useDefault;
+  final String? fontName;
+
+  const _FontPickResult.defaultFont() : useDefault = true, fontName = null;
+  const _FontPickResult.named(String name)
+    : useDefault = false,
+      fontName = name;
+}
+
+class _FontPickerDialog extends StatefulWidget {
+  final String currentFont;
+  final Future<List<String>> fontsFuture;
+
+  const _FontPickerDialog({
+    required this.currentFont,
+    required this.fontsFuture,
+  });
+
+  @override
+  State<_FontPickerDialog> createState() => _FontPickerDialogState();
+}
+
+class _FontPickerDialogState extends State<_FontPickerDialog> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      '选择字体',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: '搜索字体',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  isDense: true,
+                ),
+                onChanged: (v) => setState(() => _query = v.trim()),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: FutureBuilder<List<String>>(
+                  future: widget.fontsFuture,
+                  builder: (ctx, snap) {
+                    if (snap.connectionState != ConnectionState.done) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+                    }
+                    if (snap.hasError) {
+                      return Center(
+                        child: Text(
+                          '获取字体失败：${snap.error}',
+                          style: TextStyle(color: cs.error),
+                        ),
+                      );
+                    }
+                    final fonts = snap.data ?? const <String>[];
+                    final lowerQuery = _query.toLowerCase();
+                    final filtered = lowerQuery.isEmpty
+                        ? fonts
+                        : fonts
+                              .where(
+                                (f) => f.toLowerCase().contains(lowerQuery),
+                              )
+                              .toList();
+
+                    return ListView.builder(
+                      itemCount: filtered.length + 1,
+                      itemBuilder: (ctx, i) {
+                        if (i == 0) {
+                          final selected = widget.currentFont.isEmpty;
+                          return ListTile(
+                            leading: Icon(
+                              selected
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_unchecked,
+                              color: selected ? cs.primary : null,
+                            ),
+                            title: const Text('系统默认'),
+                            onTap: () => Navigator.of(
+                              context,
+                            ).pop(const _FontPickResult.defaultFont()),
+                          );
+                        }
+                        final name = filtered[i - 1];
+                        final selected = name == widget.currentFont;
+                        return ListTile(
+                          leading: Icon(
+                            selected
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            color: selected ? cs.primary : null,
+                          ),
+                          title: Text(name),
+                          onTap: () => Navigator.of(
+                            context,
+                          ).pop(_FontPickResult.named(name)),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

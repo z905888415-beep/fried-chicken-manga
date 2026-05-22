@@ -85,6 +85,7 @@ class UserManager extends ChangeNotifier {
   static const _keyDarkModeCoverBrightness = 'dark_mode_cover_brightness';
   static const _keyBottomNavShowLabels = 'bottom_nav_show_labels';
   static const _keyNavOrder = 'nav_order';
+  static const _keyDesktopFontFamily = 'desktop_font_family';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
   static const _keyBookshelfShowUpdateOnly = 'bookshelf_show_update_only';
   static const _keyReaderMode = 'reader_mode';
@@ -148,6 +149,7 @@ class UserManager extends ChangeNotifier {
     'bookshelf',
     'profile',
   ];
+  String _desktopFontFamily = '';
   String _bookshelfOrdering = '-datetime_updated';
   bool _bookshelfShowUpdateOnly = false;
   int _readerMode = 0;
@@ -203,6 +205,7 @@ class UserManager extends ChangeNotifier {
   double get darkModeCoverBrightness => _darkModeCoverBrightness;
   bool get bottomNavShowLabels => _bottomNavShowLabels;
   List<String> get navOrder => _navOrder;
+  String get desktopFontFamily => _desktopFontFamily;
   AppThemeOption get themeOption {
     if (_themeColor == customThemeOptionId) {
       return AppThemeOption(
@@ -314,6 +317,7 @@ class UserManager extends ChangeNotifier {
     _navOrder =
         prefs.getStringList(_keyNavOrder) ??
         const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
+    _desktopFontFamily = prefs.getString(_keyDesktopFontFamily) ?? '';
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
     _bookshelfShowUpdateOnly =
@@ -582,6 +586,18 @@ class UserManager extends ChangeNotifier {
     _navOrder = order;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_keyNavOrder, order);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopFontFamily(String fontFamily) async {
+    if (_desktopFontFamily == fontFamily) return;
+    _desktopFontFamily = fontFamily;
+    final prefs = await SharedPreferences.getInstance();
+    if (fontFamily.isEmpty) {
+      await prefs.remove(_keyDesktopFontFamily);
+    } else {
+      await prefs.setString(_keyDesktopFontFamily, fontFamily);
+    }
     notifyListeners();
   }
 

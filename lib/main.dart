@@ -1,7 +1,11 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:system_fonts/system_fonts.dart';
 
 import 'models/user_manager.dart';
 import 'pages/anime_home_page.dart';
@@ -11,10 +15,21 @@ import 'pages/bookshelf_page.dart';
 import 'pages/profile_page.dart';
 import 'utils/app_update.dart';
 
+bool get isDesktop =>
+    !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   await UserManager().init();
+  if (isDesktop) {
+    final font = UserManager().desktopFontFamily;
+    if (font.isNotEmpty) {
+      try {
+        await SystemFonts().loadFont(font);
+      } catch (_) {}
+    }
+  }
   SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.manual,
     overlays: SystemUiOverlay.values,
@@ -102,6 +117,9 @@ class _KiraAppState extends State<KiraApp> {
       colorScheme: colorScheme,
       useMaterial3: true,
       cardTheme: _cardTheme,
+      fontFamily: isDesktop && _user.desktopFontFamily.isNotEmpty
+          ? _user.desktopFontFamily
+          : null,
     );
   }
 
