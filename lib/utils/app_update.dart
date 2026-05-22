@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -7,15 +9,54 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/user_manager.dart';
 import 'toast.dart';
 
+enum AssetPlatform {
+  android('Android', Icons.android),
+  windows('Windows', Icons.desktop_windows),
+  macos('macOS', Icons.laptop_mac),
+  ios('iOS', Icons.phone_iphone),
+  linux('Linux', Icons.desktop_mac),
+  web('Web', Icons.public),
+  unknown('其他', Icons.insert_drive_file);
+
+  final String label;
+  final IconData icon;
+  const AssetPlatform(this.label, this.icon);
+}
+
+class ReleaseAsset {
+  final String name;
+  final String downloadUrl;
+  final String mirrorUrl;
+  final int size;
+  final AssetPlatform platform;
+
+  const ReleaseAsset({
+    required this.name,
+    required this.downloadUrl,
+    required this.mirrorUrl,
+    required this.size,
+    required this.platform,
+  });
+
+  String get sizeLabel {
+    if (size <= 0) return '';
+    const kb = 1024;
+    const mb = 1024 * 1024;
+    const gb = 1024 * 1024 * 1024;
+    if (size >= gb) return '${(size / gb).toStringAsFixed(2)} GB';
+    if (size >= mb) return '${(size / mb).toStringAsFixed(1)} MB';
+    if (size >= kb) return '${(size / kb).toStringAsFixed(1)} KB';
+    return '$size B';
+  }
+}
+
 class AppUpdateInfo {
   final String currentVersion;
   final String latestVersion;
   final String releaseName;
   final String releaseNotes;
   final String releasePageUrl;
-  final String downloadUrl;
-  final String mirrorDownloadUrl;
-  final String assetName;
+  final List<ReleaseAsset> assets;
 
   const AppUpdateInfo({
     required this.currentVersion,
@@ -23,9 +64,7 @@ class AppUpdateInfo {
     required this.releaseName,
     required this.releaseNotes,
     required this.releasePageUrl,
-    required this.downloadUrl,
-    required this.mirrorDownloadUrl,
-    required this.assetName,
+    required this.assets,
   });
 }
 
@@ -61,21 +100,33 @@ class AppUpdateService {
       return null;
     }
 
-    final assets = (data['assets'] as List?) ?? const [];
-    Map<String, dynamic>? targetAsset;
-    for (final item in assets) {
+    final rawAssets = (data['assets'] as List?) ?? const [];
+    final assets = <ReleaseAsset>[];
+    for (final item in rawAssets) {
       if (item is! Map) continue;
       final asset = Map<String, dynamic>.from(item);
-      final name = asset['name']?.toString().toLowerCase() ?? '';
-      if (name.endsWith('.apk')) {
-        targetAsset = asset;
-        if (name.contains('arm64-v8a')) break;
-      }
+      final name = asset['name']?.toString() ?? '';
+      final url = asset['browser_download_url']?.toString() ?? '';
+      if (name.isEmpty || url.isEmpty) continue;
+      assets.add(
+        ReleaseAsset(
+          name: name,
+          downloadUrl: url,
+          mirrorUrl: '$_mirrorPrefix$url',
+          size: (asset['size'] as num?)?.toInt() ?? 0,
+          platform: _detectPlatform(name),
+        ),
+      );
     }
-    if (targetAsset == null) return null;
+    if (assets.isEmpty) return null;
 
-    final downloadUrl = targetAsset['browser_download_url']?.toString() ?? '';
-    if (downloadUrl.isEmpty) return null;
+    final currentPlatform = _currentPlatform();
+    assets.sort((a, b) {
+      final aMatch = a.platform == currentPlatform ? 0 : 1;
+      final bMatch = b.platform == currentPlatform ? 0 : 1;
+      if (aMatch != bMatch) return aMatch - bMatch;
+      return a.platform.index.compareTo(b.platform.index);
+    });
 
     return AppUpdateInfo(
       currentVersion: currentVersion,
@@ -83,9 +134,7 @@ class AppUpdateService {
       releaseName: data['name']?.toString() ?? '发现新版本',
       releaseNotes: data['body']?.toString().trim() ?? '',
       releasePageUrl: data['html_url']?.toString() ?? '',
-      downloadUrl: downloadUrl,
-      mirrorDownloadUrl: '$_mirrorPrefix$downloadUrl',
-      assetName: targetAsset['name']?.toString() ?? 'app-release.apk',
+      assets: assets,
     );
   }
 
@@ -112,6 +161,42 @@ class AppUpdateService {
       if (!context.mounted || auto) return;
       showToast(context, '检查更新失败，请稍后重试', isError: true);
     }
+  }
+
+  static AssetPlatform _detectPlatform(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.apk')) return AssetPlatform.android;
+    if (lower.endsWith('.aab')) return AssetPlatform.android;
+    if (lower.endsWith('.exe') || lower.endsWith('.msi')) {
+      return AssetPlatform.windows;
+    }
+    if (lower.contains('windows') || lower.contains('win-')) {
+      return AssetPlatform.windows;
+    }
+    if (lower.endsWith('.dmg') || lower.endsWith('.pkg')) {
+      return AssetPlatform.macos;
+    }
+    if (lower.contains('macos') || lower.contains('darwin')) {
+      return AssetPlatform.macos;
+    }
+    if (lower.endsWith('.ipa')) return AssetPlatform.ios;
+    if (lower.endsWith('.deb') ||
+        lower.endsWith('.rpm') ||
+        lower.endsWith('.appimage')) {
+      return AssetPlatform.linux;
+    }
+    if (lower.contains('linux')) return AssetPlatform.linux;
+    if (lower.contains('web')) return AssetPlatform.web;
+    return AssetPlatform.unknown;
+  }
+
+  static AssetPlatform _currentPlatform() {
+    if (Platform.isAndroid) return AssetPlatform.android;
+    if (Platform.isIOS) return AssetPlatform.ios;
+    if (Platform.isWindows) return AssetPlatform.windows;
+    if (Platform.isMacOS) return AssetPlatform.macos;
+    if (Platform.isLinux) return AssetPlatform.linux;
+    return AssetPlatform.unknown;
   }
 
   static String _normalizeVersion(String value) {
@@ -236,6 +321,61 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     );
   }
 
+  Widget _buildAssetTile(ReleaseAsset asset, ColorScheme cs, TextTheme tt) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(asset.platform.icon, size: 22, color: cs.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  asset.name,
+                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (asset.sizeLabel.isNotEmpty)
+                  Text(
+                    '${asset.platform.label} · ${asset.sizeLabel}',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            tooltip: '下载',
+            visualDensity: VisualDensity.compact,
+            onPressed: _submitting ? null : () => _openUrl(asset.downloadUrl),
+            icon: SvgPicture.asset(
+              'assets/github.svg',
+              width: 18,
+              height: 18,
+              colorFilter: ColorFilter.mode(cs.primary, BlendMode.srcIn),
+            ),
+          ),
+          IconButton(
+            tooltip: '镜像下载',
+            visualDensity: VisualDensity.compact,
+            onPressed: _submitting ? null : () => _openUrl(asset.mirrorUrl),
+            icon: Icon(Icons.public, size: 20, color: cs.primary),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -246,9 +386,21 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      title: const Text('有更新'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('有更新')),
+          IconButton(
+            tooltip: '打开发布页',
+            visualDensity: VisualDensity.compact,
+            onPressed: _submitting
+                ? null
+                : () => _openUrl(widget.updateInfo.releasePageUrl),
+            icon: const Icon(Icons.open_in_new, size: 20),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 360,
+        width: 400,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,69 +408,43 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             Text(widget.updateInfo.releaseName, style: tt.titleSmall),
             const SizedBox(height: 12),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 240),
+              constraints: const BoxConstraints(maxHeight: 200),
               child: SingleChildScrollView(
                 child: _buildReleaseNotes(notes, cs, tt),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _submitting
-                        ? null
-                        : () => _openUrl(widget.updateInfo.downloadUrl),
-                    icon: SvgPicture.asset(
-                      'assets/github.svg',
-                      width: 18,
-                      height: 18,
-                      colorFilter: ColorFilter.mode(
-                        cs.onPrimary,
-                        BlendMode.srcIn,
-                      ),
-                    ),
-                    label: const Text('下载'),
-                    style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                Text(
+                  '安装包',
+                  style: tt.labelLarge?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _submitting
-                        ? null
-                        : () => _openUrl(widget.updateInfo.mirrorDownloadUrl),
-                    icon: const Icon(Icons.public),
-                    label: const Text('镜像'),
-                    style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: _submitting
-                        ? null
-                        : () => _openUrl(widget.updateInfo.releasePageUrl),
-                    icon: const Icon(Icons.open_in_new, size: 18),
-                    label: const Text('发布'),
-                    style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                  child: Divider(
+                    color: cs.outlineVariant.withValues(alpha: 0.5),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final asset in widget.updateInfo.assets)
+                      _buildAssetTile(asset, cs, tt),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
