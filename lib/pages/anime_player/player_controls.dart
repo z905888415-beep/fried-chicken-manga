@@ -73,6 +73,10 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
   bool _playlistVisible = false;
   Timer? _hideControlsTimer;
 
+  // Slider 拖动状态
+  bool _isSliderDragging = false;
+  double _sliderDragValue = 0.0;
+
   // 手势处理状态
   double? _dragStartX;
   Duration? _dragTargetPosition;
@@ -465,14 +469,28 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                   ),
                                 ),
                                 child: Slider(
-                                  value: progress,
-                                  onChanged: (v) => player.seek(
-                                    Duration(
-                                      milliseconds:
-                                          (duration.inMilliseconds * v).round(),
-                                    ),
-                                  ),
-                                  activeColor: Colors.red,
+                                  value: _isSliderDragging
+                                      ? _sliderDragValue
+                                      : progress,
+                                  onChanged: (v) {
+                                    setState(() {
+                                      _isSliderDragging = true;
+                                      _sliderDragValue = v;
+                                    });
+                                    _showControls();
+                                  },
+                                  onChangeEnd: (v) {
+                                    player.seek(
+                                      Duration(
+                                        milliseconds:
+                                            (duration.inMilliseconds * v)
+                                                .round(),
+                                      ),
+                                    );
+                                    _isSliderDragging = false;
+                                  },
+                                  activeColor:
+                                      Theme.of(context).colorScheme.primary,
                                   inactiveColor: Colors.white38,
                                 ),
                               ),
@@ -481,7 +499,9 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                   SizedBox(
                                     width: widget.fullscreen ? 132 : 104,
                                     child: Text(
-                                      '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                                      _isSliderDragging
+                                          ? '${_formatDuration(Duration(milliseconds: (duration.inMilliseconds * _sliderDragValue).round()))} / ${_formatDuration(duration)}'
+                                          : '${_formatDuration(position)} / ${_formatDuration(duration)}',
                                       maxLines: 1,
                                       overflow: TextOverflow.clip,
                                       style: TextStyle(
