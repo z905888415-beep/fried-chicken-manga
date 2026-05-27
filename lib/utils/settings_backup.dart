@@ -26,6 +26,10 @@ class SettingsBackupService {
   static const _kind = 'settings_backup';
   static const _version = 1;
   static const _cachePrefix = 'cache_';
+  static const _excludedPreferenceKeys = <String>{
+    'local_bookshelf_show_update_only',
+    'bookshelf_show_update_only',
+  };
 
   Future<String> exportPlainText() async {
     final prefs = await SharedPreferences.getInstance();
@@ -88,7 +92,8 @@ class SettingsBackupService {
     return keys.length;
   }
 
-  static bool _isUserPreferenceKey(String key) => !key.startsWith(_cachePrefix);
+  static bool _isUserPreferenceKey(String key) =>
+      !key.startsWith(_cachePrefix) && !_excludedPreferenceKeys.contains(key);
 
   static Map<String, dynamic>? _encodePreference(Object? value) {
     if (value is String) {
@@ -142,8 +147,11 @@ class SettingsBackupService {
     final preferences = <String, _PreferenceValue>{};
     for (final rawEntry in rawPreferences.entries) {
       final key = rawEntry.key.toString();
-      if (key.isEmpty || !_isUserPreferenceKey(key)) {
+      if (key.isEmpty || key.startsWith(_cachePrefix)) {
         throw const SettingsBackupException('配置中包含不支持的字段');
+      }
+      if (_excludedPreferenceKeys.contains(key)) {
+        continue;
       }
       if (rawEntry.value is! Map) {
         throw const SettingsBackupException('配置字段格式不正确');

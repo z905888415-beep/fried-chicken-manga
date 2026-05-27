@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
@@ -8,6 +11,7 @@ import '../models/user_manager.dart';
 import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/comic_card_skeleton.dart';
+import '../utils/data_cache.dart';
 import '../utils/toast.dart';
 import 'anime_detail_page.dart';
 import 'comic_detail_page.dart';
@@ -26,24 +30,50 @@ class BookshelfPage extends StatefulWidget {
 class _BookshelfPageState extends State<BookshelfPage> {
   final _api = ApiClient();
   final _user = UserManager();
+  final _scrollController = ScrollController();
+  Timer? _cacheTimeTimer;
   List<BookshelfItem> _items = [];
   List<AnimeBookshelfItem> _animeItems = [];
   bool _loading = true;
   int _offset = 0;
   int _total = 0;
+  int _comicTotal = 0;
+  int _animeTotal = 0;
+  DateTime? _comicCacheTime;
+  DateTime? _animeCacheTime;
   bool _loadingMore = false;
   bool _refreshing = false;
   bool _showingLoginPrompt = false;
+  late bool _lastIsLoggedIn = _user.isLoggedIn;
+  late String? _lastToken = _user.token;
+  late bool _lastAnimeFeatureEnabled = _user.animeFeatureEnabled;
   _BookshelfType _type = _BookshelfType.comic;
   late String _ordering = _user.bookshelfOrdering;
-  late bool _showUpdateOnly = _user.bookshelfShowUpdateOnly;
+  bool _showUpdateOnly = false;
+
+  static const _cacheTtl = Duration(minutes: 30);
+  static const _comicCacheKey = 'bookshelf_comic';
+  static const _animeCacheKey = 'bookshelf_anime';
+  static const _showUpdateOnlyKey = 'local_bookshelf_show_update_only';
+  static const _legacyShowUpdateOnlyKey = 'bookshelf_show_update_only';
+
+  void _startCacheTimeTimer() {
+    _cacheTimeTimer?.cancel();
+    _cacheTimeTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     _user.addListener(_onUserChanged);
+    _startCacheTimeTimer();
+    _loadShowUpdateOnly();
     if (_user.isLoggedIn) {
-      _load(silent: true);
+      _tryLoadCache().then((_) {
+        if (mounted && _currentItemsEmpty) _load(silent: true);
+      });
     } else {
       _loading = false;
     }
@@ -51,34 +81,197 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   @override
   void dispose() {
+    _cacheTimeTimer?.cancel();
+    _scrollController.dispose();
     _user.removeListener(_onUserChanged);
     super.dispose();
   }
 
   void _onUserChanged() {
     if (!mounted) return;
-    if (!_animeFeatureEnabled && _type == _BookshelfType.anime) {
+
+    final isLoggedIn = _user.isLoggedIn;
+    final token = _user.token;
+    final animeFeatureEnabled = _user.animeFeatureEnabled;
+    final loginChanged = isLoggedIn != _lastIsLoggedIn || token != _lastToken;
+    final animeFeatureChanged = animeFeatureEnabled != _lastAnimeFeatureEnabled;
+    final nextOrdering = _user.bookshelfOrdering;
+    final orderingChanged = _ordering != nextOrdering;
+
+    _lastIsLoggedIn = isLoggedIn;
+    _lastToken = token;
+    _lastAnimeFeatureEnabled = animeFeatureEnabled;
+
+    if (!isLoggedIn) {
+      if (loginChanged) {
+        setState(() {
+          _items = [];
+          _animeItems = [];
+          _total = 0;
+          _comicTotal = 0;
+          _animeTotal = 0;
+          _offset = 0;
+          _loading = false;
+          _loadingMore = false;
+          _refreshing = false;
+          _ordering = nextOrdering;
+        });
+      } else if (orderingChanged || animeFeatureChanged) {
+        setState(() {
+          _ordering = nextOrdering;
+        });
+      }
+      return;
+    }
+
+    var switchedFromDisabledAnime = false;
+    if (animeFeatureChanged &&
+        !animeFeatureEnabled &&
+        _type == _BookshelfType.anime) {
+      switchedFromDisabledAnime = true;
       setState(() {
         _type = _BookshelfType.comic;
-        _animeItems = [];
-        _total = 0;
-        _offset = 0;
+        _total = _comicTotal;
+        _offset = _items.length;
+        _loading = _items.isEmpty;
         _loadingMore = false;
+        _ordering = nextOrdering;
+      });
+    } else if (orderingChanged || animeFeatureChanged) {
+      setState(() {
+        _ordering = nextOrdering;
       });
     }
-    if (_user.isLoggedIn) {
+
+    if (loginChanged) {
       _load(silent: true, force: true);
-    } else {
-      setState(() {
-        _items = [];
-        _animeItems = [];
-        _total = 0;
-        _loading = false;
-      });
+    } else if (switchedFromDisabledAnime && _items.isEmpty) {
+      _load(silent: true, force: true);
     }
   }
 
+  Future<void> _loadShowUpdateOnly() async {
+    final prefs = await SharedPreferences.getInstance();
+    var value = prefs.getBool(_showUpdateOnlyKey);
+    final legacyValue = prefs.getBool(_legacyShowUpdateOnlyKey);
+
+    if (value == null && legacyValue != null) {
+      value = legacyValue;
+      await prefs.setBool(_showUpdateOnlyKey, legacyValue);
+    }
+    if (legacyValue != null) {
+      await prefs.remove(_legacyShowUpdateOnlyKey);
+    }
+
+    if (!mounted || value == null) return;
+    setState(() => _showUpdateOnly = value!);
+  }
+
+  void _setShowUpdateOnly(bool value) {
+    if (_showUpdateOnly == value) return;
+    setState(() => _showUpdateOnly = value);
+    unawaited(_saveShowUpdateOnly(value));
+  }
+
+  Future<void> _saveShowUpdateOnly(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showUpdateOnlyKey, value);
+    await prefs.remove(_legacyShowUpdateOnlyKey);
+  }
+
+  Future<void> _tryLoadCache() async {
+    final cache = DataCache();
+    final comicRaw = await cache.get(_comicCacheKey);
+    if (comicRaw is Map<String, dynamic>) {
+      final items =
+          (comicRaw['items'] as List?)
+              ?.map((e) => BookshelfItem.fromJson(Map<String, dynamic>.from(e)))
+              .toList() ??
+          [];
+      final total = comicRaw['total'] as int? ?? 0;
+      final cacheTimeMs = comicRaw['cache_time'] as int?;
+      final cacheTime = cacheTimeMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(cacheTimeMs)
+          : null;
+      if (items.isNotEmpty &&
+          cacheTime != null &&
+          DateTime.now().difference(cacheTime) < _cacheTtl) {
+        setState(() {
+          _items = items;
+          _total = total;
+          _comicTotal = total;
+          _offset = items.length;
+          _comicCacheTime = cacheTime;
+          _loading = false;
+        });
+      }
+    }
+    final animeRaw = await cache.get(_animeCacheKey);
+    if (animeRaw is Map<String, dynamic>) {
+      final items =
+          (animeRaw['items'] as List?)
+              ?.map(
+                (e) =>
+                    AnimeBookshelfItem.fromJson(Map<String, dynamic>.from(e)),
+              )
+              .toList() ??
+          [];
+      final total = animeRaw['total'] as int? ?? 0;
+      final cacheTimeMs = animeRaw['cache_time'] as int?;
+      final cacheTime = cacheTimeMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(cacheTimeMs)
+          : null;
+      if (items.isNotEmpty &&
+          cacheTime != null &&
+          DateTime.now().difference(cacheTime) < _cacheTtl) {
+        setState(() {
+          _animeItems = items;
+          _total = total;
+          _animeTotal = total;
+          _offset = items.length;
+          _animeCacheTime = cacheTime;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _saveComicCache(
+    List<BookshelfItem> items,
+    int total,
+    DateTime cacheTime,
+  ) async {
+    final cache = DataCache();
+    await cache.put(_comicCacheKey, {
+      'items': items.map((e) => e.toJson()).toList(),
+      'total': total,
+      'cache_time': cacheTime.millisecondsSinceEpoch,
+    }, ttl: _cacheTtl);
+  }
+
+  Future<void> _saveAnimeCache(
+    List<AnimeBookshelfItem> items,
+    int total,
+    DateTime cacheTime,
+  ) async {
+    final cache = DataCache();
+    await cache.put(_animeCacheKey, {
+      'items': items.map((e) => e.toJson()).toList(),
+      'total': total,
+      'cache_time': cacheTime.millisecondsSinceEpoch,
+    }, ttl: _cacheTtl);
+  }
+
   Future<void> _load({bool silent = false, bool force = false}) async {
+    if (!force && !_currentItemsEmpty) {
+      final cacheTime = _type == _BookshelfType.comic
+          ? _comicCacheTime
+          : _animeCacheTime;
+      if (cacheTime != null &&
+          DateTime.now().difference(cacheTime) < _cacheTtl) {
+        return;
+      }
+    }
     if (_refreshing && !force) return;
     final requestType = _type;
     _refreshing = true;
@@ -93,21 +286,29 @@ class _BookshelfPageState extends State<BookshelfPage> {
       if (requestType == _BookshelfType.comic) {
         final data = await _api.getBookshelf(ordering: _ordering);
         if (!mounted || requestType != _type) return;
+        final now = DateTime.now();
         setState(() {
           _items = data.list;
           _total = data.total;
+          _comicTotal = data.total;
           _offset = data.list.length;
+          _comicCacheTime = now;
           _loading = false;
         });
+        _saveComicCache(data.list, data.total, now);
       } else {
         final data = await _api.getAnimeBookshelf(ordering: _ordering);
         if (!mounted || requestType != _type) return;
+        final now = DateTime.now();
         setState(() {
           _animeItems = data.list;
           _total = data.total;
+          _animeTotal = data.total;
           _offset = data.list.length;
+          _animeCacheTime = now;
           _loading = false;
         });
+        _saveAnimeCache(data.list, data.total, now);
       }
       if (!silent && mounted) {
         showToast(context, '刷新成功');
@@ -119,6 +320,67 @@ class _BookshelfPageState extends State<BookshelfPage> {
         await _handleUnauthorized();
       } else if (!silent && mounted) {
         showToast(context, '刷新失败', isError: true);
+      }
+    } finally {
+      if (requestType == _type) {
+        _refreshing = false;
+        if (mounted) {
+          setState(() {});
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(0);
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _refreshLoaded() async {
+    if (_refreshing) return;
+    final requestType = _type;
+    _refreshing = true;
+    setState(() {});
+    try {
+      if (requestType == _BookshelfType.comic) {
+        final currentCount = _items.length;
+        if (currentCount == 0) {
+          _refreshing = false;
+          if (mounted) setState(() {});
+          return;
+        }
+        final data = await _api.getBookshelf(
+          limit: currentCount,
+          offset: 0,
+          ordering: _ordering,
+        );
+        if (!mounted || requestType != _type) return;
+        setState(() {
+          _items = data.list;
+          _total = data.total;
+          _offset = data.list.length;
+        });
+      } else {
+        final currentCount = _animeItems.length;
+        if (currentCount == 0) {
+          _refreshing = false;
+          if (mounted) setState(() {});
+          return;
+        }
+        final data = await _api.getAnimeBookshelf(
+          limit: currentCount,
+          offset: 0,
+          ordering: _ordering,
+        );
+        if (!mounted || requestType != _type) return;
+        setState(() {
+          _animeItems = data.list;
+          _total = data.total;
+          _offset = data.list.length;
+        });
+      }
+    } catch (e) {
+      debugPrint('BookshelfPage refreshLoaded error: $e');
+      if (_isUnauthorized(e)) {
+        await _handleUnauthorized();
       }
     } finally {
       if (requestType == _type) {
@@ -250,17 +512,40 @@ class _BookshelfPageState extends State<BookshelfPage> {
   String get _typeLabel => _type == _BookshelfType.comic ? '漫画' : '动漫';
   bool get _animeFeatureEnabled => _user.animeFeatureEnabled;
 
+  String get _cacheTimeLabel {
+    final cacheTime = _type == _BookshelfType.comic
+        ? _comicCacheTime
+        : _animeCacheTime;
+    if (cacheTime == null) return '';
+    final diff = DateTime.now().difference(cacheTime);
+    if (diff.inMinutes < 1) return '刷新于 刚刚';
+    if (diff.inMinutes < 60) return '刷新于 ${diff.inMinutes}分钟前';
+    if (diff.inHours < 24) return '刷新于 ${diff.inHours}小时前';
+    return '刷新于 ${diff.inDays}天前';
+  }
+
   void _setType(_BookshelfType type) {
     if (type == _BookshelfType.anime && !_animeFeatureEnabled) return;
     if (type == _type) return;
+    final cacheTime = type == _BookshelfType.comic
+        ? _comicCacheTime
+        : _animeCacheTime;
+    final hasValidCache =
+        cacheTime != null && DateTime.now().difference(cacheTime) < _cacheTtl;
+    final items = type == _BookshelfType.comic ? _items : _animeItems;
+    final itemsEmpty = type == _BookshelfType.comic
+        ? _items.isEmpty
+        : _animeItems.isEmpty;
     setState(() {
       _type = type;
-      _total = 0;
-      _offset = 0;
-      _loading = true;
+      _total = type == _BookshelfType.comic ? _comicTotal : _animeTotal;
+      _offset = items.length;
+      _loading = !hasValidCache && itemsEmpty;
       _loadingMore = false;
     });
-    _load(silent: true, force: true);
+    if (!hasValidCache || itemsEmpty) {
+      _load(silent: true, force: true);
+    }
   }
 
   @override
@@ -271,7 +556,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(force: true),
         child: NotificationListener<ScrollNotification>(
           onNotification: (n) {
             if (!_loading &&
@@ -281,6 +566,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
             return false;
           },
           child: CustomScrollView(
+            controller: _scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverToBoxAdapter(
@@ -328,16 +614,16 @@ class _BookshelfPageState extends State<BookshelfPage> {
               width: double.infinity,
               child: SegmentedButton<_BookshelfType>(
                 showSelectedIcon: false,
-                segments: const [
+                segments: [
                   ButtonSegment(
                     value: _BookshelfType.comic,
-                    icon: Icon(Icons.menu_book),
-                    label: Text('漫画'),
+                    icon: const Icon(Icons.menu_book),
+                    label: Text(_comicTotal > 0 ? '漫画（$_comicTotal）' : '漫画'),
                   ),
                   ButtonSegment(
                     value: _BookshelfType.anime,
-                    icon: Icon(Icons.movie_outlined),
-                    label: Text('动漫'),
+                    icon: const Icon(Icons.movie_outlined),
+                    label: Text(_animeTotal > 0 ? '动漫（$_animeTotal）' : '动漫'),
                   ),
                 ],
                 selected: {_type},
@@ -350,16 +636,13 @@ class _BookshelfPageState extends State<BookshelfPage> {
             children: [
               if (_type == _BookshelfType.comic)
                 FilterChip(
-                  label: const Text('看更新'),
+                  label: const Text('有更新'),
                   selected: _showUpdateOnly,
-                  onSelected: (v) {
-                    setState(() => _showUpdateOnly = v);
-                    _user.setBookshelfShowUpdateOnly(v);
-                  },
+                  onSelected: _setShowUpdateOnly,
                 ),
               const SizedBox(width: 8),
               Text(
-                '共 $_total 部收藏',
+                _cacheTimeLabel,
                 style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
               ),
               const Spacer(),
@@ -499,7 +782,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     lastBrowseId: item.lastBrowseId,
                     lastBrowseName: item.lastBrowseName,
                   ),
-                ).then((_) => _load(silent: true)),
+                ).then((_) => _refreshLoaded()),
               ),
               if (item.hasUpdate) const _UpdateBadge(),
             ],
@@ -536,7 +819,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   initialAnime: item.anime,
                 ),
               ),
-            ).then((_) => _load(silent: true)),
+            ).then((_) => _refreshLoaded()),
           );
         }, childCount: totalCount),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(

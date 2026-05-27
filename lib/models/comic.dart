@@ -206,6 +206,18 @@ class BookshelfItem {
       lastBrowseId != null &&
       comic.lastChapterId != null &&
       lastBrowseId != comic.lastChapterId;
+
+  factory BookshelfItem.fromJson(Map<String, dynamic> json) => BookshelfItem(
+    comic: Comic.fromJson(Map<String, dynamic>.from(json['comic'] ?? {})),
+    lastBrowseId: json['last_browse_id']?.toString(),
+    lastBrowseName: json['last_browse_name']?.toString(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'comic': comic.toJson(),
+    'last_browse_id': lastBrowseId,
+    'last_browse_name': lastBrowseName,
+  };
 }
 
 class BrowseHistoryItem {

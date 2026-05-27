@@ -166,6 +166,19 @@ class AnimeBookshelfItem {
     this.lastBrowseId,
     this.lastBrowseName,
   });
+
+  factory AnimeBookshelfItem.fromJson(Map<String, dynamic> json) =>
+      AnimeBookshelfItem(
+        anime: Anime.fromJson(Map<String, dynamic>.from(json['anime'] ?? {})),
+        lastBrowseId: json['last_browse_id']?.toString(),
+        lastBrowseName: json['last_browse_name']?.toString(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'anime': anime.toJson(),
+    'last_browse_id': lastBrowseId,
+    'last_browse_name': lastBrowseName,
+  };
 }
 
 class AnimeBrowseHistoryItem {

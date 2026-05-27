@@ -87,7 +87,6 @@ class UserManager extends ChangeNotifier {
   static const _keyNavOrder = 'nav_order';
   static const _keyDesktopFontFamily = 'desktop_font_family';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
-  static const _keyBookshelfShowUpdateOnly = 'bookshelf_show_update_only';
   static const _keyReaderMode = 'reader_mode';
   static const _keyReaderScrollDirection = 'reader_scroll_direction';
   static const _keyReaderImageGap = 'reader_image_gap';
@@ -151,7 +150,6 @@ class UserManager extends ChangeNotifier {
   ];
   String _desktopFontFamily = '';
   String _bookshelfOrdering = '-datetime_updated';
-  bool _bookshelfShowUpdateOnly = false;
   int _readerMode = 0;
   int _readerScrollDirection = 2;
   double _readerImageGap = 0.0;
@@ -221,7 +219,6 @@ class UserManager extends ChangeNotifier {
       resolveAppThemeVariantOption(_themeVariant.name);
 
   String get bookshelfOrdering => _bookshelfOrdering;
-  bool get bookshelfShowUpdateOnly => _bookshelfShowUpdateOnly;
   int get readerMode => _readerMode;
   int get readerScrollDirection => _readerScrollDirection;
   double get readerImageGap => _readerImageGap;
@@ -320,8 +317,6 @@ class UserManager extends ChangeNotifier {
     _desktopFontFamily = prefs.getString(_keyDesktopFontFamily) ?? '';
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
-    _bookshelfShowUpdateOnly =
-        prefs.getBool(_keyBookshelfShowUpdateOnly) ?? false;
     _readerMode = prefs.getInt(_keyReaderMode) ?? 0;
     _readerScrollDirection = prefs.getInt(_keyReaderScrollDirection) ?? 2;
     _readerImageGap = prefs.getDouble(_keyReaderImageGap) ?? 0.0;
@@ -605,14 +600,6 @@ class UserManager extends ChangeNotifier {
     _bookshelfOrdering = ordering;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyBookshelfOrdering, ordering);
-    notifyListeners();
-  }
-
-  Future<void> setBookshelfShowUpdateOnly(bool value) async {
-    if (_bookshelfShowUpdateOnly == value) return;
-    _bookshelfShowUpdateOnly = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyBookshelfShowUpdateOnly, value);
     notifyListeners();
   }
 
