@@ -104,9 +104,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
 
   Future<void> _initializeDetailSources() async {
     await _loadDandanplayBinding();
-    if (_dandanplayBinding == null) {
-      await _loadDetail();
-    }
+    // 始终加载详情以获取 uuid，确保收藏功能可用
+    await _loadDetail();
   }
 
   void _syncTabController() {
