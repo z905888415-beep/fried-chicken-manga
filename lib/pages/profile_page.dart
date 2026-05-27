@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -1691,7 +1692,15 @@ class _AboutPageState extends State<AboutPage> {
                     ),
                     const Divider(height: 1),
                     ListTile(
-                      leading: const Icon(Icons.code),
+                      leading: SvgPicture.asset(
+                        'assets/github.svg',
+                        width: 24,
+                        height: 24,
+                        colorFilter: ColorFilter.mode(
+                          cs.onSurfaceVariant,
+                          BlendMode.srcIn,
+                        ),
+                      ),
                       title: const Text('源代码'),
                       subtitle: const Text('caolib/kira'),
                       trailing: const Icon(Icons.open_in_new),
