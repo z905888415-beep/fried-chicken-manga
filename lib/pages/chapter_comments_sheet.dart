@@ -1,9 +1,17 @@
+import 'dart:ui';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../api/api_client.dart';
+import '../api/zhipu_api.dart';
 import '../models/chapter_comment.dart';
 import '../models/user_manager.dart';
+import '../utils/chapter_summary_cache.dart';
+import '../utils/toast.dart';
 import 'chapter_comment_display.dart';
 
 class ChapterCommentsSheet extends StatefulWidget {
@@ -41,6 +49,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
   final _api = ApiClient();
   final _user = UserManager();
+  final _zhipuSettings = ZhipuSettings();
+  final _zhipuApi = ZhipuApi();
   final _scrollController = ScrollController();
 
   List<ChapterComment> _comments = [];
@@ -57,6 +67,14 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   bool _showFloatingButtons = true;
   double _lastScrollOffset = 0;
 
+  String _aiSummary = '';
+  bool _summarizing = false;
+  bool _summaryExpanded = true;
+  String? _summaryError;
+  CancelToken? _summaryCancelToken;
+  Set<int> _spoilerIds = const {};
+  List<ChapterCommentDisplayEntry> _lastSnippetEntries = const [];
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +84,10 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     _showCommentTime = _user.commentShowTime;
     _commentFontScale = _user.commentFontScale;
     _scrollController.addListener(_handleScrollDirection);
+    _zhipuSettings.addListener(_onZhipuChanged);
+    _zhipuSettings.load().then((_) {
+      _loadCachedSummary().then((_) => _maybeAutoSummary());
+    });
     if (widget.initialComments != null) {
       _comments = List<ChapterComment>.from(widget.initialComments!);
       _total = widget.initialTotal ?? _comments.length;
@@ -84,8 +106,34 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
   @override
   void dispose() {
+    _summaryCancelToken?.cancel();
+    _zhipuSettings.removeListener(_onZhipuChanged);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onZhipuChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _maybeAutoSummary() {
+    if (!_zhipuSettings.hasApiKey ||
+        !_zhipuSettings.summaryEnabled ||
+        !_zhipuSettings.autoSummary) {
+      return;
+    }
+    if (_aiSummary.isNotEmpty || _summarizing || _comments.isEmpty) return;
+    if (_comments.length < _zhipuSettings.autoSummaryMin) return;
+    _summarizeComments();
+  }
+
+  Future<void> _loadCachedSummary() async {
+    final cached = await ChapterSummaryCache.get(widget.chapterUuid);
+    if (!mounted || cached == null || cached.isEmpty) return;
+    setState(() {
+      _aiSummary = cached;
+      _spoilerIds = _parseSpoilerIds(cached);
+    });
   }
 
   void _handleScrollDirection() {
@@ -210,6 +258,179 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   bool get _allCommentsLoaded => _total > 0 && _comments.length >= _total;
+
+  Future<void> _summarizeComments() async {
+    if (_summarizing) return;
+    if (_comments.isEmpty) {
+      showToast(context, '当前没有可总结的评论', isError: true);
+      return;
+    }
+    if (!_zhipuSettings.hasApiKey || !_zhipuSettings.summaryEnabled) {
+      showToast(context, '请先在评论区设置中启用 AI 总结', isError: true);
+      return;
+    }
+
+    final cancelToken = CancelToken();
+    _summaryCancelToken = cancelToken;
+    setState(() {
+      _summarizing = true;
+      _summaryError = null;
+      _aiSummary = '';
+      _spoilerIds = const {};
+      _summaryExpanded = true;
+    });
+
+    final snippets = _buildCommentSnippets();
+    final messages = <ZhipuMessage>[
+      ZhipuMessage(role: 'system', content: _zhipuSettings.summaryPrompt),
+      ZhipuMessage(
+        role: 'user',
+        content:
+            '章节：${widget.chapterName}\n共 ${_lastSnippetEntries.length} 条不同评论（相同内容已合并）。每条行首数字为该评论的 id：\n\n$snippets',
+      ),
+    ];
+
+    final buffer = StringBuffer();
+    try {
+      final stream = _zhipuApi.streamChat(
+        apiKey: _zhipuSettings.apiKey!,
+        model: _zhipuSettings.model,
+        messages: messages,
+        cancelToken: cancelToken,
+      );
+      await for (final delta in stream) {
+        if (!mounted) return;
+        buffer.write(delta);
+        setState(() => _aiSummary = buffer.toString());
+      }
+      if (mounted && buffer.isNotEmpty) {
+        final full = buffer.toString();
+        setState(() => _spoilerIds = _parseSpoilerIds(full));
+        await ChapterSummaryCache.set(widget.chapterUuid, full);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      if (e is DioException && CancelToken.isCancel(e)) {
+        return;
+      }
+      setState(() => _summaryError = _extractSummaryError(e));
+    } finally {
+      if (mounted) {
+        setState(() => _summarizing = false);
+      }
+      _summaryCancelToken = null;
+    }
+  }
+
+  String _buildCommentSnippets() {
+    const maxChars = 64 * 1024;
+    final buffer = StringBuffer();
+    final entries = groupChapterComments(_comments);
+    _lastSnippetEntries = entries;
+    var truncated = false;
+    for (final entry in entries) {
+      final text = entry.content.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (text.isEmpty) continue;
+      final id = entry.primaryComment.id;
+      final line = entry.isMerged
+          ? '$id. [${entry.count}人] $text\n'
+          : '$id. ${entry.primaryComment.userName}: $text\n';
+      if (buffer.length + line.length > maxChars) {
+        truncated = true;
+        break;
+      }
+      buffer.write(line);
+    }
+    if (truncated) {
+      buffer.write('…（已截断，共 ${entries.length} 条不同评论）');
+    }
+    return buffer.toString();
+  }
+
+  static final _codeBlockRegex = RegExp(
+    r'```[^`\r\n]*\r?\n([\s\S]*?)\r?\n\s*```',
+  );
+  static final _arrayRegex = RegExp(r'\[\s*([\d,\s]*)\s*\]');
+  static final _spoilerLegacyRegex = RegExp(r'<!--\s*SPOILERS\s*:([^>]*)-->');
+
+  /// 解析模型输出的剧透 id，兼容旧版 HTML 注释标记。
+  /// 策略：先找最后一个 fenced code block，从中提取 [id, id, ...]；
+  /// 若无代码块则找文本中最后一个数组模式；最后兜底旧版注释。
+  Set<int> _parseSpoilerIds(String text) {
+    // 1) 最后一个 fenced code block
+    Match? lastBlock;
+    for (final m in _codeBlockRegex.allMatches(text)) {
+      lastBlock = m;
+    }
+    if (lastBlock != null) {
+      final content = lastBlock.group(1) ?? '';
+      final arr = _arrayRegex.firstMatch(content);
+      if (arr != null) return _splitIds(arr.group(1) ?? '');
+    }
+    // 2) 无代码块，找文本中最后一个 [id, id, ...]
+    Match? lastArr;
+    for (final m in _arrayRegex.allMatches(text)) {
+      lastArr = m;
+    }
+    if (lastArr != null) return _splitIds(lastArr.group(1) ?? '');
+    // 3) 兜底旧版 HTML 注释
+    final legacy = _spoilerLegacyRegex.firstMatch(text);
+    if (legacy != null) return _splitIds(legacy.group(1) ?? '');
+    return const {};
+  }
+
+  Set<int> _splitIds(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return const {};
+    final result = <int>{};
+    for (final part in s.split(',')) {
+      final n = int.tryParse(part.trim());
+      if (n != null && n > 0) result.add(n);
+    }
+    return result;
+  }
+
+  /// 从展示文本里剥离机读标记，避免暴露给用户。只剥离最后一个代码块。
+  String _stripSpoilersMarker(String text) {
+    Match? lastBlock;
+    for (final m in _codeBlockRegex.allMatches(text)) {
+      lastBlock = m;
+    }
+    if (lastBlock != null) {
+      text = text.substring(0, lastBlock.start) + text.substring(lastBlock.end);
+    }
+    return text.replaceAll(_spoilerLegacyRegex, '').trimRight();
+  }
+
+  String _extractSummaryError(Object e) {
+    if (e is DioException) {
+      if (e.response?.statusCode == 429) {
+        return '请求过于频繁，已被限速，请稍后再试';
+      }
+      final data = e.response?.data;
+      if (data is Map) {
+        final err = data['error'];
+        if (err is Map && err['message'] is String) return err['message'];
+        if (data['message'] is String) return data['message'];
+      }
+      return e.message ?? e.toString();
+    }
+    return e.toString();
+  }
+
+  void _stopSummarize() {
+    _summaryCancelToken?.cancel('user_stop');
+  }
+
+  Future<void> _clearSummary() async {
+    await ChapterSummaryCache.remove(widget.chapterUuid);
+    if (!mounted) return;
+    setState(() {
+      _aiSummary = '';
+      _summaryError = null;
+      _spoilerIds = const {};
+    });
+  }
 
   String _formatRelativeTime(String raw) {
     if (raw.isEmpty) return '';
@@ -355,6 +576,21 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                                     onPressed: _loadAllComments,
                                     icon: const Icon(Icons.refresh),
                                   ),
+                          if (_zhipuSettings.hasApiKey &&
+                              _zhipuSettings.summaryEnabled) ...[
+                            IconButton(
+                              tooltip: _aiSummary.isEmpty
+                                  ? 'AI 总结评论'
+                                  : '重新生成 AI 总结',
+                              onPressed: _summarizing
+                                  ? null
+                                  : _summarizeComments,
+                              icon: Icon(
+                                Icons.smart_toy_outlined,
+                                color: _summarizing ? cs.onSurfaceVariant : cs.primary,
+                              ),
+                            ),
+                          ],
                           IconButton(
                             tooltip: _useCompactLayout ? '切换为列表布局' : '切换为紧凑布局',
                             onPressed: () {
@@ -397,7 +633,9 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               right: 16,
               bottom: 16,
               child: AnimatedSlide(
-                offset: _showFloatingButtons ? Offset.zero : const Offset(0, 1.2),
+                offset: _showFloatingButtons
+                    ? Offset.zero
+                    : const Offset(0, 1.2),
                 curve: Curves.easeInOutCubic,
                 duration: const Duration(milliseconds: 260),
                 child: AnimatedOpacity(
@@ -461,9 +699,12 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                                     Size.square(52),
                                   ),
                                 ),
-                                onPressed: () => Navigator.of(context).maybePop(),
+                                onPressed: () =>
+                                    Navigator.of(context).maybePop(),
                                 child: const Center(
-                                  child: Icon(Icons.keyboard_arrow_down_rounded),
+                                  child: Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                  ),
                                 ),
                               ),
                             ),
@@ -552,6 +793,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     }
 
     final entries = groupChapterComments(_comments);
+    final hasSummary = _hasSummaryPanel;
+    final summaryOffset = hasSummary ? 1 : 0;
 
     if (!_useCompactLayout) {
       return NotificationListener<ScrollNotification>(
@@ -564,17 +807,21 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
             16,
             _commentListBottomPadding,
           ),
-          itemCount: entries.length + (_loadingMore ? 1 : 0),
+          itemCount: summaryOffset + entries.length + (_loadingMore ? 1 : 0),
           separatorBuilder: (_, index) => const SizedBox(height: 10),
           itemBuilder: (_, index) {
-            if (index == entries.length && _loadingMore) {
+            if (hasSummary && index == 0) {
+              return _buildSummaryPanel(cs, tt);
+            }
+            final dataIndex = index - summaryOffset;
+            if (dataIndex == entries.length && _loadingMore) {
               return const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()),
               );
             }
 
-            final entry = entries[index];
+            final entry = entries[dataIndex];
             return _CommentCard(
               entry: entry,
               relativeTime: _formatRelativeTime(entry.createAt),
@@ -583,6 +830,9 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               showUserName: _showUserName,
               showCommentTime: _showCommentTime,
               fontScale: _commentFontScale,
+              spoilerIds: _zhipuSettings.spoilerAnalysis
+                  ? _spoilerIds
+                  : const {},
             );
           },
         ),
@@ -607,17 +857,21 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               16,
               _commentListBottomPadding,
             ),
-            itemCount: rows.length + (_loadingMore ? 1 : 0),
+            itemCount: summaryOffset + rows.length + (_loadingMore ? 1 : 0),
             separatorBuilder: (_, index) => const SizedBox(height: 8),
             itemBuilder: (_, index) {
-              if (index == rows.length && _loadingMore) {
+              if (hasSummary && index == 0) {
+                return _buildSummaryPanel(cs, tt);
+              }
+              final dataIndex = index - summaryOffset;
+              if (dataIndex == rows.length && _loadingMore) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Center(child: CircularProgressIndicator()),
                 );
               }
 
-              final row = rows[index];
+              final row = rows[dataIndex];
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -634,6 +888,9 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                         showUserName: _showUserName,
                         showCommentTime: _showCommentTime,
                         fontScale: _commentFontScale,
+                        spoilerIds: _zhipuSettings.spoilerAnalysis
+                            ? _spoilerIds
+                            : const {},
                       ),
                     ),
                     if (i != row.items.length - 1)
@@ -645,6 +902,146 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
           ),
         );
       },
+    );
+  }
+
+  bool get _hasSummaryPanel =>
+      _zhipuSettings.hasApiKey &&
+      _zhipuSettings.summaryEnabled &&
+      (_aiSummary.isNotEmpty || _summarizing || _summaryError != null);
+
+  Widget _buildSummaryPanel(ColorScheme cs, TextTheme tt) {
+    final hasContent = _aiSummary.isNotEmpty;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 6, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.smart_toy_outlined, size: 16, color: cs.primary),
+              const SizedBox(width: 6),
+              Text(
+                'AI 总结',
+                style: tt.labelLarge?.copyWith(
+                  color: cs.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 6),
+              if (_zhipuSettings.customModels.isNotEmpty)
+                DropdownButton<String>(
+                  value: _zhipuSettings.customModels.contains(_zhipuSettings.model)
+                      ? _zhipuSettings.model
+                      : null,
+                  hint: Text(
+                    _zhipuSettings.model,
+                    style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  icon: const Icon(Icons.unfold_more, size: 12),
+                  style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                  underline: const SizedBox.shrink(),
+                  isDense: true,
+                  padding: EdgeInsets.zero,
+                  items: _zhipuSettings.customModels
+                      .map((m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(m, style: const TextStyle(fontSize: 11)),
+                          ))
+                      .toList(),
+                  onChanged: _summarizing
+                      ? null
+                      : (m) {
+                          if (m != null) _zhipuSettings.setModel(m);
+                        },
+                ),
+              const Spacer(),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: _summarizing ? '停止' : '重新生成',
+                onPressed: _summarizing ? _stopSummarize : _summarizeComments,
+                icon: Icon(_summarizing ? Icons.stop : Icons.refresh, size: 18),
+              ),
+              if (hasContent && !_summarizing)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: '复制',
+                  onPressed: () async {
+                    final text = _stripSpoilersMarker(_aiSummary);
+                    await Clipboard.setData(ClipboardData(text: text));
+                    if (mounted) showToast(context, '已复制');
+                  },
+                  icon: const Icon(Icons.copy, size: 18),
+                ),
+              if (hasContent && !_summarizing)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: '清除总结',
+                  onPressed: _clearSummary,
+                  icon: const Icon(Icons.close, size: 18),
+                ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: _summaryExpanded ? '收起' : '展开',
+                onPressed: () =>
+                    setState(() => _summaryExpanded = !_summaryExpanded),
+                icon: Icon(
+                  _summaryExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 20,
+                ),
+              ),
+            ],
+          ),
+          if (_summaryExpanded) ...[
+            if (_summaryError != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+                child: Text(
+                  '生成失败：${_summaryError!}',
+                  style: tt.bodySmall?.copyWith(color: cs.error),
+                ),
+              )
+            else if (hasContent)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
+                child: MarkdownBody(
+                  data: _stripSpoilersMarker(_aiSummary),
+                  selectable: true,
+                  styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
+                      .copyWith(
+                        p: tt.bodyMedium?.copyWith(height: 1.5),
+                        h1: tt.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h2: tt.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h3: tt.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                        strong: tt.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: cs.primary,
+                        ),
+                        listBullet: tt.bodyMedium,
+                      ),
+                ),
+              )
+            else if (_summarizing)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
+                child: Text(
+                  '正在生成中…',
+                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -974,7 +1371,7 @@ class _CommentSkeletonState extends State<_CommentSkeleton>
   }
 }
 
-class _CommentCard extends StatelessWidget {
+class _CommentCard extends StatefulWidget {
   final ChapterCommentDisplayEntry entry;
   final String relativeTime;
   final bool compact;
@@ -982,6 +1379,7 @@ class _CommentCard extends StatelessWidget {
   final bool showUserName;
   final bool showCommentTime;
   final double fontScale;
+  final Set<int> spoilerIds;
 
   const _CommentCard({
     required this.entry,
@@ -991,13 +1389,37 @@ class _CommentCard extends StatelessWidget {
     this.showUserName = true,
     this.showCommentTime = true,
     this.fontScale = 1.0,
+    this.spoilerIds = const {},
   });
+
+  @override
+  State<_CommentCard> createState() => _CommentCardState();
+}
+
+class _CommentCardState extends State<_CommentCard> {
+  bool _revealed = false;
+
+  bool get _isSpoiler {
+    // 合并评论：只要其中任一评论 id 在集合中就视为剧透
+    if (_revealed) return false;
+    for (final c in widget.entry.comments) {
+      if (widget.spoilerIds.contains(c.id)) return true;
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
+    final entry = widget.entry;
+    final compact = widget.compact;
+    final showAvatar = widget.showAvatar;
+    final showUserName = widget.showUserName;
+    final showCommentTime = widget.showCommentTime;
+    final fontScale = widget.fontScale;
+    final relativeTime = widget.relativeTime;
     final horizontalPadding = compact ? 10.0 : 12.0;
     final topPadding = compact ? 8.0 : 12.0;
     final bottomPadding = compact ? 4.0 : 12.0;
@@ -1033,6 +1455,7 @@ class _CommentCard extends StatelessWidget {
               contentSpacing: contentSpacing,
               bodyStyle: bodyStyle,
               showAvatar: showAvatar,
+              spoilerIds: widget.spoilerIds,
             )
           : Column(
               mainAxisSize: MainAxisSize.min,
@@ -1064,10 +1487,112 @@ class _CommentCard extends StatelessWidget {
                   ),
                   SizedBox(height: contentSpacing),
                 ],
-                SelectableText(
-                  entry.content,
-                  minLines: compact ? 1 : null,
-                  style: bodyStyle,
+                Stack(
+                  children: [
+                    SelectableText(
+                      entry.content,
+                      minLines: compact ? 1 : null,
+                      style: bodyStyle,
+                    ),
+                    if (_isSpoiler)
+                      Positioned.fill(
+                        child: GestureDetector(
+                          onTap: () async {
+                            final settings = ZhipuSettings();
+                            if (!settings.spoilerWarn) {
+                              setState(() => _revealed = true);
+                              return;
+                            }
+                            var noRemind = false;
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => StatefulBuilder(
+                                builder: (ctx, setLocal) => AlertDialog(
+                                  title: const Text('剧透警告'),
+                                  content: const Text('真的要打开吗？前方是地狱啊！'),
+                                  actions: [
+                                    SizedBox(
+                                      height: 32,
+                                      child: GestureDetector(
+                                        onTap: () => setLocal(
+                                          () => noRemind = !noRemind,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: Checkbox(
+                                                value: noRemind,
+                                                onChanged: (v) => setLocal(
+                                                  () => noRemind = v ?? false,
+                                                ),
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              '不再提醒',
+                                              style: Theme.of(
+                                                ctx,
+                                              ).textTheme.bodySmall,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, false),
+                                      child: const Text('算了'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('打开'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                            if (ok == true) {
+                              if (noRemind)
+                                await settings.setSpoilerWarn(false);
+                              setState(() => _revealed = true);
+                            }
+                          },
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                              child: Container(
+                                color: cs.surface.withValues(alpha: 0.5),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.visibility_off_outlined,
+                                        size: compact ? 16 : 20,
+                                        color: cs.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '这是一条高度剧透嫌疑的评论',
+                                        style: tt.labelSmall?.copyWith(
+                                          color: cs.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -1088,12 +1613,13 @@ class _CommentLayoutItem {
   const _CommentLayoutItem({required this.entry, required this.width});
 }
 
-class _MergedCommentContent extends StatelessWidget {
+class _MergedCommentContent extends StatefulWidget {
   final ChapterCommentDisplayEntry entry;
   final bool compact;
   final double contentSpacing;
   final TextStyle? bodyStyle;
   final bool showAvatar;
+  final Set<int> spoilerIds;
 
   const _MergedCommentContent({
     required this.entry,
@@ -1101,45 +1627,167 @@ class _MergedCommentContent extends StatelessWidget {
     required this.contentSpacing,
     required this.bodyStyle,
     this.showAvatar = true,
+    this.spoilerIds = const {},
   });
 
   @override
-  Widget build(BuildContext context) {
-    final showCountTag = _shouldShowMergedCountTag(entry.count);
+  State<_MergedCommentContent> createState() => _MergedCommentContentState();
+}
 
-    if (!showAvatar) {
-      if (!showCountTag) {
-        return SelectableText(
-          entry.content,
-          minLines: compact ? 1 : null,
-          style: bodyStyle,
-        );
-      }
-      return Row(
-        crossAxisAlignment: compact
-            ? CrossAxisAlignment.center
-            : CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              entry.content,
-              maxLines: compact ? 3 : null,
-              overflow: compact ? TextOverflow.ellipsis : null,
-              style: bodyStyle,
+class _MergedCommentContentState extends State<_MergedCommentContent> {
+  bool _revealed = false;
+
+  bool get _isSpoiler {
+    if (_revealed) return false;
+    for (final c in widget.entry.comments) {
+      if (widget.spoilerIds.contains(c.id)) return true;
+    }
+    return false;
+  }
+
+  Widget _buildSpoilerOverlay(ColorScheme cs, TextTheme tt) {
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: () async {
+          final settings = ZhipuSettings();
+          if (!settings.spoilerWarn) {
+            setState(() => _revealed = true);
+            return;
+          }
+          var noRemind = false;
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => StatefulBuilder(
+              builder: (ctx, setLocal) => AlertDialog(
+                title: const Text('剧透警告'),
+                content: const Text('真的要打开吗？前方是地狱啊！'),
+                actions: [
+                  SizedBox(
+                    height: 32,
+                    child: GestureDetector(
+                      onTap: () => setLocal(() => noRemind = !noRemind),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: Checkbox(
+                              value: noRemind,
+                              onChanged: (v) =>
+                                  setLocal(() => noRemind = v ?? false),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '不再提醒',
+                            style: Theme.of(ctx).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('算了'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('打开'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Align(
-            alignment: compact ? Alignment.center : Alignment.topCenter,
-            child: Padding(
-              padding: EdgeInsets.only(top: compact ? 0 : 2),
-              child: _MergedCommentCountTag(
-                count: entry.count,
-                compact: compact,
+          );
+          if (ok == true) {
+            if (noRemind) await settings.setSpoilerWarn(false);
+            setState(() => _revealed = true);
+          }
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              color: cs.surface.withValues(alpha: 0.5),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.visibility_off_outlined,
+                      size: widget.compact ? 16 : 20,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '含剧透，点击查看',
+                      style: tt.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final entry = widget.entry;
+    final compact = widget.compact;
+    final showAvatar = widget.showAvatar;
+    final showCountTag = _shouldShowMergedCountTag(entry.count);
+
+    Widget spoilerWrap(Widget child) {
+      if (!_isSpoiler) return child;
+      return Stack(children: [child, _buildSpoilerOverlay(cs, tt)]);
+    }
+
+    if (!showAvatar) {
+      if (!showCountTag) {
+        return spoilerWrap(
+          SelectableText(
+            entry.content,
+            minLines: compact ? 1 : null,
+            style: widget.bodyStyle,
+          ),
+        );
+      }
+      return spoilerWrap(
+        Row(
+          crossAxisAlignment: compact
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                entry.content,
+                maxLines: compact ? 3 : null,
+                overflow: compact ? TextOverflow.ellipsis : null,
+                style: widget.bodyStyle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Align(
+              alignment: compact ? Alignment.center : Alignment.topCenter,
+              child: Padding(
+                padding: EdgeInsets.only(top: compact ? 0 : 2),
+                child: _MergedCommentCountTag(
+                  count: entry.count,
+                  compact: compact,
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
@@ -1161,11 +1809,13 @@ class _MergedCommentContent extends StatelessWidget {
             ],
           ],
         ),
-        SizedBox(height: contentSpacing + (compact ? 1 : 2)),
-        SelectableText(
-          entry.content,
-          minLines: compact ? 1 : null,
-          style: bodyStyle,
+        SizedBox(height: widget.contentSpacing + (compact ? 1 : 2)),
+        spoilerWrap(
+          SelectableText(
+            entry.content,
+            minLines: compact ? 1 : null,
+            style: widget.bodyStyle,
+          ),
         ),
       ],
     );
@@ -1394,6 +2044,156 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
     _commentAutoLoadAll = widget.commentAutoLoadAll;
   }
 
+  Future<void> _editPreset(
+    BuildContext context, {
+    required PromptPreset preset,
+    required bool isBuiltIn,
+  }) async {
+    final settings = ZhipuSettings();
+    final nameCtrl = TextEditingController(text: preset.name);
+    final promptCtrl = TextEditingController(text: preset.prompt);
+    final result = await showDialog<Map<String, String?>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isBuiltIn ? '编辑内置提示词' : '编辑提示词'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: promptCtrl,
+                minLines: 6,
+                maxLines: 14,
+                decoration: const InputDecoration(
+                  labelText: '提示词',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (!isBuiltIn)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, {'action': 'delete'}),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(ctx).colorScheme.error,
+              ),
+              child: const Text('删除'),
+            ),
+          if (isBuiltIn)
+            TextButton(
+              onPressed: () {
+                final builtIn = ZhipuSettings.builtInPresets
+                    .where((p) => p.id == preset.id)
+                    .firstOrNull;
+                if (builtIn != null) {
+                  nameCtrl.text = builtIn.name;
+                  promptCtrl.text = builtIn.prompt;
+                }
+              },
+              child: const Text('还原默认'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, {
+              'name': nameCtrl.text,
+              'prompt': promptCtrl.text,
+            }),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    final action = result['action'];
+    if (action == 'delete') {
+      await settings.removePreset(preset.id);
+    } else {
+      await settings.updatePreset(
+        preset.id,
+        name: result['name']!.trim(),
+        prompt: result['prompt']!.trim(),
+      );
+    }
+  }
+
+  Future<void> _addPreset(BuildContext context) async {
+    final settings = ZhipuSettings();
+    final nameCtrl = TextEditingController();
+    final promptCtrl = TextEditingController();
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加提示词'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: promptCtrl,
+                minLines: 6,
+                maxLines: 14,
+                decoration: const InputDecoration(
+                  labelText: '提示词',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (nameCtrl.text.trim().isEmpty ||
+                  promptCtrl.text.trim().isEmpty) {
+                return;
+              }
+              Navigator.pop(ctx, {
+                'name': nameCtrl.text,
+                'prompt': promptCtrl.text,
+              });
+            },
+            child: const Text('添加'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) {
+      await settings.addPreset(
+        result['name']!.trim(),
+        result['prompt']!.trim(),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -1535,6 +2335,163 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                   );
                   setState(() => _commentFontScale = nextScale);
                   widget.onFontScaleChanged(nextScale);
+                },
+              ),
+              const Divider(height: 24),
+              // AI 总结设置
+              ListenableBuilder(
+                listenable: ZhipuSettings(),
+                builder: (context, _) {
+                  final zhipu = ZhipuSettings();
+                  final hasKey = zhipu.hasApiKey;
+                  final enabled = zhipu.summaryEnabled;
+                  final spoiler = zhipu.spoilerAnalysis;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('AI 总结', style: tt.bodyMedium),
+                      const SizedBox(height: 8),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('启用 AI 总结'),
+                        subtitle: Text(
+                          hasKey
+                              ? (enabled ? '评论顶部显示 AI 总结按钮' : '未启用')
+                              : '请先在「我的 → 智谱清言」中配置 API 密钥',
+                          style: tt.bodySmall?.copyWith(
+                            color: hasKey ? null : cs.error,
+                          ),
+                        ),
+                        value: enabled && hasKey,
+                        onChanged: hasKey
+                            ? (v) => zhipu.setSummaryEnabled(v)
+                            : null,
+                      ),
+                      if (enabled && hasKey) ...[
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('自动 AI 总结'),
+                          subtitle: Text('评论数 ≥ ${zhipu.autoSummaryMin} 条时自动生成'),
+                          value: zhipu.autoSummary,
+                          onChanged: (v) => zhipu.setAutoSummary(v),
+                        ),
+                        if (zhipu.autoSummary)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16),
+                            child: Row(
+                              children: [
+                                Text('最少评论数',
+                                    style: Theme.of(context).textTheme.bodySmall),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  width: 64,
+                                  child: TextFormField(
+                                    initialValue: zhipu.autoSummaryMin.toString(),
+                                    keyboardType: TextInputType.number,
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 6,
+                                      ),
+                                      border: const OutlineInputBorder(),
+                                    ),
+                                    onFieldSubmitted: (v) {
+                                      final n = int.tryParse(v);
+                                      if (n != null && n > 0) {
+                                        zhipu.setAutoSummaryMin(n);
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('剧透分析'),
+                          subtitle: const Text('识别剧透评论并自动遮罩（需要搭配特定提示词）'),
+                          value: spoiler,
+                          onChanged: (v) => zhipu.setSpoilerAnalysis(v),
+                        ),
+                        if (spoiler)
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('打开剧透评论弹出提醒'),
+                            value: zhipu.spoilerWarn,
+                            onChanged: (v) => zhipu.setSpoilerWarn(v),
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '提示词预设',
+                          style: tt.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        for (final p in zhipu.presets)
+                          ListTile(
+                            contentPadding: const EdgeInsets.only(
+                              left: 0,
+                              right: 8,
+                            ),
+                            leading: Radio<String>(
+                              value: p.id,
+                              groupValue: zhipu.activePresetId,
+                              onChanged: (v) {
+                                if (v != null) zhipu.setActivePreset(v);
+                              },
+                            ),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    p.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (p.isBuiltIn && zhipu.isPresetModified(p.id))
+                                  Icon(
+                                    Icons.edit_note,
+                                    size: 16,
+                                    color: cs.primary,
+                                  ),
+                              ],
+                            ),
+                            subtitle: Text(
+                              p.prompt,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.edit_outlined, size: 20),
+                              tooltip: '编辑',
+                              onPressed: () => _editPreset(
+                                context,
+                                preset: p,
+                                isBuiltIn: p.isBuiltIn,
+                              ),
+                            ),
+                            onTap: () => zhipu.setActivePreset(p.id),
+                          ),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            icon: const Icon(Icons.add, size: 18),
+                            label: const Text('添加提示词'),
+                            onPressed: () => _addPreset(context),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
                 },
               ),
               const SizedBox(height: 8),

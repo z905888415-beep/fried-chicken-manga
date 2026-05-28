@@ -15,6 +15,7 @@ import 'browse_history_page.dart';
 import 'download_center_page.dart';
 import 'general_page.dart';
 import 'network_page.dart';
+import 'zhipu_chat_page.dart';
 
 const _appDisclaimerItems = [
   '本应用为非官方第三方客户端，仅基于第三方平台提供的接口或公开可访问资源进行内容展示与访问。',
@@ -397,6 +398,22 @@ class _ProfilePageState extends State<ProfilePage> {
                               context,
                               MaterialPageRoute(
                                 builder: (_) => const NetworkPage(),
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          ListTile(
+                            leading: const _SettingIcon(
+                              icon: Icons.smart_toy_outlined,
+                              color: Color(0xFFE07AD0),
+                            ),
+                            title: const Text('AI配置'),
+                            subtitle: const Text('使用AI总结评论，剧透提醒'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ZhipuChatPage(),
                               ),
                             ),
                           ),
