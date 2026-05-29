@@ -7,17 +7,21 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../api/api_client.dart';
+import '../api/zhipu_api.dart';
 import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
 import '../models/user_manager.dart';
+import '../utils/chapter_summary_cache.dart';
 import '../utils/download_manager.dart';
 import '../utils/image_load_stats.dart';
 import '../utils/toast.dart';
 import '../utils/reading_history.dart';
+import 'chapter_comment_display.dart';
 import 'chapter_comments_sheet.dart';
 
 class ReaderPage extends StatefulWidget {
   final String pathWord;
+  final String? comicName;
   final String? group;
   final String chapterUuid;
   final String chapterName;
@@ -26,6 +30,7 @@ class ReaderPage extends StatefulWidget {
   const ReaderPage({
     super.key,
     required this.pathWord,
+    this.comicName,
     this.group,
     required this.chapterUuid,
     required this.chapterName,
@@ -57,6 +62,8 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   final _api = ApiClient();
+  final _zhipuSettings = ZhipuSettings();
+  final _zhipuApi = ZhipuApi();
   final _downloads = DownloadManager();
   final _user = UserManager();
   final _itemScrollController = ItemScrollController();
@@ -263,18 +270,110 @@ class _ReaderPageState extends State<ReaderPage> {
 
   Future<void> _preloadComments() async {
     if (!_user.commentPreload) return;
-    if (_detail == null || _detail!.isDownloaded) return;
+    final detail = _detail;
+    if (detail == null || detail.isDownloaded) return;
     if (_hasCommentCacheFor(_currentUuid)) return;
 
     final chapterUuid = _currentUuid;
+    final chapterName = detail.name;
 
     try {
       final data = await _api.getChapterComments(chapterUuid, limit: 100);
       if (!mounted || _currentUuid != chapterUuid) return;
       _updateCommentCache(chapterUuid, data.list, data.total, rebuild: true);
+      await _maybeAutoSummaryAfterPreload(
+        chapterUuid: chapterUuid,
+        chapterName: chapterName,
+        comments: data.list,
+      );
     } catch (_) {
       // 预加载失败不影响正常流程
     }
+  }
+
+  Future<void> _maybeAutoSummaryAfterPreload({
+    required String chapterUuid,
+    required String chapterName,
+    required List<ChapterComment> comments,
+  }) async {
+    await _zhipuSettings.load();
+    if (!mounted || _currentUuid != chapterUuid) return;
+    if (!_user.commentPreload ||
+        !_zhipuSettings.hasApiKey ||
+        !_zhipuSettings.summaryEnabled ||
+        !_zhipuSettings.autoSummary ||
+        _zhipuSettings.autoSummaryTiming !=
+            ZhipuAutoSummaryTiming.afterPreload) {
+      return;
+    }
+    if (comments.isEmpty || comments.length < _zhipuSettings.autoSummaryMin) {
+      return;
+    }
+
+    final cached = await ChapterSummaryCache.get(chapterUuid);
+    if (!mounted || _currentUuid != chapterUuid) return;
+    if (cached != null && cached.isNotEmpty) return;
+
+    final input = _buildPreloadedSummaryInput(comments);
+    if (input.snippets.trim().isEmpty) return;
+
+    final comicLine = widget.comicName?.trim().isNotEmpty == true
+        ? '漫画：${widget.comicName!.trim()}\n'
+        : '';
+    final messages = <ZhipuMessage>[
+      ZhipuMessage(role: 'system', content: _zhipuSettings.summaryPrompt),
+      ZhipuMessage(
+        role: 'user',
+        content:
+            '$comicLine章节：$chapterName\n共 ${input.count} 条不同评论（相同内容已合并）。每条行首数字为该评论的 id：\n\n${input.snippets}',
+      ),
+    ];
+
+    final buffer = StringBuffer();
+    try {
+      final stream = _zhipuApi.streamChat(
+        apiKey: _zhipuSettings.apiKey!,
+        model: _zhipuSettings.model,
+        messages: messages,
+      );
+      await for (final delta in stream) {
+        if (!mounted || _currentUuid != chapterUuid) return;
+        buffer.write(delta);
+      }
+      final full = buffer.toString();
+      if (full.isNotEmpty) {
+        await ChapterSummaryCache.set(chapterUuid, full);
+      }
+    } catch (_) {
+      // 后台自动总结失败不打断阅读。
+    }
+  }
+
+  ({String snippets, int count}) _buildPreloadedSummaryInput(
+    List<ChapterComment> comments,
+  ) {
+    const maxChars = 64 * 1024;
+    final buffer = StringBuffer();
+    final entries = groupChapterComments(comments);
+    var truncated = false;
+
+    for (final entry in entries) {
+      final text = entry.content.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (text.isEmpty) continue;
+      final id = entry.primaryComment.id;
+      final line = entry.isMerged
+          ? '$id. [${entry.count}人] $text\n'
+          : '$id. ${entry.primaryComment.userName}: $text\n';
+      if (buffer.length + line.length > maxChars) {
+        truncated = true;
+        break;
+      }
+      buffer.write(line);
+    }
+    if (truncated) {
+      buffer.write('…（已截断，共 ${entries.length} 条不同评论）');
+    }
+    return (snippets: buffer.toString(), count: entries.length);
   }
 
   void _goChapter(String? uuid) {
@@ -986,6 +1085,7 @@ class _ReaderPageState extends State<ReaderPage> {
       backgroundColor: Colors.transparent,
       builder: (_) => ChapterCommentsSheet(
         chapterUuid: detail.uuid,
+        comicName: widget.comicName ?? widget.pathWord,
         chapterName: detail.name,
         initialComments: initialComments,
         initialTotal: initialTotal,

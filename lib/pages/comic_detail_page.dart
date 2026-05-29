@@ -605,6 +605,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       MaterialPageRoute(
         builder: (_) => ReaderPage(
           pathWord: widget.pathWord,
+          comicName: _comic?.name,
           group: _selectedGroup,
           chapterUuid: chapter.uuid,
           chapterName: chapter.name,
@@ -665,6 +666,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               MaterialPageRoute(
                                 builder: (_) => ReaderPage(
                                   pathWord: widget.pathWord,
+                                  comicName: _comic?.name,
                                   group: _selectedGroup,
                                   chapterUuid: _nextBrowseChapter!.uuid,
                                   chapterName: _nextBrowseChapter!.name,
@@ -686,6 +688,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                             MaterialPageRoute(
                               builder: (_) => ReaderPage(
                                 pathWord: widget.pathWord,
+                                comicName: _comic?.name,
                                 group: _selectedGroup,
                                 chapterUuid: _lastBrowseId!,
                                 chapterName: _lastBrowseName ?? '',
@@ -1191,7 +1194,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               borderRadius: BorderRadius.circular(10),
                             );
                             return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                              ),
                               child: isSelected
                                   ? FilledButton(
                                       onPressed: () {},
@@ -1217,7 +1222,8 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                                         maximumSize: const Size(38, 38),
                                         fixedSize: const Size(38, 38),
                                         padding: EdgeInsets.zero,
-                                        backgroundColor: cs.surfaceContainerHigh,
+                                        backgroundColor:
+                                            cs.surfaceContainerHigh,
                                         foregroundColor: cs.onSurfaceVariant,
                                         shape: pageButtonShape,
                                         tapTargetSize:

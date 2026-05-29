@@ -548,6 +548,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
       backgroundColor: Colors.transparent,
       builder: (_) => ChapterCommentsSheet(
         chapterUuid: detail.uuid,
+        comicName: _downloads.getLocalComicInfo(widget.pathWord)?.comic.name,
         chapterName: detail.name,
         initialComments: detail.comments,
         initialTotal: detail.commentTotal,
@@ -773,6 +774,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                           MaterialPageRoute(
                             builder: (_) => ReaderPage(
                               pathWord: widget.pathWord,
+                              comicName: comic.name,
                               chapterUuid: chapter.chapterUuid,
                               chapterName: chapter.chapterName,
                             ),
@@ -815,6 +817,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                         MaterialPageRoute(
                           builder: (_) => ReaderPage(
                             pathWord: widget.pathWord,
+                            comicName: comic.name,
                             chapterUuid: nextChapter.chapterUuid,
                             chapterName: nextChapter.chapterName,
                           ),
@@ -833,6 +836,7 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
                       MaterialPageRoute(
                         builder: (_) => ReaderPage(
                           pathWord: widget.pathWord,
+                          comicName: comic.name,
                           chapterUuid: _lastBrowseId!,
                           chapterName: _lastBrowseName ?? '',
                           initialPage: _lastBrowsePage,

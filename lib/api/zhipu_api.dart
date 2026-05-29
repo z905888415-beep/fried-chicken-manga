@@ -41,6 +41,8 @@ class PromptPreset {
   );
 }
 
+enum ZhipuAutoSummaryTiming { onOpen, afterPreload }
+
 /// 智谱清言（BigModel）API 客户端与本地设置。
 ///
 /// 密钥与模型选择仅保存在本地 SharedPreferences，不上传到任何位置。
@@ -57,6 +59,7 @@ class ZhipuSettings extends ChangeNotifier {
   static const _keyActivePreset = 'zhipu_active_preset';
   static const _keyAutoSummary = 'zhipu_auto_summary';
   static const _keyAutoSummaryMin = 'zhipu_auto_summary_min';
+  static const _keyAutoSummaryTiming = 'zhipu_auto_summary_timing';
   static const _keySpoilerWarn = 'zhipu_spoiler_warn';
   static const _keyCustomModels = 'zhipu_custom_models';
 
@@ -132,6 +135,7 @@ class ZhipuSettings extends ChangeNotifier {
   bool _spoilerAnalysis = false;
   bool _autoSummary = false;
   int _autoSummaryMin = 30;
+  ZhipuAutoSummaryTiming _autoSummaryTiming = ZhipuAutoSummaryTiming.onOpen;
   bool _spoilerWarn = true;
   List<PromptPreset> _presets = List.from(builtInPresets);
   String _activePresetId = presetBasicId;
@@ -145,6 +149,7 @@ class ZhipuSettings extends ChangeNotifier {
   bool get spoilerAnalysis => _spoilerAnalysis;
   bool get autoSummary => _autoSummary;
   int get autoSummaryMin => _autoSummaryMin;
+  ZhipuAutoSummaryTiming get autoSummaryTiming => _autoSummaryTiming;
   bool get spoilerWarn => _spoilerWarn;
   List<PromptPreset> get presets => List.unmodifiable(_presets);
   String get activePresetId => _activePresetId;
@@ -162,6 +167,9 @@ class ZhipuSettings extends ChangeNotifier {
     _spoilerAnalysis = sp.getBool(_keySpoilerAnalysis) ?? false;
     _autoSummary = sp.getBool(_keyAutoSummary) ?? false;
     _autoSummaryMin = sp.getInt(_keyAutoSummaryMin) ?? 30;
+    _autoSummaryTiming = _parseAutoSummaryTiming(
+      sp.getString(_keyAutoSummaryTiming),
+    );
     _spoilerWarn = sp.getBool(_keySpoilerWarn) ?? true;
     _activePresetId = sp.getString(_keyActivePreset) ?? presetBasicId;
     _customModels = sp.getStringList(_keyCustomModels) ?? [];
@@ -174,6 +182,13 @@ class ZhipuSettings extends ChangeNotifier {
     _syncPrompt();
     _loaded = true;
     notifyListeners();
+  }
+
+  ZhipuAutoSummaryTiming _parseAutoSummaryTiming(String? value) {
+    for (final timing in ZhipuAutoSummaryTiming.values) {
+      if (timing.name == value) return timing;
+    }
+    return ZhipuAutoSummaryTiming.onOpen;
   }
 
   Future<void> _loadPresets(SharedPreferences sp) async {
@@ -254,6 +269,13 @@ class ZhipuSettings extends ChangeNotifier {
     _autoSummaryMin = min < 1 ? 1 : min;
     final sp = await SharedPreferences.getInstance();
     await sp.setInt(_keyAutoSummaryMin, _autoSummaryMin);
+    notifyListeners();
+  }
+
+  Future<void> setAutoSummaryTiming(ZhipuAutoSummaryTiming timing) async {
+    _autoSummaryTiming = timing;
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(_keyAutoSummaryTiming, timing.name);
     notifyListeners();
   }
 
