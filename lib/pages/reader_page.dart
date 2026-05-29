@@ -1657,23 +1657,43 @@ class _ReaderImageViewerState extends State<_ReaderImageViewer> {
   }
 
   Widget _buildImage() {
+    Widget image;
+
     if (widget.isDownloaded) {
-      return Image.file(
+      image = Image.file(
         File(widget.imageSource),
         fit: BoxFit.contain,
         errorBuilder: (_, _, _) => const _ReaderImageViewerError(),
       );
+    } else {
+      image = CachedNetworkImage(
+        imageUrl: widget.imageSource,
+        cacheManager: widget.cacheManager,
+        fit: BoxFit.contain,
+        placeholder: (_, _) => const Center(
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+        ),
+        errorWidget: (_, _, _) => const _ReaderImageViewerError(),
+      );
     }
 
-    return CachedNetworkImage(
-      imageUrl: widget.imageSource,
-      cacheManager: widget.cacheManager,
-      fit: BoxFit.contain,
-      placeholder: (_, _) => const Center(
-        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-      ),
-      errorWidget: (_, _, _) => const _ReaderImageViewerError(),
-    );
+    if (Theme.of(context).brightness == Brightness.dark &&
+        _user.readerDimming > 0) {
+      image = Stack(
+        children: [
+          image,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: _user.readerDimming),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return image;
   }
 
   Widget _buildViewport() {
