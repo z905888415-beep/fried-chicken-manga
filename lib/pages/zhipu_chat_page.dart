@@ -5,6 +5,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/zhipu_api.dart';
+import '../utils/network_error.dart';
 import '../utils/toast.dart';
 
 class ZhipuChatPage extends StatefulWidget {
@@ -235,20 +236,7 @@ class _ZhipuChatPageState extends State<ZhipuChatPage> {
   }
 
   String _extractError(Object e) {
-    if (e is DioException) {
-      if (e.response?.statusCode == 429) {
-        return '请求过于频繁，已被限速，请稍后再试';
-      }
-      final data = e.response?.data;
-      if (data is Map) {
-        final err = data['error'];
-        if (err is Map && err['message'] is String) return err['message'];
-        if (data['message'] is String) return data['message'];
-      }
-      if (data is String && data.isNotEmpty) return data;
-      return e.message ?? e.toString();
-    }
-    return e.toString();
+    return NetworkError.message(e);
   }
 
   void _stop() {
@@ -431,13 +419,10 @@ class _ZhipuChatPageState extends State<ZhipuChatPage> {
                     child: CircularProgressIndicator(strokeWidth: 2, color: fg),
                   )
                 : isUser
-                ? SelectableText(
-                    msg.content,
-                    style: TextStyle(color: fg, fontSize: 15),
-                  )
+                ? Text(msg.content, style: TextStyle(color: fg, fontSize: 15))
                 : MarkdownBody(
                     data: msg.content,
-                    selectable: true,
+                    selectable: false,
                     onTapLink: (text, href, title) async {
                       if (href == null) return;
                       final uri = Uri.tryParse(href);
@@ -645,7 +630,8 @@ class _ModelManagerSheetState extends State<_ModelManagerSheet> {
                   selected: isSelected,
                   onTap: () async {
                     await widget.settings.setModel(m);
-                    if (mounted) Navigator.pop(context);
+                    if (!context.mounted) return;
+                    Navigator.pop(context);
                   },
                 );
               },

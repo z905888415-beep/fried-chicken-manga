@@ -5,6 +5,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/network_error.dart';
+
 /// 提示词预设条目。
 class PromptPreset {
   final String id;
@@ -413,7 +415,7 @@ class ZhipuApi {
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(minutes: 5),
     ),
-  );
+  )..interceptors.add(NetworkError.rateLimitInterceptor());
 
   /// 以流式 SSE 方式调用，逐块吐出文本增量。
   Stream<String> streamChat({

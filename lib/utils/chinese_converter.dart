@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import 'network_error.dart';
+
 class ChineseConverter {
   static final Dio _dio = Dio(
     BaseOptions(
@@ -9,7 +11,7 @@ class ChineseConverter {
       sendTimeout: const Duration(seconds: 8),
       responseType: ResponseType.json,
     ),
-  );
+  )..interceptors.add(NetworkError.rateLimitInterceptor());
 
   static final Map<String, String> _cache = {};
 

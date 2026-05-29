@@ -14,6 +14,7 @@ import '../models/user_manager.dart';
 import '../utils/chapter_summary_cache.dart';
 import '../utils/download_manager.dart';
 import '../utils/image_load_stats.dart';
+import '../utils/network_error.dart';
 import '../utils/toast.dart';
 import '../utils/reading_history.dart';
 import 'chapter_comment_display.dart';
@@ -313,6 +314,7 @@ class _ReaderPageState extends State<ReaderPage> {
     final cached = await ChapterSummaryCache.get(chapterUuid);
     if (!mounted || _currentUuid != chapterUuid) return;
     if (cached != null && cached.isNotEmpty) return;
+    if (ChapterSummaryCache.isGenerating(chapterUuid)) return;
 
     final input = _buildPreloadedSummaryInput(comments);
     if (input.snippets.trim().isEmpty) return;
@@ -330,6 +332,7 @@ class _ReaderPageState extends State<ReaderPage> {
     ];
 
     final buffer = StringBuffer();
+    ChapterSummaryCache.startProgress(chapterUuid);
     try {
       final stream = _zhipuApi.streamChat(
         apiKey: _zhipuSettings.apiKey!,
@@ -337,14 +340,24 @@ class _ReaderPageState extends State<ReaderPage> {
         messages: messages,
       );
       await for (final delta in stream) {
-        if (!mounted || _currentUuid != chapterUuid) return;
+        if (!mounted || _currentUuid != chapterUuid) {
+          ChapterSummaryCache.clearProgress(chapterUuid);
+          return;
+        }
         buffer.write(delta);
+        ChapterSummaryCache.updateProgress(chapterUuid, buffer.toString());
       }
       final full = buffer.toString();
       if (full.isNotEmpty) {
         await ChapterSummaryCache.set(chapterUuid, full);
+      } else {
+        ChapterSummaryCache.clearProgress(chapterUuid);
       }
-    } catch (_) {
+    } catch (e) {
+      ChapterSummaryCache.failProgress(
+        chapterUuid,
+        '后台自动总结失败：${NetworkError.message(e)}',
+      );
       // 后台自动总结失败不打断阅读。
     }
   }

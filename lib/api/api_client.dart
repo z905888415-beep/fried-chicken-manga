@@ -11,6 +11,7 @@ import '../models/chapter_comment.dart';
 import '../models/comic_comment.dart';
 import '../models/user_manager.dart';
 import '../utils/data_cache.dart';
+import '../utils/network_error.dart';
 
 class ApiClient {
   static const _hostSg = 'mapi.hotmangasg.com';
@@ -42,7 +43,7 @@ class ApiClient {
   Completer<bool>? _autoLoginCompleter;
 
   ApiClient._() {
-    _dio = Dio();
+    _dio = Dio()..interceptors.add(NetworkError.rateLimitInterceptor());
     _commentDio = Dio(
       BaseOptions(
         headers: {
@@ -66,7 +67,7 @@ class ApiClient {
           'Connection': 'keep-alive',
         },
       ),
-    );
+    )..interceptors.add(NetworkError.rateLimitInterceptor());
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
@@ -304,7 +305,7 @@ class ApiClient {
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0',
         },
       ),
-    );
+    )..interceptors.add(NetworkError.rateLimitInterceptor());
 
     final resp = await dio.post(
       'https://$_hostCopy/api/kb/web/login',
@@ -418,7 +419,7 @@ class ApiClient {
           'Cookie': _buildRegisterCookie(),
         },
       ),
-    );
+    )..interceptors.add(NetworkError.rateLimitInterceptor());
 
     final resp = await dio.post(
       'https://$_hostWeb/api/v2/register',

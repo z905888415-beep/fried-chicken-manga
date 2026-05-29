@@ -11,6 +11,7 @@ import '../api/zhipu_api.dart';
 import '../models/chapter_comment.dart';
 import '../models/user_manager.dart';
 import '../utils/chapter_summary_cache.dart';
+import '../utils/network_error.dart';
 import '../utils/toast.dart';
 import 'chapter_comment_display.dart';
 
@@ -77,6 +78,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   CancelToken? _summaryCancelToken;
   Set<int> _spoilerIds = const {};
   List<ChapterCommentDisplayEntry> _lastSnippetEntries = const [];
+  late final ChapterSummaryProgress _summaryProgress;
+  bool _usingSharedSummaryProgress = false;
 
   @override
   void initState() {
@@ -88,6 +91,9 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     _commentFontScale = _user.commentFontScale;
     _scrollController.addListener(_handleScrollDirection);
     _zhipuSettings.addListener(_onZhipuChanged);
+    _summaryProgress = ChapterSummaryCache.progressOf(widget.chapterUuid);
+    _summaryProgress.addListener(_onSummaryProgressChanged);
+    _applySummaryProgress(rebuild: false);
     _zhipuSettings.load().then((_) {
       _loadCachedSummary().then((_) => _maybeAutoSummary());
     });
@@ -110,6 +116,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   @override
   void dispose() {
     _summaryCancelToken?.cancel();
+    _summaryProgress.removeListener(_onSummaryProgressChanged);
     _zhipuSettings.removeListener(_onZhipuChanged);
     _scrollController.dispose();
     super.dispose();
@@ -117,6 +124,48 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
   void _onZhipuChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onSummaryProgressChanged() {
+    if (!mounted) return;
+    _applySummaryProgress();
+  }
+
+  void _applySummaryProgress({bool rebuild = true}) {
+    void apply() {
+      if (!_summaryProgress.hasState) {
+        if (_usingSharedSummaryProgress) {
+          _aiSummary = '';
+          _summarizing = false;
+          _summaryError = null;
+          _spoilerIds = const {};
+          _usingSharedSummaryProgress = false;
+        }
+        return;
+      }
+
+      _usingSharedSummaryProgress = true;
+      _summarizing = _summaryProgress.isGenerating;
+      if (_summaryProgress.content.isNotEmpty) {
+        _aiSummary = _summaryProgress.content;
+        _spoilerIds = _parseSpoilerIds(_summaryProgress.content);
+      }
+      if (_summaryProgress.error != null) {
+        _summaryError = _summaryProgress.error;
+      } else if (_summaryProgress.isGenerating ||
+          _summaryProgress.content.isNotEmpty) {
+        _summaryError = null;
+      }
+      if (_summaryProgress.isGenerating) {
+        _summaryExpanded = true;
+      }
+    }
+
+    if (rebuild) {
+      setState(apply);
+    } else {
+      apply();
+    }
   }
 
   void _maybeAutoSummary() {
@@ -415,19 +464,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   String _extractSummaryError(Object e) {
-    if (e is DioException) {
-      if (e.response?.statusCode == 429) {
-        return '请求过于频繁，已被限速，请稍后再试';
-      }
-      final data = e.response?.data;
-      if (data is Map) {
-        final err = data['error'];
-        if (err is Map && err['message'] is String) return err['message'];
-        if (data['message'] is String) return data['message'];
-      }
-      return e.message ?? e.toString();
-    }
-    return e.toString();
+    return NetworkError.message(e);
   }
 
   void _stopSummarize() {
@@ -479,52 +516,54 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
           child: SizedBox(
             width: sheetSize.width,
             height: sheetSize.height * _sheetMaxHeightFactor,
-            child: _CommentSettingsPanel(
-              useCompactLayout: _useCompactLayout,
-              showUserAvatar: _showUserAvatar,
-              showUserName: _showUserName,
-              showCommentTime: _showCommentTime,
-              commentFontScale: _commentFontScale,
-              commentPreload: _user.commentPreload,
-              commentAutoLoadAll: _user.commentAutoLoadAll,
-              onLayoutChanged: (compact) {
-                if (!mounted) return;
-                setState(() => _useCompactLayout = compact);
-                _user.setCommentCompactLayout(compact);
-              },
-              onShowAvatarChanged: (enabled) {
-                if (!mounted) return;
-                setState(() => _showUserAvatar = enabled);
-                _user.setCommentShowAvatar(enabled);
-              },
-              onShowUserNameChanged: (enabled) {
-                if (!mounted) return;
-                setState(() => _showUserName = enabled);
-                _user.setCommentShowUserName(enabled);
-              },
-              onShowCommentTimeChanged: (enabled) {
-                if (!mounted) return;
-                setState(() => _showCommentTime = enabled);
-                _user.setCommentShowTime(enabled);
-              },
-              onFontScaleChanged: (scale) {
-                if (!mounted) return;
-                setState(() => _commentFontScale = scale);
-                _user.setCommentFontScale(scale);
-              },
-              onPreloadChanged: (enabled) {
-                _user.setCommentPreload(enabled);
-                if (!enabled &&
-                    _zhipuSettings.autoSummaryTiming ==
-                        ZhipuAutoSummaryTiming.afterPreload) {
-                  _zhipuSettings.setAutoSummaryTiming(
-                    ZhipuAutoSummaryTiming.onOpen,
-                  );
-                }
-              },
-              onAutoLoadAllChanged: (enabled) {
-                _user.setCommentAutoLoadAll(enabled);
-              },
+            child: ExcludeSemantics(
+              child: _CommentSettingsPanel(
+                useCompactLayout: _useCompactLayout,
+                showUserAvatar: _showUserAvatar,
+                showUserName: _showUserName,
+                showCommentTime: _showCommentTime,
+                commentFontScale: _commentFontScale,
+                commentPreload: _user.commentPreload,
+                commentAutoLoadAll: _user.commentAutoLoadAll,
+                onLayoutChanged: (compact) {
+                  if (!mounted) return;
+                  setState(() => _useCompactLayout = compact);
+                  _user.setCommentCompactLayout(compact);
+                },
+                onShowAvatarChanged: (enabled) {
+                  if (!mounted) return;
+                  setState(() => _showUserAvatar = enabled);
+                  _user.setCommentShowAvatar(enabled);
+                },
+                onShowUserNameChanged: (enabled) {
+                  if (!mounted) return;
+                  setState(() => _showUserName = enabled);
+                  _user.setCommentShowUserName(enabled);
+                },
+                onShowCommentTimeChanged: (enabled) {
+                  if (!mounted) return;
+                  setState(() => _showCommentTime = enabled);
+                  _user.setCommentShowTime(enabled);
+                },
+                onFontScaleChanged: (scale) {
+                  if (!mounted) return;
+                  setState(() => _commentFontScale = scale);
+                  _user.setCommentFontScale(scale);
+                },
+                onPreloadChanged: (enabled) {
+                  _user.setCommentPreload(enabled);
+                  if (!enabled &&
+                      _zhipuSettings.autoSummaryTiming ==
+                          ZhipuAutoSummaryTiming.afterPreload) {
+                    _zhipuSettings.setAutoSummaryTiming(
+                      ZhipuAutoSummaryTiming.onOpen,
+                    );
+                  }
+                },
+                onAutoLoadAllChanged: (enabled) {
+                  _user.setCommentAutoLoadAll(enabled);
+                },
+              ),
             ),
           ),
         );
@@ -658,7 +697,11 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                       ),
                     ),
                     Divider(height: 1, color: cs.outlineVariant),
-                    Expanded(child: _buildBody(context, cs, tt)),
+                    Expanded(
+                      child: ExcludeSemantics(
+                        child: _buildBody(context, cs, tt),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -906,31 +949,33 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               }
 
               final row = rows[dataIndex];
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (var i = 0; i < row.items.length; i++) ...[
-                    SizedBox(
-                      width: row.items[i].width,
-                      child: _CommentCard(
-                        entry: row.items[i].entry,
-                        relativeTime: _formatRelativeTime(
-                          row.items[i].entry.createAt,
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < row.items.length; i++) ...[
+                      SizedBox(
+                        width: row.items[i].width,
+                        child: _CommentCard(
+                          entry: row.items[i].entry,
+                          relativeTime: _formatRelativeTime(
+                            row.items[i].entry.createAt,
+                          ),
+                          compact: true,
+                          showAvatar: _showUserAvatar,
+                          showUserName: _showUserName,
+                          showCommentTime: _showCommentTime,
+                          fontScale: _commentFontScale,
+                          spoilerIds: _zhipuSettings.spoilerAnalysis
+                              ? _spoilerIds
+                              : const {},
                         ),
-                        compact: true,
-                        showAvatar: _showUserAvatar,
-                        showUserName: _showUserName,
-                        showCommentTime: _showCommentTime,
-                        fontScale: _commentFontScale,
-                        spoilerIds: _zhipuSettings.spoilerAnalysis
-                            ? _spoilerIds
-                            : const {},
                       ),
-                    ),
-                    if (i != row.items.length - 1)
-                      const SizedBox(width: _commentRowSpacing),
+                      if (i != row.items.length - 1)
+                        const SizedBox(width: _commentRowSpacing),
+                    ],
                   ],
-                ],
+                ),
               );
             },
           ),
@@ -1121,7 +1166,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                 padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
                 child: MarkdownBody(
                   data: _stripSpoilersMarker(_aiSummary),
-                  selectable: true,
+                  selectable: false,
                   styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
                       .copyWith(
                         p: tt.bodyMedium?.copyWith(height: 1.5),
@@ -1197,6 +1242,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     final textTheme = Theme.of(context).textTheme;
     final textScaler = MediaQuery.textScalerOf(context);
     const minWidth = 108.0;
+    const compactCardHorizontalPadding = 20.0;
+    const compactTextWidthBuffer = 10.0;
     final preferredMaxWidth = maxWidth * 0.8;
 
     final estimatedWidths = entries.map((entry) {
@@ -1229,7 +1276,9 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         contentWidth = mergedInlineWidth;
       }
 
-      final cardWidth = (contentWidth + 24).clamp(minWidth, preferredMaxWidth);
+      final cardWidth =
+          (contentWidth + compactCardHorizontalPadding + compactTextWidthBuffer)
+              .clamp(minWidth, preferredMaxWidth);
       return _CommentLayoutItem(entry: entry, width: cardWidth);
     }).toList();
 
@@ -1249,10 +1298,14 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       );
       final remainder = maxWidth - spacingWidth - cardsWidth;
       if (remainder > 0) {
-        final last = currentItems.removeLast();
-        currentItems.add(
-          _CommentLayoutItem(entry: last.entry, width: last.width + remainder),
-        );
+        final extraWidth = remainder / currentItems.length;
+        currentItems = [
+          for (final item in currentItems)
+            _CommentLayoutItem(
+              entry: item.entry,
+              width: item.width + extraWidth,
+            ),
+        ];
       }
       rows.add(_CommentRow(items: List<_CommentLayoutItem>.from(currentItems)));
       currentItems = <_CommentLayoutItem>[];
@@ -1905,29 +1958,24 @@ class _MergedCommentContentState extends State<_MergedCommentContent> {
         );
       }
       return spoilerWrap(
-        Row(
-          crossAxisAlignment: compact
-              ? CrossAxisAlignment.center
-              : CrossAxisAlignment.start,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                entry.content,
-                maxLines: compact ? 3 : null,
-                overflow: compact ? TextOverflow.ellipsis : null,
-                style: widget.bodyStyle,
-              ),
-            ),
-            const SizedBox(width: 8),
             Align(
-              alignment: compact ? Alignment.center : Alignment.topCenter,
+              alignment: Alignment.topRight,
               child: Padding(
-                padding: EdgeInsets.only(top: compact ? 0 : 2),
+                padding: EdgeInsets.only(bottom: compact ? 4 : 6),
                 child: _MergedCommentCountTag(
                   count: entry.count,
                   compact: compact,
                 ),
               ),
+            ),
+            SelectableText(
+              entry.content,
+              minLines: compact ? 1 : null,
+              style: widget.bodyStyle,
             ),
           ],
         ),
@@ -1989,36 +2037,39 @@ class _MergedCommentCountTag extends StatelessWidget {
     return Container(
       constraints: BoxConstraints(minWidth: minWidth, minHeight: tagHeight),
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding / 2),
-      alignment: Alignment.center,
       decoration: decoration,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (isHot) ...[
-            Icon(
-              Icons.local_fire_department_rounded,
-              size: iconSize,
-              color: colors.foreground,
+      child: Center(
+        widthFactor: 1,
+        heightFactor: 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (isHot) ...[
+              Icon(
+                Icons.local_fire_department_rounded,
+                size: iconSize,
+                color: colors.foreground,
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              textHeightBehavior: const TextHeightBehavior(
+                applyHeightToFirstAscent: false,
+                applyHeightToLastDescent: false,
+              ),
+              strutStyle: const StrutStyle(height: 1, forceStrutHeight: true),
+              style: tt.labelSmall?.copyWith(
+                color: colors.foreground,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0,
+                height: 1,
+              ),
             ),
-            const SizedBox(width: 4),
           ],
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            textHeightBehavior: const TextHeightBehavior(
-              applyHeightToFirstAscent: false,
-              applyHeightToLastDescent: false,
-            ),
-            strutStyle: const StrutStyle(height: 1, forceStrutHeight: true),
-            style: tt.labelSmall?.copyWith(
-              color: colors.foreground,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0,
-              height: 1,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2768,10 +2819,21 @@ BoxDecoration _buildCommentCardDecoration(
   required bool highlightAsHot,
 }) {
   final borderRadius = BorderRadius.circular(_commentCardCornerRadius);
+  final shadows = _buildCommentCardShadows(
+    brightness,
+    highlightAsHot: highlightAsHot,
+  );
   if (!highlightAsHot) {
     return BoxDecoration(
       color: colorScheme.surfaceContainerLow,
       borderRadius: borderRadius,
+      border: Border.all(
+        color: colorScheme.outlineVariant.withValues(
+          alpha: brightness == Brightness.dark ? 0.22 : 0.45,
+        ),
+        width: 0.6,
+      ),
+      boxShadow: shadows,
     );
   }
 
@@ -2784,7 +2846,38 @@ BoxDecoration _buildCommentCardDecoration(
         alpha: brightness == Brightness.dark ? 0.48 : 0.56,
       ),
     ),
+    boxShadow: shadows,
   );
+}
+
+List<BoxShadow> _buildCommentCardShadows(
+  Brightness brightness, {
+  required bool highlightAsHot,
+}) {
+  final baseShadowAlpha = brightness == Brightness.dark ? 0.30 : 0.14;
+  final shadows = <BoxShadow>[
+    BoxShadow(
+      color: Colors.black.withValues(alpha: baseShadowAlpha),
+      blurRadius: brightness == Brightness.dark ? 12 : 14,
+      spreadRadius: brightness == Brightness.dark ? 0 : -1,
+      offset: const Offset(0, 4),
+    ),
+  ];
+
+  if (highlightAsHot) {
+    shadows.add(
+      BoxShadow(
+        color: _hotCommentAccentColor.withValues(
+          alpha: brightness == Brightness.dark ? 0.20 : 0.16,
+        ),
+        blurRadius: 16,
+        spreadRadius: -2,
+        offset: const Offset(0, 4),
+      ),
+    );
+  }
+
+  return shadows;
 }
 
 TextStyle? _buildCommentUserStyle(

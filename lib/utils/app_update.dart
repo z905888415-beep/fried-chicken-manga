@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/user_manager.dart';
+import 'network_error.dart';
 import 'toast.dart';
 
 enum AssetPlatform {
@@ -81,7 +82,7 @@ class AppUpdateService {
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 15),
     ),
-  );
+  )..interceptors.add(NetworkError.rateLimitInterceptor());
 
   static Future<AppUpdateInfo?> checkForUpdate({
     bool respectSkippedVersion = true,

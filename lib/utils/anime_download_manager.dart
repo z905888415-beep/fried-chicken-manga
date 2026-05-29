@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
+import 'network_error.dart';
 
 enum DownloadTaskStatus { pending, downloading, paused, failed }
 
@@ -447,7 +448,7 @@ class AnimeDownloadManager extends ChangeNotifier {
           sendTimeout: _timeout,
           receiveTimeout: _timeout,
         ),
-      );
+      )..interceptors.add(NetworkError.rateLimitInterceptor());
       final response = await dio.get(url);
       dio.close(force: true);
       final text = response.data?.toString() ?? '';
@@ -467,7 +468,7 @@ class AnimeDownloadManager extends ChangeNotifier {
         sendTimeout: _timeout,
         receiveTimeout: _timeout,
       ),
-    );
+    )..interceptors.add(NetworkError.rateLimitInterceptor());
 
     final segmentDio = Dio(
       BaseOptions(
@@ -475,7 +476,7 @@ class AnimeDownloadManager extends ChangeNotifier {
         sendTimeout: _timeout,
         receiveTimeout: const Duration(minutes: 5),
       ),
-    );
+    )..interceptors.add(NetworkError.rateLimitInterceptor());
 
     try {
       final resolved = await _resolveMediaPlaylist(

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../utils/data_cache.dart';
+import '../utils/network_error.dart';
 
 class _CacheEntry {
   final dynamic data;
@@ -304,6 +305,7 @@ class DandanplayApi {
 
   DandanplayApi._() {
     _dio = Dio(BaseOptions(baseUrl: _baseUrl));
+    _dio.interceptors.add(NetworkError.rateLimitInterceptor());
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {

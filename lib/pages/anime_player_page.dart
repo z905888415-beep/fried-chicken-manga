@@ -17,6 +17,7 @@ import '../models/user_manager.dart';
 import '../utils/anime_download_manager.dart';
 import '../utils/anime_playback_history.dart';
 import '../utils/chinese_converter.dart';
+import '../utils/network_error.dart';
 import 'profile_page.dart';
 
 part 'anime_player/media_open_diagnosis.dart';
@@ -383,7 +384,7 @@ class _AnimePlayerPageState extends State<AnimePlayerPage>
         receiveTimeout: const Duration(seconds: 8),
         validateStatus: (status) => status != null && status < 600,
       ),
-    );
+    )..interceptors.add(NetworkError.rateLimitInterceptor());
 
     try {
       final manifestResponse = await dio.getUri<String>(uri);
