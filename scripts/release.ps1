@@ -7,8 +7,15 @@ try {
     $currentTag = Get-CurrentTag
     Write-Host "当前最新tag: $currentTag" -ForegroundColor Yellow
 
-    # 解析版本号
+    # 解析版本号（支持预发布后缀，如 v1.0.2-beta）
     $version = $currentTag.Substring(1)
+    $dashIdx = $version.IndexOf('-')
+    if ($dashIdx -ge 0) {
+        $preRelease = $version.Substring($dashIdx)
+        $version = $version.Substring(0, $dashIdx)
+    } else {
+        $preRelease = ''
+    }
     $parts = $version.Split('.') | ForEach-Object { [int]$_ }
     $major, $minor, $patch = $parts
 
@@ -20,8 +27,16 @@ try {
     Write-Host "  1) Patch: $nextPatch"
     Write-Host "  2) Minor: $nextMinor"
     Write-Host "  3) Major: $nextMajor"
-    Write-Host "  4) 手动输入"
-    $choice = Read-Host "请输入选项 (1-4)"
+    if ($preRelease) {
+        Write-Host "  4) 预发布: $nextPatch$preRelease"
+        Write-Host "  5) 手动输入"
+        $choice = Read-Host "请输入选项 (1-5)"
+    } else {
+        Write-Host "  4) 手动输入"
+        $choice = Read-Host "请输入选项 (1-4)"
+    }
+
+    $semverPattern = '^v\d+\.\d+\.\d+(-[\w.]+)?$'
 
     switch ($choice) {
         '1' { $newTag = $nextPatch }
@@ -29,8 +44,19 @@ try {
         '2' { $newTag = $nextMinor }
         '3' { $newTag = $nextMajor }
         '4' {
-            $newTag = Read-Host "请输入新版本号 (格式: v1.2.3)"
-            if ($newTag -notmatch '^v\d+\.\d+\.\d+$') {
+            if ($preRelease) {
+                $newTag = "$nextPatch$preRelease"
+            } else {
+                $newTag = Read-Host "请输入新版本号 (格式: v1.2.3 或 v1.2.3-beta)"
+                if ($newTag -notmatch $semverPattern) {
+                    Write-Host "错误: 版本号格式不正确" -ForegroundColor Red
+                    exit 1
+                }
+            }
+        }
+        '5' {
+            $newTag = Read-Host "请输入新版本号 (格式: v1.2.3 或 v1.2.3-beta)"
+            if ($newTag -notmatch $semverPattern) {
                 Write-Host "错误: 版本号格式不正确" -ForegroundColor Red
                 exit 1
             }
