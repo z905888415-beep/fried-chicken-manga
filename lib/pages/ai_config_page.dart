@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/ai_api.dart';
@@ -22,6 +25,60 @@ class _AiModelChoice {
   String get value => '$providerId::$model';
 }
 
+class _AiChatSession {
+  final String id;
+  final String title;
+  final DateTime updatedAt;
+  final List<AiMessage> messages;
+
+  const _AiChatSession({
+    required this.id,
+    required this.title,
+    required this.updatedAt,
+    required this.messages,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'updatedAt': updatedAt.toIso8601String(),
+    'messages': messages.map((message) => message.toJson()).toList(),
+  };
+
+  factory _AiChatSession.fromJson(Map<String, dynamic> json) {
+    final messages = (json['messages'] as List? ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) => AiMessage(
+            role: item['role'] as String? ?? 'user',
+            content: item['content'] as String? ?? '',
+          ),
+        )
+        .toList();
+    return _AiChatSession(
+      id: json['id'] as String? ?? _newSessionId(),
+      title: json['title'] as String? ?? '新对话',
+      updatedAt:
+          DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.now(),
+      messages: messages,
+    );
+  }
+
+  _AiChatSession copyWith({
+    String? title,
+    DateTime? updatedAt,
+    List<AiMessage>? messages,
+  }) => _AiChatSession(
+    id: id,
+    title: title ?? this.title,
+    updatedAt: updatedAt ?? this.updatedAt,
+    messages: messages ?? this.messages,
+  );
+}
+
+String _newSessionId() => 'session_${DateTime.now().millisecondsSinceEpoch}';
+
 class AiConfigPage extends StatefulWidget {
   const AiConfigPage({super.key});
 
@@ -30,12 +87,16 @@ class AiConfigPage extends StatefulWidget {
 }
 
 class _AiConfigPageState extends State<AiConfigPage> {
+  static const _sessionsKey = 'ai_chat_sessions';
+
   final _settings = AiSettings();
   final _api = AiApi();
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
 
   final List<AiMessage> _messages = [];
+  List<_AiChatSession> _sessions = [];
+  String? _activeSessionId;
   bool _sending = false;
   CancelToken? _cancelToken;
 
@@ -44,6 +105,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
     super.initState();
     _settings.addListener(_onSettingsChanged);
     _settings.load();
+    _loadSessions();
   }
 
   @override
@@ -76,6 +138,75 @@ class _AiConfigPageState extends State<AiConfigPage> {
       }
     }
     return result;
+  }
+
+  Future<void> _loadSessions() async {
+    final sp = await SharedPreferences.getInstance();
+    final raw = sp.getString(_sessionsKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final sessions =
+          (jsonDecode(raw) as List)
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    _AiChatSession.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .where((session) => session.messages.isNotEmpty)
+              .toList()
+            ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      if (!mounted) return;
+      setState(() => _sessions = sessions);
+    } catch (_) {
+      // 忽略损坏的历史记录，避免影响聊天页打开。
+    }
+  }
+
+  Future<void> _saveSessions() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(
+      _sessionsKey,
+      jsonEncode(_sessions.map((session) => session.toJson()).toList()),
+    );
+  }
+
+  String _titleFromFirstMessage(String text) {
+    final singleLine = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (singleLine.isEmpty) return '新对话';
+    return singleLine.length > 18
+        ? '${singleLine.substring(0, 18)}…'
+        : singleLine;
+  }
+
+  Future<void> _persistCurrentSession() async {
+    final savedMessages = _messages
+        .where((message) => message.content.trim().isNotEmpty)
+        .toList(growable: false);
+    if (savedMessages.isEmpty) return;
+    final firstUser = savedMessages
+        .where((message) => message.role == 'user')
+        .firstOrNull
+        ?.content;
+    final title = _titleFromFirstMessage(
+      firstUser ?? savedMessages.first.content,
+    );
+    final now = DateTime.now();
+    final id = _activeSessionId ?? _newSessionId();
+    _activeSessionId = id;
+    final session = _AiChatSession(
+      id: id,
+      title: title,
+      updatedAt: now,
+      messages: savedMessages,
+    );
+    final index = _sessions.indexWhere((item) => item.id == id);
+    if (index < 0) {
+      _sessions.insert(0, session);
+    } else {
+      _sessions[index] = session;
+      _sessions.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    }
+    await _saveSessions();
   }
 
   void _scrollToBottom() {
@@ -596,6 +727,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
       _sending = true;
     });
     _scrollToBottom();
+    await _persistCurrentSession();
 
     final cancelToken = CancelToken();
     _cancelToken = cancelToken;
@@ -651,6 +783,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
         setState(() => _sending = false);
       }
       _cancelToken = null;
+      await _persistCurrentSession();
     }
   }
 
@@ -662,9 +795,143 @@ class _AiConfigPageState extends State<AiConfigPage> {
     _cancelToken?.cancel('user_stop');
   }
 
-  void _clearChat() {
+  Future<void> _clearChat() async {
     if (_messages.isEmpty) return;
-    setState(_messages.clear);
+    await _persistCurrentSession();
+    setState(() {
+      _activeSessionId = null;
+      _messages.clear();
+    });
+  }
+
+  Future<void> _openSessionHistory() async {
+    await _persistCurrentSession();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final cs = Theme.of(ctx).colorScheme;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '会话历史',
+                            style: Theme.of(ctx).textTheme.titleMedium,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _activeSessionId = null;
+                              _messages.clear();
+                            });
+                            Navigator.pop(ctx);
+                          },
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('新会话'),
+                        ),
+                        IconButton(
+                          tooltip: '关闭',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  if (_sessions.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        '暂无历史会话',
+                        style: TextStyle(color: cs.onSurfaceVariant),
+                      ),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _sessions.length,
+                        itemBuilder: (_, index) {
+                          final session = _sessions[index];
+                          final selected = session.id == _activeSessionId;
+                          final preview = session.messages
+                              .where((message) => message.content.isNotEmpty)
+                              .lastOrNull
+                              ?.content
+                              .replaceAll(RegExp(r'\s+'), ' ')
+                              .trim();
+                          return ListTile(
+                            selected: selected,
+                            leading: Icon(
+                              selected
+                                  ? Icons.chat_bubble
+                                  : Icons.chat_bubble_outline,
+                            ),
+                            title: Text(
+                              session.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              preview == null || preview.isEmpty
+                                  ? '${session.messages.length} 条消息'
+                                  : preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: IconButton(
+                              tooltip: '删除会话',
+                              icon: Icon(Icons.delete_outline, color: cs.error),
+                              onPressed: () async {
+                                final removedActive =
+                                    session.id == _activeSessionId;
+                                setState(() {
+                                  _sessions.removeWhere(
+                                    (item) => item.id == session.id,
+                                  );
+                                  if (removedActive) {
+                                    _activeSessionId = null;
+                                    _messages.clear();
+                                  }
+                                });
+                                setLocal(() {});
+                                await _saveSessions();
+                              },
+                            ),
+                            onTap: () {
+                              setState(() {
+                                _activeSessionId = session.id;
+                                _messages
+                                  ..clear()
+                                  ..addAll(session.messages);
+                              });
+                              Navigator.pop(ctx);
+                              _scrollToBottom();
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _openModelPicker() async {
@@ -808,6 +1075,11 @@ class _AiConfigPageState extends State<AiConfigPage> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: '会话历史',
+            icon: const Icon(Icons.history),
+            onPressed: _openSessionHistory,
+          ),
           IconButton(
             tooltip: '接口配置',
             icon: Icon(
