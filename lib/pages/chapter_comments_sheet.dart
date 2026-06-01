@@ -15,6 +15,18 @@ import '../utils/network_error.dart';
 import '../utils/toast.dart';
 import 'chapter_comment_display.dart';
 
+class _AiSummaryModelChoice {
+  final String providerId;
+  final String providerName;
+  final String model;
+
+  const _AiSummaryModelChoice({
+    required this.providerId,
+    required this.providerName,
+    required this.model,
+  });
+}
+
 class ChapterCommentsSheet extends StatefulWidget {
   final String chapterUuid;
   final String? comicName;
@@ -129,6 +141,25 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   void _onSummaryProgressChanged() {
     if (!mounted) return;
     _applySummaryProgress();
+  }
+
+  List<_AiSummaryModelChoice> get _modelChoices {
+    final result = <_AiSummaryModelChoice>[];
+    for (final provider in _aiSettings.enabledProviders) {
+      final seen = <String>{};
+      for (final model in provider.models) {
+        final trimmed = model.trim();
+        if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+        result.add(
+          _AiSummaryModelChoice(
+            providerId: provider.id,
+            providerName: provider.name,
+            model: trimmed,
+          ),
+        );
+      }
+    }
+    return result;
   }
 
   void _applySummaryProgress({bool rebuild = true}) {
@@ -910,9 +941,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               showUserName: _showUserName,
               showCommentTime: _showCommentTime,
               fontScale: _commentFontScale,
-              spoilerIds: _aiSettings.spoilerAnalysis
-                  ? _spoilerIds
-                  : const {},
+              spoilerIds: _aiSettings.spoilerAnalysis ? _spoilerIds : const {},
             );
           },
         ),
@@ -994,6 +1023,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
   Widget _buildModelNameButton(ColorScheme cs, TextTheme tt) {
     final canSwitch = !_summarizing;
+    final provider = _aiSettings.activeProvider;
     return Tooltip(
       message: canSwitch ? '切换模型' : '生成中无法切换模型',
       child: InkWell(
@@ -1007,7 +1037,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 140),
                 child: Text(
-                  _aiSettings.model,
+                  provider.model,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: tt.labelSmall?.copyWith(
@@ -1030,16 +1060,16 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   Future<void> _showModelPickerSheet() async {
-    if (_summarizing || _aiSettings.customModels.isEmpty) return;
+    final choices = _modelChoices;
+    if (_summarizing || choices.isEmpty) return;
 
-    final selectedModel = await showModalBottomSheet<String>(
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) {
         final cs = Theme.of(sheetContext).colorScheme;
         final tt = Theme.of(sheetContext).textTheme;
-        final models = _aiSettings.customModels;
-        final currentModel = _aiSettings.model;
+        final active = _aiSettings.activeProvider;
 
         return SafeArea(
           child: Padding(
@@ -1065,7 +1095,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                   ],
                 ),
                 Text(
-                  '当前模型：$currentModel',
+                  '当前模型：${active.name} / ${active.model}',
                   style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
                 const SizedBox(height: 12),
@@ -1073,28 +1103,59 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                   constraints: BoxConstraints(
                     maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.5,
                   ),
-                  child: ListView.separated(
+                  child: ListView.builder(
                     shrinkWrap: true,
-                    itemCount: models.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 4),
+                    itemCount: choices.length,
                     itemBuilder: (context, index) {
-                      final model = models[index];
-                      final selected = model == currentModel;
-                      return ListTile(
-                        dense: true,
-                        selected: selected,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        title: Text(
-                          model,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: selected
-                            ? Icon(Icons.check, color: cs.primary)
-                            : null,
-                        onTap: () => Navigator.of(sheetContext).pop(model),
+                      final choice = choices[index];
+                      final showHeader =
+                          index == 0 ||
+                          choices[index - 1].providerId != choice.providerId;
+                      final selected =
+                          active.id == choice.providerId &&
+                          active.model == choice.model;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (showHeader) ...[
+                            if (index > 0) const Divider(height: 1),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
+                              child: Text(
+                                choice.providerName,
+                                style: tt.labelSmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                          ListTile(
+                            dense: true,
+                            selected: selected,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            title: Text(
+                              choice.model,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: selected
+                                ? Icon(Icons.check, color: cs.primary)
+                                : null,
+                            onTap: () async {
+                              await _aiSettings.setActiveModel(
+                                providerId: choice.providerId,
+                                model: choice.model,
+                              );
+                              if (sheetContext.mounted) {
+                                Navigator.of(sheetContext).pop();
+                              }
+                            },
+                          ),
+                        ],
                       );
                     },
                   ),
@@ -1105,14 +1166,6 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         );
       },
     );
-
-    if (!mounted ||
-        selectedModel == null ||
-        selectedModel == _aiSettings.model) {
-      return;
-    }
-
-    _aiSettings.setModel(selectedModel);
   }
 
   Widget _buildSummaryPanel(ColorScheme cs, TextTheme tt) {
@@ -1140,8 +1193,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                 ),
               ),
               const SizedBox(width: 6),
-              if (_aiSettings.customModels.isNotEmpty)
-                _buildModelNameButton(cs, tt),
+              if (_modelChoices.isNotEmpty) _buildModelNameButton(cs, tt),
               const Spacer(),
               IconButton(
                 visualDensity: VisualDensity.compact,
@@ -2615,32 +2667,27 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                                 const SizedBox(height: 6),
                                 SizedBox(
                                   width: double.infinity,
-                                  child:
-                                      SegmentedButton<AiAutoSummaryTiming>(
-                                        segments: [
-                                          const ButtonSegment(
-                                            value:
-                                                AiAutoSummaryTiming.onOpen,
-                                            label: Text('打开评论区时'),
-                                          ),
-                                          ButtonSegment(
-                                            value: AiAutoSummaryTiming
-                                                .afterPreload,
-                                            label: const Text('预加载完成后'),
-                                            enabled: _commentPreload,
-                                          ),
-                                        ],
-                                        selected: {
-                                          _commentPreload
-                                              ? zhipu.autoSummaryTiming
-                                              : AiAutoSummaryTiming.onOpen,
-                                        },
-                                        onSelectionChanged: (values) {
-                                          zhipu.setAutoSummaryTiming(
-                                            values.first,
-                                          );
-                                        },
+                                  child: SegmentedButton<AiAutoSummaryTiming>(
+                                    segments: [
+                                      const ButtonSegment(
+                                        value: AiAutoSummaryTiming.onOpen,
+                                        label: Text('打开评论区时'),
                                       ),
+                                      ButtonSegment(
+                                        value: AiAutoSummaryTiming.afterPreload,
+                                        label: const Text('预加载完成后'),
+                                        enabled: _commentPreload,
+                                      ),
+                                    ],
+                                    selected: {
+                                      _commentPreload
+                                          ? zhipu.autoSummaryTiming
+                                          : AiAutoSummaryTiming.onOpen,
+                                    },
+                                    onSelectionChanged: (values) {
+                                      zhipu.setAutoSummaryTiming(values.first);
+                                    },
+                                  ),
                                 ),
                                 if (!_commentPreload) ...[
                                   const SizedBox(height: 4),
@@ -2657,7 +2704,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('剧透分析'),
-                          subtitle: const Text('识别剧透评论并自动遮罩（需要搭配特定提示词）'),
+                          subtitle: const Text('开启后会在当前提示词后自动追加剧透分析要求'),
                           value: spoiler,
                           onChanged: (v) => zhipu.setSpoilerAnalysis(v),
                         ),

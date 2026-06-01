@@ -170,6 +170,10 @@ class AiSettings extends ChangeNotifier {
 
   /// 内置预设 ID。
   static const presetBasicId = 'basic';
+  static const presetSharpId = 'sharp';
+  static const presetWarmId = 'warm';
+
+  /// 旧版内置剧透预设 ID，仅用于迁移历史配置。
   static const presetSpoilerId = 'spoiler';
 
   /// 不带剧透分析的基础提示词（默认）。
@@ -179,13 +183,26 @@ class AiSettings extends ChangeNotifier {
       '**值得一提**（可选，亮点/梗/争议）。\n'
       '语言要凝练、有趣，不要逐条复述评论，不要编造评论里没有的内容。';
 
-  /// 带剧透分析的提示词。
-  static const defaultPromptSpoiler =
-      '你是一名漫画社区氛围分析师。请基于用户提供的章节评论列表，用简体中文 Markdown 输出一份简洁的总结，包含以下小标题：\n'
-      '**整体氛围**（一句话概括）、**大家在聊什么**（要点列表，3~6 条，注意：不要在这里复述任何剧透内容）、'
-      '**值得一提**（可选，亮点/梗/争议，同样不能透露剧透）、'
-      '**剧透警告**（仅当存在剧透评论时才输出此段，且只能写"本章评论中有 N 处涉及剧透，已为你遮罩"这一句，绝对不要描述、暗示或概括任何剧情/转折/结局；如果没有任何剧透评论则整段省略，不要输出此标题和任何内容）。\n'
-      '语言要凝练、有趣，不要逐条复述评论，不要编造评论里没有的内容。\n\n'
+  /// 毒辣风格：更直接地指出槽点和争议。
+  static const defaultPromptSharp =
+      '请以毒辣但克制的风格，基于用户提供的章节评论列表，用简体中文 Markdown 输出一份犀利总结，包含以下小标题：\n'
+      '**一句狠评**（一句话概括评论区氛围）、**主要槽点/爽点**（3~6 条）、'
+      '**争议焦点**（可选）、**值得一提**（可选）。\n'
+      '表达可以尖锐、有梗，但不要人身攻击读者或作者，不要为了毒舌而编造评论里没有的内容，不要逐条复述评论。';
+
+  /// 温和风格：更平和、友善地归纳评论。
+  static const defaultPromptWarm =
+      '请以温和、平实、有共情感的风格，基于用户提供的章节评论列表，用简体中文 Markdown 输出一份易读总结，包含以下小标题：\n'
+      '**整体感受**（一句话概括）、**大家关注的内容**（3~6 条）、'
+      '**被提到的细节**（可选）、**简短结论**。\n'
+      '语言要自然友善，不要过度煽情，不要逐条复述评论，不要编造评论里没有的内容。';
+
+  /// 开启剧透分析时追加到当前提示词后的要求。
+  static const spoilerAnalysisPromptAppendix =
+      '【剧透分析附加要求】\n'
+      '用户已开启剧透分析。请在遵循上方提示词的基础上，额外满足以下要求：\n'
+      '- 正文总结中不要复述、描述、暗示或概括任何剧透内容；\n'
+      '- 可以输出 **剧透警告**，但仅当存在剧透评论时才输出此段，且只能写"本章评论中有 N 处涉及剧透，已为你遮罩"这一句，绝对不要描述、暗示或概括任何剧情/转折/结局；如果没有任何剧透评论则整段省略。\n\n'
       '【剧透的判定标准 · 非常重要】\n'
       '只有同时满足以下全部条件的评论才应标记为剧透：\n'
       '- 明确透露了尚未在当前章节及之前出场过的剧情走向、角色命运（死亡、复活、背叛等）或结局结果；\n'
@@ -205,6 +222,10 @@ class AiSettings extends ChangeNotifier {
       '3) 中括号里只能有数字和英文逗号，不要写解释、不要带 id= 前缀；\n'
       '4) 哪怕没有剧透也要写空数组 []，不能省略整个代码块；\n';
 
+  /// 兼容旧版常量；剧透分析现在会动态追加到当前预设。
+  static const defaultPromptSpoiler =
+      '$defaultPromptBasic\n\n$spoilerAnalysisPromptAppendix';
+
   /// 兼容旧版。
   static const defaultSummaryPrompt = defaultPromptBasic;
 
@@ -216,9 +237,15 @@ class AiSettings extends ChangeNotifier {
       isBuiltIn: true,
     ),
     PromptPreset(
-      id: presetSpoilerId,
-      name: '带剧透分析的提示词',
-      prompt: defaultPromptSpoiler,
+      id: presetSharpId,
+      name: '毒辣风格',
+      prompt: defaultPromptSharp,
+      isBuiltIn: true,
+    ),
+    PromptPreset(
+      id: presetWarmId,
+      name: '温和风格',
+      prompt: defaultPromptWarm,
       isBuiltIn: true,
     ),
   ];
@@ -443,10 +470,16 @@ class AiSettings extends ChangeNotifier {
 
   Future<void> _loadPresets(SharedPreferences sp) async {
     final raw = sp.getString(_keyPresets);
+    var migrated = false;
     if (raw != null && raw.isNotEmpty) {
       try {
         final list = (jsonDecode(raw) as List)
             .map((e) => PromptPreset.fromJson(e as Map<String, dynamic>))
+            .where((preset) {
+              final keep = _shouldKeepStoredPreset(preset);
+              if (!keep) migrated = true;
+              return keep;
+            })
             .toList();
         // 确保内置预设始终存在（用保存的覆盖默认）
         final ids = list.map((e) => e.id).toSet();
@@ -456,15 +489,40 @@ class AiSettings extends ChangeNotifier {
               builtIn == builtInPresets[0] ? 0 : list.length,
               builtIn,
             );
+            migrated = true;
           }
         }
         _presets = list;
       } catch (_) {
         _presets = List.from(builtInPresets);
+        migrated = true;
       }
     } else {
       _presets = List.from(builtInPresets);
     }
+    if (_activePresetId == presetSpoilerId ||
+        _presets.every((preset) => preset.id != _activePresetId)) {
+      _activePresetId = presetBasicId;
+      migrated = true;
+    }
+    if (migrated) {
+      await sp.setString(
+        _keyPresets,
+        jsonEncode(_presets.map((e) => e.toJson()).toList()),
+      );
+      await sp.setString(_keyActivePreset, _activePresetId);
+    }
+  }
+
+  bool _shouldKeepStoredPreset(PromptPreset preset) {
+    if (preset.id == presetSpoilerId &&
+        (preset.isBuiltIn || preset.name == '带剧透分析的提示词')) {
+      return false;
+    }
+    final isCurrentBuiltIn = builtInPresets.any(
+      (builtIn) => builtIn.id == preset.id,
+    );
+    return !preset.isBuiltIn || isCurrentBuiltIn;
   }
 
   Future<void> _savePresets() async {
@@ -477,7 +535,12 @@ class AiSettings extends ChangeNotifier {
 
   void _syncPrompt() {
     final preset = activePreset;
-    _summaryPrompt = preset?.prompt ?? defaultPromptBasic;
+    final basePrompt = preset?.prompt.trim().isNotEmpty == true
+        ? preset!.prompt.trim()
+        : defaultPromptBasic;
+    _summaryPrompt = _spoilerAnalysis
+        ? '$basePrompt\n\n$spoilerAnalysisPromptAppendix'
+        : basePrompt;
   }
 
   Future<void> setApiKey(String? key) async {
@@ -655,15 +718,9 @@ class AiSettings extends ChangeNotifier {
 
   Future<void> setSpoilerAnalysis(bool enabled) async {
     _spoilerAnalysis = enabled;
-    if (enabled && _activePresetId == presetBasicId) {
-      _activePresetId = presetSpoilerId;
-    } else if (!enabled && _activePresetId == presetSpoilerId) {
-      _activePresetId = presetBasicId;
-    }
     _syncPrompt();
     final sp = await SharedPreferences.getInstance();
     await sp.setBool(_keySpoilerAnalysis, enabled);
-    await sp.setString(_keyActivePreset, _activePresetId);
     notifyListeners();
   }
 
