@@ -7,7 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../api/api_client.dart';
-import '../api/zhipu_api.dart';
+import '../api/ai_api.dart';
 import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
 import '../models/user_manager.dart';
@@ -63,8 +63,8 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   final _api = ApiClient();
-  final _zhipuSettings = ZhipuSettings();
-  final _zhipuApi = ZhipuApi();
+  final _aiSettings = AiSettings();
+  final _aiApi = AiApi();
   final _downloads = DownloadManager();
   final _user = UserManager();
   final _itemScrollController = ItemScrollController();
@@ -297,17 +297,17 @@ class _ReaderPageState extends State<ReaderPage> {
     required String chapterName,
     required List<ChapterComment> comments,
   }) async {
-    await _zhipuSettings.load();
+    await _aiSettings.load();
     if (!mounted || _currentUuid != chapterUuid) return;
     if (!_user.commentPreload ||
-        !_zhipuSettings.hasApiKey ||
-        !_zhipuSettings.summaryEnabled ||
-        !_zhipuSettings.autoSummary ||
-        _zhipuSettings.autoSummaryTiming !=
-            ZhipuAutoSummaryTiming.afterPreload) {
+        !_aiSettings.hasConfig ||
+        !_aiSettings.summaryEnabled ||
+        !_aiSettings.autoSummary ||
+        _aiSettings.autoSummaryTiming !=
+            AiAutoSummaryTiming.afterPreload) {
       return;
     }
-    if (comments.isEmpty || comments.length < _zhipuSettings.autoSummaryMin) {
+    if (comments.isEmpty || comments.length < _aiSettings.autoSummaryMin) {
       return;
     }
 
@@ -322,9 +322,9 @@ class _ReaderPageState extends State<ReaderPage> {
     final comicLine = widget.comicName?.trim().isNotEmpty == true
         ? '漫画：${widget.comicName!.trim()}\n'
         : '';
-    final messages = <ZhipuMessage>[
-      ZhipuMessage(role: 'system', content: _zhipuSettings.summaryPrompt),
-      ZhipuMessage(
+    final messages = <AiMessage>[
+      AiMessage(role: 'system', content: _aiSettings.summaryPrompt),
+      AiMessage(
         role: 'user',
         content:
             '$comicLine章节：$chapterName\n共 ${input.count} 条不同评论（相同内容已合并）。每条行首数字为该评论的 id：\n\n${input.snippets}',
@@ -334,9 +334,12 @@ class _ReaderPageState extends State<ReaderPage> {
     final buffer = StringBuffer();
     ChapterSummaryCache.startProgress(chapterUuid);
     try {
-      final stream = _zhipuApi.streamChat(
-        apiKey: _zhipuSettings.apiKey!,
-        model: _zhipuSettings.model,
+      final provider = _aiSettings.activeProvider;
+      final stream = _aiApi.streamChat(
+        apiKey: provider.apiKey!,
+        baseUrl: provider.baseUrl,
+        apiFormat: provider.apiFormat,
+        model: provider.model,
         messages: messages,
       );
       await for (final delta in stream) {

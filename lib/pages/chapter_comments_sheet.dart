@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../api/api_client.dart';
-import '../api/zhipu_api.dart';
+import '../api/ai_api.dart';
 import '../models/chapter_comment.dart';
 import '../models/user_manager.dart';
 import '../utils/chapter_summary_cache.dart';
@@ -53,8 +53,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
   final _api = ApiClient();
   final _user = UserManager();
-  final _zhipuSettings = ZhipuSettings();
-  final _zhipuApi = ZhipuApi();
+  final _aiSettings = AiSettings();
+  final _aiApi = AiApi();
   final _scrollController = ScrollController();
 
   List<ChapterComment> _comments = [];
@@ -90,11 +90,11 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     _showCommentTime = _user.commentShowTime;
     _commentFontScale = _user.commentFontScale;
     _scrollController.addListener(_handleScrollDirection);
-    _zhipuSettings.addListener(_onZhipuChanged);
+    _aiSettings.addListener(_onAiChanged);
     _summaryProgress = ChapterSummaryCache.progressOf(widget.chapterUuid);
     _summaryProgress.addListener(_onSummaryProgressChanged);
     _applySummaryProgress(rebuild: false);
-    _zhipuSettings.load().then((_) {
+    _aiSettings.load().then((_) {
       _loadCachedSummary().then((_) => _maybeAutoSummary());
     });
     if (widget.initialComments != null) {
@@ -117,12 +117,12 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   void dispose() {
     _summaryCancelToken?.cancel();
     _summaryProgress.removeListener(_onSummaryProgressChanged);
-    _zhipuSettings.removeListener(_onZhipuChanged);
+    _aiSettings.removeListener(_onAiChanged);
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _onZhipuChanged() {
+  void _onAiChanged() {
     if (mounted) setState(() {});
   }
 
@@ -169,16 +169,16 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   void _maybeAutoSummary() {
-    if (!_zhipuSettings.hasApiKey ||
-        !_zhipuSettings.summaryEnabled ||
-        !_zhipuSettings.autoSummary) {
+    if (!_aiSettings.hasConfig ||
+        !_aiSettings.summaryEnabled ||
+        !_aiSettings.autoSummary) {
       return;
     }
-    if (_zhipuSettings.autoSummaryTiming != ZhipuAutoSummaryTiming.onOpen) {
+    if (_aiSettings.autoSummaryTiming != AiAutoSummaryTiming.onOpen) {
       return;
     }
     if (_aiSummary.isNotEmpty || _summarizing || _comments.isEmpty) return;
-    if (_comments.length < _zhipuSettings.autoSummaryMin) return;
+    if (_comments.length < _aiSettings.autoSummaryMin) return;
     _summarizeComments();
   }
 
@@ -323,7 +323,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       showToast(context, '当前没有可总结的评论', isError: true);
       return;
     }
-    if (!_zhipuSettings.hasApiKey || !_zhipuSettings.summaryEnabled) {
+    if (!_aiSettings.hasConfig || !_aiSettings.summaryEnabled) {
       showToast(context, '请先在评论区设置中启用 AI 总结', isError: true);
       return;
     }
@@ -342,9 +342,9 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     final comicLine = widget.comicName?.trim().isNotEmpty == true
         ? '漫画：${widget.comicName!.trim()}\n'
         : '';
-    final messages = <ZhipuMessage>[
-      ZhipuMessage(role: 'system', content: _zhipuSettings.summaryPrompt),
-      ZhipuMessage(
+    final messages = <AiMessage>[
+      AiMessage(role: 'system', content: _aiSettings.summaryPrompt),
+      AiMessage(
         role: 'user',
         content:
             '$comicLine章节：${widget.chapterName}\n共 ${_lastSnippetEntries.length} 条不同评论（相同内容已合并）。每条行首数字为该评论的 id：\n\n$snippets',
@@ -353,9 +353,12 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
     final buffer = StringBuffer();
     try {
-      final stream = _zhipuApi.streamChat(
-        apiKey: _zhipuSettings.apiKey!,
-        model: _zhipuSettings.model,
+      final provider = _aiSettings.activeProvider;
+      final stream = _aiApi.streamChat(
+        apiKey: provider.apiKey!,
+        baseUrl: provider.baseUrl,
+        apiFormat: provider.apiFormat,
+        model: provider.model,
         messages: messages,
         cancelToken: cancelToken,
       );
@@ -553,10 +556,10 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                 onPreloadChanged: (enabled) {
                   _user.setCommentPreload(enabled);
                   if (!enabled &&
-                      _zhipuSettings.autoSummaryTiming ==
-                          ZhipuAutoSummaryTiming.afterPreload) {
-                    _zhipuSettings.setAutoSummaryTiming(
-                      ZhipuAutoSummaryTiming.onOpen,
+                      _aiSettings.autoSummaryTiming ==
+                          AiAutoSummaryTiming.afterPreload) {
+                    _aiSettings.setAutoSummaryTiming(
+                      AiAutoSummaryTiming.onOpen,
                     );
                   }
                 },
@@ -647,8 +650,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                                     onPressed: _loadAllComments,
                                     icon: const Icon(Icons.refresh),
                                   ),
-                          if (_zhipuSettings.hasApiKey &&
-                              _zhipuSettings.summaryEnabled) ...[
+                          if (_aiSettings.hasApiKey &&
+                              _aiSettings.summaryEnabled) ...[
                             IconButton(
                               tooltip: _aiSummary.isEmpty
                                   ? 'AI 总结评论'
@@ -907,7 +910,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               showUserName: _showUserName,
               showCommentTime: _showCommentTime,
               fontScale: _commentFontScale,
-              spoilerIds: _zhipuSettings.spoilerAnalysis
+              spoilerIds: _aiSettings.spoilerAnalysis
                   ? _spoilerIds
                   : const {},
             );
@@ -966,7 +969,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                           showUserName: _showUserName,
                           showCommentTime: _showCommentTime,
                           fontScale: _commentFontScale,
-                          spoilerIds: _zhipuSettings.spoilerAnalysis
+                          spoilerIds: _aiSettings.spoilerAnalysis
                               ? _spoilerIds
                               : const {},
                         ),
@@ -985,8 +988,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   bool get _hasSummaryPanel =>
-      _zhipuSettings.hasApiKey &&
-      _zhipuSettings.summaryEnabled &&
+      _aiSettings.hasApiKey &&
+      _aiSettings.summaryEnabled &&
       (_aiSummary.isNotEmpty || _summarizing || _summaryError != null);
 
   Widget _buildModelNameButton(ColorScheme cs, TextTheme tt) {
@@ -1004,7 +1007,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 140),
                 child: Text(
-                  _zhipuSettings.model,
+                  _aiSettings.model,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: tt.labelSmall?.copyWith(
@@ -1027,7 +1030,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   Future<void> _showModelPickerSheet() async {
-    if (_summarizing || _zhipuSettings.customModels.isEmpty) return;
+    if (_summarizing || _aiSettings.customModels.isEmpty) return;
 
     final selectedModel = await showModalBottomSheet<String>(
       context: context,
@@ -1035,8 +1038,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       builder: (sheetContext) {
         final cs = Theme.of(sheetContext).colorScheme;
         final tt = Theme.of(sheetContext).textTheme;
-        final models = _zhipuSettings.customModels;
-        final currentModel = _zhipuSettings.model;
+        final models = _aiSettings.customModels;
+        final currentModel = _aiSettings.model;
 
         return SafeArea(
           child: Padding(
@@ -1105,11 +1108,11 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
     if (!mounted ||
         selectedModel == null ||
-        selectedModel == _zhipuSettings.model) {
+        selectedModel == _aiSettings.model) {
       return;
     }
 
-    _zhipuSettings.setModel(selectedModel);
+    _aiSettings.setModel(selectedModel);
   }
 
   Widget _buildSummaryPanel(ColorScheme cs, TextTheme tt) {
@@ -1137,7 +1140,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                 ),
               ),
               const SizedBox(width: 6),
-              if (_zhipuSettings.customModels.isNotEmpty)
+              if (_aiSettings.customModels.isNotEmpty)
                 _buildModelNameButton(cs, tt),
               const Spacer(),
               IconButton(
@@ -1693,7 +1696,7 @@ class _CommentCardState extends State<_CommentCard> {
                       Positioned.fill(
                         child: GestureDetector(
                           onTap: () async {
-                            final settings = ZhipuSettings();
+                            final settings = AiSettings();
                             if (!settings.spoilerWarn) {
                               setState(() => _revealed = true);
                               return;
@@ -1845,7 +1848,7 @@ class _MergedCommentContentState extends State<_MergedCommentContent> {
     return Positioned.fill(
       child: GestureDetector(
         onTap: () async {
-          final settings = ZhipuSettings();
+          final settings = AiSettings();
           if (!settings.spoilerWarn) {
             setState(() => _revealed = true);
             return;
@@ -2243,7 +2246,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
     required PromptPreset preset,
     required bool isBuiltIn,
   }) async {
-    final settings = ZhipuSettings();
+    final settings = AiSettings();
     final nameCtrl = TextEditingController(text: preset.name);
     final promptCtrl = TextEditingController(text: preset.prompt);
     final result = await showDialog<Map<String, String?>>(
@@ -2288,7 +2291,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
           if (isBuiltIn)
             TextButton(
               onPressed: () {
-                final builtIn = ZhipuSettings.builtInPresets
+                final builtIn = AiSettings.builtInPresets
                     .where((p) => p.id == preset.id)
                     .firstOrNull;
                 if (builtIn != null) {
@@ -2326,7 +2329,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
   }
 
   Future<void> _addPreset(BuildContext context) async {
-    final settings = ZhipuSettings();
+    final settings = AiSettings();
     final nameCtrl = TextEditingController();
     final promptCtrl = TextEditingController();
     final result = await showDialog<Map<String, String>>(
@@ -2534,9 +2537,9 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
               const Divider(height: 24),
               // AI 总结设置
               ListenableBuilder(
-                listenable: ZhipuSettings(),
+                listenable: AiSettings(),
                 builder: (context, _) {
-                  final zhipu = ZhipuSettings();
+                  final zhipu = AiSettings();
                   final hasKey = zhipu.hasApiKey;
                   final enabled = zhipu.summaryEnabled;
                   final spoiler = zhipu.spoilerAnalysis;
@@ -2613,15 +2616,15 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                                 SizedBox(
                                   width: double.infinity,
                                   child:
-                                      SegmentedButton<ZhipuAutoSummaryTiming>(
+                                      SegmentedButton<AiAutoSummaryTiming>(
                                         segments: [
                                           const ButtonSegment(
                                             value:
-                                                ZhipuAutoSummaryTiming.onOpen,
+                                                AiAutoSummaryTiming.onOpen,
                                             label: Text('打开评论区时'),
                                           ),
                                           ButtonSegment(
-                                            value: ZhipuAutoSummaryTiming
+                                            value: AiAutoSummaryTiming
                                                 .afterPreload,
                                             label: const Text('预加载完成后'),
                                             enabled: _commentPreload,
@@ -2630,7 +2633,7 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                                         selected: {
                                           _commentPreload
                                               ? zhipu.autoSummaryTiming
-                                              : ZhipuAutoSummaryTiming.onOpen,
+                                              : AiAutoSummaryTiming.onOpen,
                                         },
                                         onSelectionChanged: (values) {
                                           zhipu.setAutoSummaryTiming(
