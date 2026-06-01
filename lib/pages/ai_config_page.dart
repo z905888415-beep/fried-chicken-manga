@@ -42,18 +42,15 @@ class _AiChatSession {
     'id': id,
     'title': title,
     'updatedAt': updatedAt.toIso8601String(),
-    'messages': messages.map((message) => message.toJson()).toList(),
+    'messages': messages
+        .map((message) => message.toJson(includeReasoning: true))
+        .toList(),
   };
 
   factory _AiChatSession.fromJson(Map<String, dynamic> json) {
     final messages = (json['messages'] as List? ?? const [])
         .whereType<Map>()
-        .map(
-          (item) => AiMessage(
-            role: item['role'] as String? ?? 'user',
-            content: item['content'] as String? ?? '',
-          ),
-        )
+        .map((item) => AiMessage.fromJson(Map<String, dynamic>.from(item)))
         .toList();
     return _AiChatSession(
       id: json['id'] as String? ?? _newSessionId(),
@@ -95,6 +92,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
   final _scrollCtrl = ScrollController();
 
   final List<AiMessage> _messages = [];
+  final Set<int> _expandedReasoningIndexes = {};
   List<_AiChatSession> _sessions = [];
   String? _activeSessionId;
   bool _sending = false;
@@ -738,9 +736,10 @@ class _AiConfigPageState extends State<AiConfigPage> {
         .toList();
 
     final buffer = StringBuffer();
+    final reasoningBuffer = StringBuffer();
     try {
       final provider = _settings.activeProvider;
-      final stream = _api.streamChat(
+      final stream = _api.streamChatChunks(
         apiKey: provider.apiKey!,
         baseUrl: provider.baseUrl,
         apiFormat: provider.apiFormat,
@@ -748,22 +747,32 @@ class _AiConfigPageState extends State<AiConfigPage> {
         messages: history,
         cancelToken: cancelToken,
       );
-      await for (final delta in stream) {
+      await for (final chunk in stream) {
         if (!mounted) return;
-        buffer.write(delta);
+        if (chunk.isReasoning) {
+          reasoningBuffer.write(chunk.text);
+        } else {
+          buffer.write(chunk.text);
+        }
         setState(() {
           _messages[_messages.length - 1] = AiMessage(
             role: 'assistant',
             content: buffer.toString(),
+            reasoningContent: reasoningBuffer.isEmpty
+                ? null
+                : reasoningBuffer.toString(),
           );
         });
         _scrollToBottom();
       }
       if (buffer.isEmpty && mounted) {
         setState(() {
-          _messages[_messages.length - 1] = const AiMessage(
+          _messages[_messages.length - 1] = AiMessage(
             role: 'assistant',
             content: '(模型未返回内容)',
+            reasoningContent: reasoningBuffer.isEmpty
+                ? null
+                : reasoningBuffer.toString(),
           );
         });
       }
@@ -776,6 +785,9 @@ class _AiConfigPageState extends State<AiConfigPage> {
           content: buffer.isEmpty
               ? '请求失败：$msg'
               : '${buffer.toString()}\n\n[出错：$msg]',
+          reasoningContent: reasoningBuffer.isEmpty
+              ? null
+              : reasoningBuffer.toString(),
         );
       });
     } finally {
@@ -1107,7 +1119,7 @@ class _AiConfigPageState extends State<AiConfigPage> {
                       vertical: 16,
                     ),
                     itemCount: _messages.length,
-                    itemBuilder: (_, i) => _buildBubble(_messages[i], cs),
+                    itemBuilder: (_, i) => _buildBubble(_messages[i], cs, i),
                   ),
           ),
           SafeArea(
@@ -1172,10 +1184,16 @@ class _AiConfigPageState extends State<AiConfigPage> {
     );
   }
 
-  Widget _buildBubble(AiMessage msg, ColorScheme cs) {
+  Widget _buildBubble(AiMessage msg, ColorScheme cs, int index) {
     final isUser = msg.role == 'user';
     final bg = isUser ? cs.primary : cs.surfaceContainerHighest;
     final fg = isUser ? cs.onPrimary : cs.onSurface;
+    final reasoning = msg.reasoningContent?.trim();
+    final hasReasoning = !isUser && reasoning != null && reasoning.isNotEmpty;
+    final shouldCollapseReasoning = msg.content.trim().isNotEmpty;
+    final reasoningExpanded =
+        hasReasoning &&
+        (!shouldCollapseReasoning || _expandedReasoningIndexes.contains(index));
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -1196,15 +1214,38 @@ class _AiConfigPageState extends State<AiConfigPage> {
               color: bg,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: msg.content.isEmpty
-                ? SizedBox(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hasReasoning)
+                  _buildReasoningBox(
+                    reasoning,
+                    cs,
+                    expanded: reasoningExpanded,
+                    collapsed: shouldCollapseReasoning,
+                    onTap: shouldCollapseReasoning
+                        ? () => setState(() {
+                            if (_expandedReasoningIndexes.contains(index)) {
+                              _expandedReasoningIndexes.remove(index);
+                            } else {
+                              _expandedReasoningIndexes.add(index);
+                            }
+                          })
+                        : null,
+                  ),
+                if (hasReasoning && msg.content.isNotEmpty)
+                  const SizedBox(height: 8),
+                if (msg.content.isEmpty)
+                  SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2, color: fg),
                   )
-                : isUser
-                ? Text(msg.content, style: TextStyle(color: fg, fontSize: 15))
-                : MarkdownBody(
+                else if (isUser)
+                  Text(msg.content, style: TextStyle(color: fg, fontSize: 15))
+                else
+                  MarkdownBody(
                     data: msg.content,
                     selectable: false,
                     onTapLink: (text, href, title) async {
@@ -1218,7 +1259,69 @@ class _AiConfigPageState extends State<AiConfigPage> {
                     },
                     styleSheet: _markdownStyle(cs, fg),
                   ),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReasoningBox(
+    String reasoning,
+    ColorScheme cs, {
+    required bool expanded,
+    required bool collapsed,
+    VoidCallback? onTap,
+  }) {
+    final textStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+      fontSize: 12,
+      height: 1.35,
+    );
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.7)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.psychology_alt_outlined,
+                  size: 14,
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  expanded ? '思考过程' : '思考过程（已折叠）',
+                  style: textStyle?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                if (collapsed) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+                  ),
+                ],
+              ],
+            ),
+            if (expanded) ...[
+              const SizedBox(height: 6),
+              Text(reasoning, style: textStyle),
+            ],
+          ],
         ),
       ),
     );

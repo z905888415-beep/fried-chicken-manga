@@ -790,10 +790,35 @@ class AiSettings extends ChangeNotifier {
 class AiMessage {
   final String role;
   final String content;
+  final String? reasoningContent;
 
-  const AiMessage({required this.role, required this.content});
+  const AiMessage({
+    required this.role,
+    required this.content,
+    this.reasoningContent,
+  });
 
-  Map<String, dynamic> toJson() => {'role': role, 'content': content};
+  factory AiMessage.fromJson(Map<String, dynamic> json) => AiMessage(
+    role: json['role'] as String? ?? 'user',
+    content: json['content'] as String? ?? '',
+    reasoningContent:
+        json['reasoningContent'] as String? ??
+        json['reasoning_content'] as String?,
+  );
+
+  Map<String, dynamic> toJson({bool includeReasoning = false}) => {
+    'role': role,
+    'content': content,
+    if (includeReasoning && reasoningContent?.trim().isNotEmpty == true)
+      'reasoningContent': reasoningContent,
+  };
+}
+
+class AiStreamChunk {
+  final String text;
+  final bool isReasoning;
+
+  const AiStreamChunk({required this.text, this.isReasoning = false});
 }
 
 class AiApi {
@@ -848,6 +873,27 @@ class AiApi {
     required List<AiMessage> messages,
     CancelToken? cancelToken,
   }) async* {
+    await for (final chunk in streamChatChunks(
+      apiKey: apiKey,
+      baseUrl: baseUrl,
+      apiFormat: apiFormat,
+      model: model,
+      messages: messages,
+      cancelToken: cancelToken,
+    )) {
+      if (!chunk.isReasoning) yield chunk.text;
+    }
+  }
+
+  /// 以流式 SSE 方式调用，同时保留支持推理模型返回的思考增量。
+  Stream<AiStreamChunk> streamChatChunks({
+    required String apiKey,
+    required String baseUrl,
+    required OpenAiApiFormat apiFormat,
+    required String model,
+    required List<AiMessage> messages,
+    CancelToken? cancelToken,
+  }) async* {
     final response = await _dio.post<ResponseBody>(
       _endpointFor(baseUrl, apiFormat),
       data: _requestBody(apiFormat, model, messages),
@@ -879,8 +925,8 @@ class AiApi {
       if (data == '[DONE]') return;
       try {
         final json = jsonDecode(data) as Map<String, dynamic>;
-        final content = _parseStreamDelta(json, apiFormat);
-        if (content != null && content.isNotEmpty) yield content;
+        final chunk = _parseStreamChunk(json, apiFormat);
+        if (chunk != null && chunk.text.isNotEmpty) yield chunk;
       } catch (_) {
         // 忽略个别无法解析的行
       }
@@ -931,7 +977,7 @@ class AiApi {
     };
   }
 
-  String? _parseStreamDelta(
+  AiStreamChunk? _parseStreamChunk(
     Map<String, dynamic> json,
     OpenAiApiFormat apiFormat,
   ) {
@@ -939,9 +985,16 @@ class AiApi {
       final type = json['type'];
       final delta = json['delta'];
       if (type == 'response.output_text.delta' && delta is String) {
-        return delta;
+        return AiStreamChunk(text: delta);
       }
-      if (type == 'response.refusal.delta' && delta is String) return delta;
+      if (type == 'response.refusal.delta' && delta is String) {
+        return AiStreamChunk(text: delta);
+      }
+      if ((type == 'response.reasoning_summary_text.delta' ||
+              type == 'response.reasoning_text.delta') &&
+          delta is String) {
+        return AiStreamChunk(text: delta, isReasoning: true);
+      }
     }
 
     final choices = json['choices'] as List?;
@@ -950,13 +1003,39 @@ class AiApi {
     if (first is! Map) return null;
     final delta = first['delta'];
     if (delta is Map) {
+      final reasoning = _stringField(delta, const [
+        'reasoning_content',
+        'reasoning',
+        'reasoningContent',
+        'thinking',
+      ]);
+      if (reasoning != null) {
+        return AiStreamChunk(text: reasoning, isReasoning: true);
+      }
       final content = delta['content'];
-      if (content is String) return content;
+      if (content is String) return AiStreamChunk(text: content);
     }
     final message = first['message'];
     if (message is Map) {
+      final reasoning = _stringField(message, const [
+        'reasoning_content',
+        'reasoning',
+        'reasoningContent',
+        'thinking',
+      ]);
+      if (reasoning != null) {
+        return AiStreamChunk(text: reasoning, isReasoning: true);
+      }
       final content = message['content'];
-      if (content is String) return content;
+      if (content is String) return AiStreamChunk(text: content);
+    }
+    return null;
+  }
+
+  String? _stringField(Map source, List<String> keys) {
+    for (final key in keys) {
+      final value = source[key];
+      if (value is String && value.isNotEmpty) return value;
     }
     return null;
   }

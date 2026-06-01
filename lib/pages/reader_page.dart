@@ -303,8 +303,7 @@ class _ReaderPageState extends State<ReaderPage> {
         !_aiSettings.hasConfig ||
         !_aiSettings.summaryEnabled ||
         !_aiSettings.autoSummary ||
-        _aiSettings.autoSummaryTiming !=
-            AiAutoSummaryTiming.afterPreload) {
+        _aiSettings.autoSummaryTiming != AiAutoSummaryTiming.afterPreload) {
       return;
     }
     if (comments.isEmpty || comments.length < _aiSettings.autoSummaryMin) {
@@ -332,27 +331,42 @@ class _ReaderPageState extends State<ReaderPage> {
     ];
 
     final buffer = StringBuffer();
+    final reasoningBuffer = StringBuffer();
     ChapterSummaryCache.startProgress(chapterUuid);
     try {
       final provider = _aiSettings.activeProvider;
-      final stream = _aiApi.streamChat(
+      final stream = _aiApi.streamChatChunks(
         apiKey: provider.apiKey!,
         baseUrl: provider.baseUrl,
         apiFormat: provider.apiFormat,
         model: provider.model,
         messages: messages,
       );
-      await for (final delta in stream) {
+      await for (final chunk in stream) {
         if (!mounted || _currentUuid != chapterUuid) {
           ChapterSummaryCache.clearProgress(chapterUuid);
           return;
         }
-        buffer.write(delta);
-        ChapterSummaryCache.updateProgress(chapterUuid, buffer.toString());
+        if (chunk.isReasoning) {
+          reasoningBuffer.write(chunk.text);
+        } else {
+          buffer.write(chunk.text);
+        }
+        ChapterSummaryCache.updateProgress(
+          chapterUuid,
+          buffer.toString(),
+          reasoningContent: reasoningBuffer.toString(),
+        );
       }
       final full = buffer.toString();
       if (full.isNotEmpty) {
-        await ChapterSummaryCache.set(chapterUuid, full);
+        await ChapterSummaryCache.set(
+          chapterUuid,
+          full,
+          reasoningContent: reasoningBuffer.isEmpty
+              ? null
+              : reasoningBuffer.toString(),
+        );
       } else {
         ChapterSummaryCache.clearProgress(chapterUuid);
       }

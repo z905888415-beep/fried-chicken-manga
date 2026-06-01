@@ -4,29 +4,42 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ChapterSummaryProgress extends ChangeNotifier {
   bool _isGenerating = false;
   String _content = '';
+  String _reasoningContent = '';
   String? _error;
 
   bool get isGenerating => _isGenerating;
   String get content => _content;
+  String get reasoningContent => _reasoningContent;
   String? get error => _error;
-  bool get hasState => _isGenerating || _content.isNotEmpty || _error != null;
+  bool get hasState =>
+      _isGenerating ||
+      _content.isNotEmpty ||
+      _reasoningContent.isNotEmpty ||
+      _error != null;
 
-  void _start({String initialContent = ''}) {
+  void _start({String initialContent = '', String initialReasoning = ''}) {
     _isGenerating = true;
     _content = initialContent;
+    _reasoningContent = initialReasoning;
     _error = null;
     notifyListeners();
   }
 
-  void _update(String content) {
+  void _update(String content, {String? reasoningContent}) {
     _content = content;
+    if (reasoningContent != null) {
+      _reasoningContent = reasoningContent;
+    }
     _error = null;
     notifyListeners();
   }
 
-  void _complete(String content) {
+  void _complete(String content, {String? reasoningContent}) {
     _isGenerating = false;
     _content = content;
+    if (reasoningContent != null) {
+      _reasoningContent = reasoningContent;
+    }
     _error = null;
     notifyListeners();
   }
@@ -40,6 +53,7 @@ class ChapterSummaryProgress extends ChangeNotifier {
   void _clear() {
     _isGenerating = false;
     _content = '';
+    _reasoningContent = '';
     _error = null;
     notifyListeners();
   }
@@ -56,12 +70,25 @@ class ChapterSummaryCache {
   static bool isGenerating(String chapterUuid) =>
       _progress[chapterUuid]?.isGenerating ?? false;
 
-  static void startProgress(String chapterUuid, {String initialContent = ''}) {
-    progressOf(chapterUuid)._start(initialContent: initialContent);
+  static void startProgress(
+    String chapterUuid, {
+    String initialContent = '',
+    String initialReasoning = '',
+  }) {
+    progressOf(chapterUuid)._start(
+      initialContent: initialContent,
+      initialReasoning: initialReasoning,
+    );
   }
 
-  static void updateProgress(String chapterUuid, String content) {
-    progressOf(chapterUuid)._update(content);
+  static void updateProgress(
+    String chapterUuid,
+    String content, {
+    String? reasoningContent,
+  }) {
+    progressOf(
+      chapterUuid,
+    )._update(content, reasoningContent: reasoningContent);
   }
 
   static void failProgress(String chapterUuid, String error) {
@@ -77,14 +104,20 @@ class ChapterSummaryCache {
     return sp.getString('$_prefix$chapterUuid');
   }
 
-  static Future<void> set(String chapterUuid, String content) async {
+  static Future<void> set(
+    String chapterUuid,
+    String content, {
+    String? reasoningContent,
+  }) async {
     final sp = await SharedPreferences.getInstance();
     if (content.isEmpty) {
       await sp.remove('$_prefix$chapterUuid');
       clearProgress(chapterUuid);
     } else {
       await sp.setString('$_prefix$chapterUuid', content);
-      progressOf(chapterUuid)._complete(content);
+      progressOf(
+        chapterUuid,
+      )._complete(content, reasoningContent: reasoningContent);
     }
   }
 

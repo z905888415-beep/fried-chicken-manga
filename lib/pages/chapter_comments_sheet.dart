@@ -84,8 +84,10 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   double _lastScrollOffset = 0;
 
   String _aiSummary = '';
+  String _aiSummaryReasoning = '';
   bool _summarizing = false;
   bool _summaryExpanded = true;
+  bool _summaryReasoningExpanded = false;
   String? _summaryError;
   CancelToken? _summaryCancelToken;
   Set<int> _spoilerIds = const {};
@@ -167,6 +169,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       if (!_summaryProgress.hasState) {
         if (_usingSharedSummaryProgress) {
           _aiSummary = '';
+          _aiSummaryReasoning = '';
           _summarizing = false;
           _summaryError = null;
           _spoilerIds = const {};
@@ -181,6 +184,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         _aiSummary = _summaryProgress.content;
         _spoilerIds = _parseSpoilerIds(_summaryProgress.content);
       }
+      _aiSummaryReasoning = _summaryProgress.reasoningContent;
       if (_summaryProgress.error != null) {
         _summaryError = _summaryProgress.error;
       } else if (_summaryProgress.isGenerating ||
@@ -218,6 +222,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     if (!mounted || cached == null || cached.isEmpty) return;
     setState(() {
       _aiSummary = cached;
+      _aiSummaryReasoning = '';
       _spoilerIds = _parseSpoilerIds(cached);
     });
   }
@@ -365,6 +370,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       _summarizing = true;
       _summaryError = null;
       _aiSummary = '';
+      _aiSummaryReasoning = '';
+      _summaryReasoningExpanded = false;
       _spoilerIds = const {};
       _summaryExpanded = true;
     });
@@ -383,9 +390,10 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     ];
 
     final buffer = StringBuffer();
+    final reasoningBuffer = StringBuffer();
     try {
       final provider = _aiSettings.activeProvider;
-      final stream = _aiApi.streamChat(
+      final stream = _aiApi.streamChatChunks(
         apiKey: provider.apiKey!,
         baseUrl: provider.baseUrl,
         apiFormat: provider.apiFormat,
@@ -393,15 +401,34 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
         messages: messages,
         cancelToken: cancelToken,
       );
-      await for (final delta in stream) {
+      await for (final chunk in stream) {
         if (!mounted) return;
-        buffer.write(delta);
-        setState(() => _aiSummary = buffer.toString());
+        if (chunk.isReasoning) {
+          reasoningBuffer.write(chunk.text);
+        } else {
+          buffer.write(chunk.text);
+        }
+        final reasoningText = reasoningBuffer.toString();
+        setState(() {
+          _aiSummary = buffer.toString();
+          _aiSummaryReasoning = reasoningText;
+        });
+        ChapterSummaryCache.updateProgress(
+          widget.chapterUuid,
+          buffer.toString(),
+          reasoningContent: reasoningText,
+        );
       }
       if (mounted && buffer.isNotEmpty) {
         final full = buffer.toString();
         setState(() => _spoilerIds = _parseSpoilerIds(full));
-        await ChapterSummaryCache.set(widget.chapterUuid, full);
+        await ChapterSummaryCache.set(
+          widget.chapterUuid,
+          full,
+          reasoningContent: reasoningBuffer.isEmpty
+              ? null
+              : reasoningBuffer.toString(),
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -510,6 +537,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     if (!mounted) return;
     setState(() {
       _aiSummary = '';
+      _aiSummaryReasoning = '';
+      _summaryReasoningExpanded = false;
       _summaryError = null;
       _spoilerIds = const {};
     });
@@ -1170,6 +1199,10 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
 
   Widget _buildSummaryPanel(ColorScheme cs, TextTheme tt) {
     final hasContent = _aiSummary.isNotEmpty;
+    final reasoning = _aiSummaryReasoning.trim();
+    final hasReasoning = reasoning.isNotEmpty;
+    final reasoningExpanded =
+        hasReasoning && (!hasContent || _summaryReasoningExpanded);
     return Container(
       decoration: BoxDecoration(
         color: cs.surfaceContainerLow,
@@ -1208,6 +1241,16 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
             ],
           ),
           if (_summaryExpanded) ...[
+            if (hasReasoning) ...[
+              _buildSummaryReasoningBox(
+                cs,
+                tt,
+                reasoning: reasoning,
+                expanded: reasoningExpanded,
+                collapsed: hasContent,
+              ),
+              const SizedBox(height: 8),
+            ],
             if (_summaryError != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
@@ -1283,6 +1326,71 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryReasoningBox(
+    ColorScheme cs,
+    TextTheme tt, {
+    required String reasoning,
+    required bool expanded,
+    required bool collapsed,
+  }) {
+    final textStyle = tt.bodySmall?.copyWith(
+      color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+      fontSize: 12,
+      height: 1.35,
+    );
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: collapsed
+          ? () => setState(
+              () => _summaryReasoningExpanded = !_summaryReasoningExpanded,
+            )
+          : null,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(4, 2, 8, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLowest.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.7)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.psychology_alt_outlined,
+                  size: 14,
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  expanded ? '思考过程' : '思考过程（已折叠）',
+                  style: textStyle?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                if (collapsed) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.78),
+                  ),
+                ],
+              ],
+            ),
+            if (expanded) ...[
+              const SizedBox(height: 6),
+              Text(reasoning, style: textStyle),
+            ],
+          ],
+        ),
       ),
     );
   }
