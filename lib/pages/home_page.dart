@@ -1,7 +1,11 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
+import '../models/user_manager.dart';
 import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
@@ -16,14 +20,16 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
+const _mangaHomeCardWidth = 112.0;
+
 class _HomePageState extends State<HomePage> {
-  static const _homeCacheKey = 'home_v2';
+  static const _cacheKey = 'manga_home_v1';
   static const _rankingOrdering = '-datetime_updated';
-  static const _cardWidth = 112.0;
 
   final _api = ApiClient();
   final _cache = DataCache();
-  List<Comic> _recommendations = [];
+  final _user = UserManager();
+  MangaHome? _home;
   List<Comic> _rankingPreview = [];
   bool _loading = true;
   bool _refreshing = false;
@@ -32,31 +38,37 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _user.addListener(_onUserChanged);
     _loadFromCache();
     _load();
   }
 
+  @override
+  void dispose() {
+    _user.removeListener(_onUserChanged);
+    super.dispose();
+  }
+
+  void _onUserChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _loadFromCache() async {
-    final cached = await _cache.get(_homeCacheKey);
-    if (cached != null && _loading) {
-      setState(() {
-        _recommendations =
-            (cached['recommendations'] as List?)
-                ?.map((j) => Comic.fromJson(j))
-                .toList() ??
-            [];
-        _rankingPreview =
-            (cached['ranking'] as List?)
-                ?.map((j) => Comic.fromJson(j))
-                .toList() ??
-            [];
-        _loading = false;
-      });
-    }
+    final cached = await _cache.get(_cacheKey);
+    if (!mounted || cached == null || !_loading) return;
+    setState(() {
+      _home = MangaHome.fromJson(Map<String, dynamic>.from(cached['home']));
+      _rankingPreview =
+          (cached['ranking'] as List?)
+              ?.map((j) => Comic.fromJson(j))
+              .toList() ??
+          [];
+      _loading = false;
+    });
   }
 
   Future<void> _load() async {
-    final hasData = _recommendations.isNotEmpty;
+    final hasData = _home != null;
     if (!hasData) {
       setState(() {
         _loading = true;
@@ -66,22 +78,22 @@ class _HomePageState extends State<HomePage> {
       setState(() => _refreshing = true);
     }
     try {
-      final recsFuture = _api.getRecommendations(limit: 10);
+      final homeFuture = _api.getMangaHome();
       final rankingFuture = _api.getComicList(
         ordering: _rankingOrdering,
         limit: 6,
       );
-      final recs = await recsFuture;
+      final home = await homeFuture;
       final ranking = await rankingFuture;
       if (!mounted) return;
       setState(() {
-        _recommendations = recs;
+        _home = home;
         _rankingPreview = ranking.list;
         _loading = false;
         _refreshing = false;
       });
-      _cache.put(_homeCacheKey, {
-        'recommendations': recs.map((c) => c.toJson()).toList(),
+      _cache.put(_cacheKey, {
+        'home': home.toJson(),
         'ranking': ranking.list.map((c) => c.toJson()).toList(),
       });
     } catch (e) {
@@ -113,10 +125,17 @@ class _HomePageState extends State<HomePage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final contentWidth = screenWidth.clamp(0.0, 900.0);
     final hp = (screenWidth - contentWidth) / 2 + 16;
+    final home = _home;
+    final bannerItems = home == null
+        ? const <_MangaBannerItem>[]
+        : home.banners
+              .map(_MangaBannerItem.fromBanner)
+              .where((item) => item.cover.isNotEmpty)
+              .toList();
 
     if (_loading) return const Center(child: CircularProgressIndicator());
 
-    if (_error != null && _recommendations.isEmpty) {
+    if (_error != null && home == null) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -142,10 +161,23 @@ class _HomePageState extends State<HomePage> {
             const SliverToBoxAdapter(
               child: LinearProgressIndicator(minHeight: 2),
             ),
-
-          // ── 推荐区 ──
-          if (_recommendations.isNotEmpty) ...[
-            _SectionTitle(
+          if (bannerItems.isNotEmpty && _user.bannerVisible)
+            SliverToBoxAdapter(
+              child: _MangaBannerCarousel(
+                items: bannerItems,
+                hp: hp,
+                onTap: (comic) => _openComic(
+                  comic,
+                  ComicHeroTags.base(
+                    scope: 'home-banner',
+                    pathWord: comic.pathWord,
+                    index: 0,
+                  ),
+                ),
+              ),
+            ),
+          if (home != null && home.recommendations.isNotEmpty)
+            _MangaSection(
               title: '热门推荐',
               icon: Icons.auto_awesome,
               hp: hp,
@@ -153,33 +185,11 @@ class _HomePageState extends State<HomePage> {
                 context,
                 MaterialPageRoute(builder: (_) => const RecommendPage()),
               ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 190,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: EdgeInsets.symmetric(horizontal: hp),
-                  itemCount: _recommendations.length,
-                  itemBuilder: (_, i) {
-                    final c = _recommendations[i];
-                    final heroTagBase = ComicHeroTags.base(
-                      scope: 'home-recommend',
-                      pathWord: c.pathWord,
-                      index: i,
-                    );
-                    return _RecommendCard(
-                      comic: c,
-                      heroTagBase: heroTagBase,
-                      onTap: () => _openComic(c, heroTagBase),
-                    );
-                  },
-                ),
+              child: _MangaHorizontalList(
+                items: home.recommendations,
+                onTap: _openComic,
               ),
             ),
-          ],
-
-          // ── 排行区 ──
           if (_rankingPreview.isNotEmpty) ...[
             _SectionTitle(
               title: '漫画排行',
@@ -207,7 +217,7 @@ class _HomePageState extends State<HomePage> {
                   );
                 }, childCount: _rankingPreview.length),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: _cardWidth,
+                  maxCrossAxisExtent: _mangaHomeCardWidth,
                   childAspectRatio: 0.55,
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
@@ -219,6 +229,476 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+}
+
+// ── Banner ──
+
+class _MangaBannerItem {
+  final String cover;
+  final String title;
+  final String brief;
+  final Comic? comic;
+
+  const _MangaBannerItem({
+    required this.cover,
+    required this.title,
+    required this.brief,
+    this.comic,
+  });
+
+  factory _MangaBannerItem.fromBanner(MangaBanner banner) {
+    final comic = banner.comic;
+    final title = comic != null && comic.name.isNotEmpty
+        ? comic.name
+        : banner.brief;
+    return _MangaBannerItem(
+      cover: banner.cover.isNotEmpty ? banner.cover : (comic?.cover ?? ''),
+      title: title,
+      brief: banner.brief,
+      comic: comic,
+    );
+  }
+}
+
+class _MangaBannerCarousel extends StatefulWidget {
+  final List<_MangaBannerItem> items;
+  final double hp;
+  final ValueChanged<Comic> onTap;
+
+  const _MangaBannerCarousel({
+    required this.items,
+    required this.hp,
+    required this.onTap,
+  });
+
+  @override
+  State<_MangaBannerCarousel> createState() => _MangaBannerCarouselState();
+}
+
+class _MangaBannerCarouselState extends State<_MangaBannerCarousel> {
+  late final PageController _controller;
+  Timer? _timer;
+  late int _page;
+
+  @override
+  void initState() {
+    super.initState();
+    _page = _initialPage(widget.items.length);
+    _controller = PageController(initialPage: _page);
+    _restartTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MangaBannerCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items.length != widget.items.length) {
+      _page = _initialPage(widget.items.length);
+      if (_controller.hasClients) {
+        _controller.jumpToPage(_page);
+      }
+      _restartTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _restartTimer() {
+    _timer?.cancel();
+    if (widget.items.length <= 1) return;
+    _timer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _nextPage(restartTimer: false),
+    );
+  }
+
+  int _initialPage(int count) {
+    return count > 1 ? count * 1000 : 0;
+  }
+
+  void _nextPage({bool restartTimer = true}) {
+    if (!mounted || widget.items.length <= 1) return;
+    if (!_controller.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _nextPage(restartTimer: restartTimer),
+      );
+      return;
+    }
+    _animateToPage(_page + 1, restartTimer: restartTimer);
+  }
+
+  void _animateToPage(int page, {bool restartTimer = true}) {
+    _controller.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+    );
+    if (restartTimer) {
+      _restartTimer();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 176,
+          child: Stack(
+            children: [
+              PageView.builder(
+                controller: _controller,
+                physics: const PageScrollPhysics(),
+                itemCount: widget.items.length > 1 ? null : widget.items.length,
+                onPageChanged: (page) => setState(() => _page = page),
+                itemBuilder: (_, i) {
+                  final item = widget.items[i % widget.items.length];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      left: widget.hp,
+                      right: widget.hp,
+                      bottom: 8,
+                    ),
+                    child: _MangaBannerCard(
+                      item: item,
+                      onTap: item.comic == null
+                          ? null
+                          : () => widget.onTap(item.comic!),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        if (widget.items.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < widget.items.length; i++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: i == _page % widget.items.length ? 16 : 6,
+                    height: 6,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: i == _page % widget.items.length
+                          ? cs.primary
+                          : cs.onSurfaceVariant.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _MangaBannerCard extends StatelessWidget {
+  final _MangaBannerItem item;
+  final VoidCallback? onTap;
+
+  const _MangaBannerCard({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        margin: EdgeInsets.zero,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            CoverBrightnessFilter(
+              child: CachedNetworkImage(
+                imageUrl: item.cover,
+                fit: BoxFit.cover,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
+                placeholder: (_, _) => _ImagePlaceholder(icon: Icons.book),
+                errorWidget: (_, _, _) =>
+                    _ImagePlaceholder(icon: Icons.broken_image),
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.72),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 14,
+              right: 14,
+              bottom: 12,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (item.title.isNotEmpty)
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  if (item.brief.isNotEmpty && item.brief != item.title) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      item.brief,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.bodySmall?.copyWith(color: cs.surface),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Section & Card ──
+
+class _MangaSection extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final double hp;
+  final Widget child;
+  final VoidCallback? onMore;
+
+  const _MangaSection({
+    required this.title,
+    required this.icon,
+    required this.hp,
+    required this.child,
+    this.onMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return SliverToBoxAdapter(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(hp, 0, hp, 6),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: cs.primary),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                if (onMore != null)
+                  TextButton(
+                    onPressed: onMore,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('更多', style: TextStyle(color: cs.primary)),
+                        Icon(Icons.chevron_right, size: 18, color: cs.primary),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _MangaHorizontalList extends StatelessWidget {
+  final List<Comic> items;
+  final void Function(Comic, String) onTap;
+
+  const _MangaHorizontalList({required this.items, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final contentWidth = screenWidth < 900 ? screenWidth : 900.0;
+    final hp = (screenWidth - contentWidth) / 2 + 16;
+
+    return SizedBox(
+      height: 190,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.symmetric(horizontal: hp),
+        itemCount: items.length,
+        itemBuilder: (_, i) {
+          final comic = items[i];
+          final heroTagBase = ComicHeroTags.base(
+            scope: 'home-recommend',
+            pathWord: comic.pathWord,
+            index: i,
+          );
+          return _MangaCard(
+            comic: comic,
+            heroTagBase: heroTagBase,
+            onTap: () => onTap(comic, heroTagBase),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MangaCard extends StatelessWidget {
+  final Comic comic;
+  final String? heroTagBase;
+  final VoidCallback onTap;
+
+  const _MangaCard({
+    required this.comic,
+    this.heroTagBase,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: _mangaHomeCardWidth,
+        margin: const EdgeInsets.only(right: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _hero(
+                ComicHeroTags.cover,
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  margin: EdgeInsets.zero,
+                  child: CoverBrightnessFilter(
+                    child: CachedNetworkImage(
+                      imageUrl: comic.cover,
+                      fit: BoxFit.cover,
+                      width: _mangaHomeCardWidth,
+                      height: double.infinity,
+                      fadeInDuration: Duration.zero,
+                      fadeOutDuration: Duration.zero,
+                      placeholder: (_, _) => Container(
+                        color: cs.surfaceContainerHighest,
+                        child: Center(
+                          child: Icon(
+                            Icons.image,
+                            color: cs.onSurfaceVariant,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                      errorWidget: (_, _, _) => Container(
+                        color: cs.surfaceContainerHighest,
+                        child: Center(
+                          child: Icon(
+                            Icons.broken_image,
+                            color: cs.onSurfaceVariant,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              comic.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tt.bodySmall,
+            ),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Icon(Icons.local_fire_department, size: 12, color: cs.primary),
+                const SizedBox(width: 2),
+                Text(
+                  ComicCard.formatPopular(comic.popular),
+                  style: tt.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                ),
+                if (comic.authors.isNotEmpty) ...[
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      comic.authors.map((a) => a.name).join(' / '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _hero(String Function(String base) tagOf, Widget child) {
+    final base = heroTagBase;
+    if (base == null) return child;
+    return Hero(
+      tag: tagOf(base),
+      createRectTween: ComicHeroTags.createRectTween,
+      placeholderBuilder: _buildHeroPlaceholder,
+      child: child,
+    );
+  }
+
+  Widget _buildHeroPlaceholder(
+    BuildContext context,
+    Size heroSize,
+    Widget child,
+  ) {
+    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 }
 
@@ -270,109 +750,18 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _RecommendCard extends StatelessWidget {
-  static const _cardWidth = _HomePageState._cardWidth;
+class _ImagePlaceholder extends StatelessWidget {
+  final IconData icon;
 
-  final Comic comic;
-  final String? heroTagBase;
-  final VoidCallback onTap;
-  const _RecommendCard({
-    required this.comic,
-    this.heroTagBase,
-    required this.onTap,
-  });
+  const _ImagePlaceholder({required this.icon});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final title = Text(
-      comic.name,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.bodySmall,
+    return Container(
+      color: cs.surfaceContainerHighest,
+      child: Center(child: Icon(icon, color: cs.onSurfaceVariant, size: 32)),
     );
-    final authorText = Text(
-      comic.authors.map((a) => a.name).join(' / '),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(
-        context,
-      ).textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
-    );
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: _cardWidth,
-        margin: const EdgeInsets.only(right: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _hero(
-                ComicHeroTags.cover,
-                Card(
-                  clipBehavior: Clip.antiAlias,
-                  margin: EdgeInsets.zero,
-                  child: CoverBrightnessFilter(
-                    child: CachedNetworkImage(
-                      imageUrl: comic.cover,
-                      fit: BoxFit.cover,
-                      width: _cardWidth,
-                      height: double.infinity,
-                      fadeInDuration: Duration.zero,
-                      fadeOutDuration: Duration.zero,
-                      placeholder: (_, _) => Container(
-                        color: cs.surfaceContainerHighest,
-                        child: Center(
-                          child: Icon(
-                            Icons.image,
-                            color: cs.onSurfaceVariant,
-                            size: 32,
-                          ),
-                        ),
-                      ),
-                      errorWidget: (_, _, _) => Container(
-                        color: cs.surfaceContainerHighest,
-                        child: Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            color: cs.onSurfaceVariant,
-                            size: 32,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            title,
-            if (comic.authors.isNotEmpty) authorText,
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _hero(String Function(String base) tagOf, Widget child) {
-    final base = heroTagBase;
-    if (base == null) return child;
-    return Hero(
-      tag: tagOf(base),
-      createRectTween: ComicHeroTags.createRectTween,
-      placeholderBuilder: _buildHeroPlaceholder,
-      child: child,
-    );
-  }
-
-  Widget _buildHeroPlaceholder(
-    BuildContext context,
-    Size heroSize,
-    Widget child,
-  ) {
-    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 }
 

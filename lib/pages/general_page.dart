@@ -221,6 +221,17 @@ class _GeneralPageState extends State<GeneralPage> {
                     onChanged: _user.setAnimeFeatureEnabled,
                   ),
                   const Divider(height: 1, indent: 16, endIndent: 16),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.view_carousel_outlined),
+                    title: const Text('显示Banner'),
+                    subtitle: Text(
+                      '关闭后漫画和动漫主页顶部Banner不显示',
+                      style: tt.bodySmall,
+                    ),
+                    value: _user.bannerVisible,
+                    onChanged: _user.setBannerVisible,
+                  ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
                   ListTile(
                     leading: const Icon(Icons.upload_file_rounded),
                     title: const Text('导出设置'),

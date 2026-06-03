@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/anime.dart';
+import '../models/user_manager.dart';
 import '../utils/cover_brightness_filter.dart';
 import '../utils/data_cache.dart';
 import '../utils/toast.dart';
@@ -26,6 +27,7 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
 
   final _api = ApiClient();
   final _cache = DataCache();
+  final _user = UserManager();
   AnimeHome? _home;
   bool _loading = true;
   bool _refreshing = false;
@@ -34,13 +36,19 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
   @override
   void initState() {
     super.initState();
+    _user.addListener(_onUserChanged);
     _loadFromCache();
     _load();
   }
 
   @override
   void dispose() {
+    _user.removeListener(_onUserChanged);
     super.dispose();
+  }
+
+  void _onUserChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadFromCache() async {
@@ -149,7 +157,7 @@ class _AnimeHomePageState extends State<AnimeHomePage> {
             const SliverToBoxAdapter(
               child: LinearProgressIndicator(minHeight: 2),
             ),
-          if (bannerItems.isNotEmpty)
+          if (bannerItems.isNotEmpty && _user.bannerVisible)
             SliverToBoxAdapter(
               child: _AnimeBannerCarousel(
                 items: bannerItems,
@@ -282,7 +290,7 @@ class _AnimeBannerCarouselState extends State<_AnimeBannerCarousel> {
     _timer?.cancel();
     if (widget.items.length <= 1) return;
     _timer = Timer.periodic(
-      const Duration(seconds: 3),
+      const Duration(seconds: 5),
       (_) => _nextPage(restartTimer: false),
     );
   }

@@ -10,6 +10,70 @@ class Author {
   Map<String, dynamic> toJson() => {'name': name, 'path_word': pathWord};
 }
 
+class MangaBanner {
+  final String cover;
+  final String brief;
+  final String outUuid;
+  final Comic? comic;
+
+  const MangaBanner({
+    required this.cover,
+    required this.brief,
+    required this.outUuid,
+    this.comic,
+  });
+
+  factory MangaBanner.fromJson(Map<String, dynamic> json) => MangaBanner(
+    cover: json['cover']?.toString() ?? '',
+    brief: json['brief']?.toString() ?? '',
+    outUuid: json['out_uuid']?.toString() ?? '',
+    comic: json['comic'] is Map
+        ? Comic.fromJson(Map<String, dynamic>.from(json['comic']))
+        : null,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'cover': cover,
+    'brief': brief,
+    'out_uuid': outUuid,
+    'comic': comic?.toJson(),
+  };
+}
+
+class MangaHome {
+  final List<MangaBanner> banners;
+  final List<Comic> recommendations;
+
+  const MangaHome({this.banners = const [], this.recommendations = const []});
+
+  factory MangaHome.fromJson(Map<String, dynamic> json) => MangaHome(
+    banners:
+        (json['banners'] as List?)
+            ?.map((e) => MangaBanner.fromJson(Map<String, dynamic>.from(e)))
+            .toList() ??
+        const [],
+    recommendations: _parseRecList(json['recs']),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'banners': banners.map((e) => e.toJson()).toList(),
+    'recs': {
+      'list': recommendations.map((e) => {'comic': e.toJson()}).toList(),
+    },
+  };
+
+  static List<Comic> _parseRecList(dynamic section) {
+    final list = section is Map ? section['list'] as List? : null;
+    if (list == null) return const [];
+    return list
+        .where((e) => e is Map && e['comic'] is Map)
+        .map(
+          (e) => Comic.fromJson(Map<String, dynamic>.from((e as Map)['comic'])),
+        )
+        .toList();
+  }
+}
+
 class Theme {
   final String name;
   final String pathWord;

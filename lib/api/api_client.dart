@@ -16,6 +16,7 @@ import '../utils/network_error.dart';
 class ApiClient {
   static const _hostSg = 'mapi.hotmangasg.com';
   static const _hostSd = 'mapi.hotmangasd.com';
+  static const _hostMangaHome = 'api.2024manga.com';
   // static const _hostComment = 'api.mangacopy.com';
   static const _hostComment = 'api.copy2000.online';
   static const _hostComicComment = 'api.copy2000.online';
@@ -254,7 +255,10 @@ class ApiClient {
     Map<String, dynamic>? params,
     String host = _hostSg,
   }) async {
-    final resp = await _dio.get(_url(path, host), queryParameters: params);
+    final url = host == _hostMangaHome
+        ? 'https://$host$path'
+        : _url(path, host);
+    final resp = await _dio.get(url, queryParameters: params);
     return resp.data['results'];
   }
 
@@ -506,6 +510,16 @@ class ApiClient {
   }
 
   // ── 漫画相关 ──
+
+  /// 漫画主页
+  Future<MangaHome> getMangaHome() async {
+    final data = await _get(
+      '/api/v3/h5/discoverIndex/freeComic',
+      params: {'platform': 3, '_update': true},
+      host: _hostMangaHome,
+    );
+    return MangaHome.fromJson(data);
+  }
 
   // 1. 热门搜索关键词
   Future<List<String>> getHotKeywords() async {

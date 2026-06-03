@@ -114,6 +114,7 @@ class UserManager extends ChangeNotifier {
   static const _keyLoginSource = 'login_source';
   static const _keyApiRoute = 'api_route';
   static const _keyAnimeFeatureEnabled = 'anime_feature_enabled';
+  static const _keyBannerVisible = 'banner_visible';
   static const _keyAnimeHomeBannerCollapsed = 'anime_home_banner_collapsed';
   static const _keyAnimeSkipSeconds = 'anime_skip_seconds';
   static const _keyAnimePlaybackProgressEnabled =
@@ -175,6 +176,7 @@ class UserManager extends ChangeNotifier {
   String _loginSource = 'hotmanga';
   int _apiRoute = 0; // 0=线路1(默认), 1=线路2
   bool _animeFeatureEnabled = true;
+  bool _bannerVisible = true;
   bool _animeHomeBannerCollapsed = false;
   int _animeSkipSeconds = 86;
   bool _animePlaybackProgressEnabled = true;
@@ -244,6 +246,7 @@ class UserManager extends ChangeNotifier {
   String get loginSource => _loginSource;
   int get apiRoute => _apiRoute;
   bool get animeFeatureEnabled => _animeFeatureEnabled;
+  bool get bannerVisible => _bannerVisible;
   bool get animeHomeBannerCollapsed => _animeHomeBannerCollapsed;
   int get animeSkipSeconds => _animeSkipSeconds;
   bool get animePlaybackProgressEnabled => _animePlaybackProgressEnabled;
@@ -347,6 +350,7 @@ class UserManager extends ChangeNotifier {
     _loginSource = prefs.getString(_keyLoginSource) ?? 'hotmanga';
     _apiRoute = prefs.getInt(_keyApiRoute) ?? 0;
     _animeFeatureEnabled = prefs.getBool(_keyAnimeFeatureEnabled) ?? true;
+    _bannerVisible = prefs.getBool(_keyBannerVisible) ?? true;
     _animeHomeBannerCollapsed =
         prefs.getBool(_keyAnimeHomeBannerCollapsed) ?? false;
     _animeSkipSeconds = prefs.getInt(_keyAnimeSkipSeconds) ?? 86;
@@ -782,6 +786,14 @@ class UserManager extends ChangeNotifier {
     _animeFeatureEnabled = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAnimeFeatureEnabled, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setBannerVisible(bool visible) async {
+    if (_bannerVisible == visible) return;
+    _bannerVisible = visible;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBannerVisible, visible);
     notifyListeners();
   }
 
