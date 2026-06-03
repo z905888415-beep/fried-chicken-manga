@@ -80,7 +80,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   String _aiSummary = '';
   String _aiSummaryReasoning = '';
   bool _summarizing = false;
-  bool _summaryExpanded = true;
+  bool _summaryExpanded = false;
+  bool _summaryExpansionTouched = false;
   bool _summaryReasoningExpanded = false;
   String? _summaryError;
   CancelToken? _summaryCancelToken;
@@ -99,10 +100,13 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     _commentFontScale = _user.commentFontScale;
     _scrollController.addListener(_handleScrollDirection);
     _aiSettings.addListener(_onAiChanged);
+    _applySummaryDefaultExpansion();
     _summaryProgress = ChapterSummaryCache.progressOf(widget.chapterUuid);
     _summaryProgress.addListener(_onSummaryProgressChanged);
     _applySummaryProgress(rebuild: false);
     _aiSettings.load().then((_) {
+      if (!mounted) return;
+      setState(_applySummaryDefaultExpansion);
       _loadCachedSummary().then((_) => _maybeAutoSummary());
     });
     if (widget.initialComments != null) {
@@ -131,7 +135,20 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
   }
 
   void _onAiChanged() {
-    if (mounted) setState(() {});
+    if (mounted) setState(_applySummaryDefaultExpansion);
+  }
+
+  void _applySummaryDefaultExpansion() {
+    if (!_summaryExpansionTouched) {
+      _summaryExpanded = !_aiSettings.summaryCollapsed;
+    }
+  }
+
+  void _toggleSummaryExpanded() {
+    setState(() {
+      _summaryExpansionTouched = true;
+      _summaryExpanded = !_summaryExpanded;
+    });
   }
 
   void _onSummaryProgressChanged() {
@@ -185,9 +202,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
           _summaryProgress.content.isNotEmpty) {
         _summaryError = null;
       }
-      if (_summaryProgress.isGenerating) {
-        _summaryExpanded = true;
-      }
+      _applySummaryDefaultExpansion();
     }
 
     if (rebuild) {
@@ -373,7 +388,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
       _aiSummaryReasoning = '';
       _summaryReasoningExpanded = false;
       _spoilerIds = const {};
-      _summaryExpanded = true;
+      _applySummaryDefaultExpansion();
     });
 
     final snippets = _buildCommentSnippets();
@@ -538,6 +553,8 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     setState(() {
       _aiSummary = '';
       _aiSummaryReasoning = '';
+      _summaryExpansionTouched = false;
+      _summaryExpanded = !_aiSettings.summaryCollapsed;
       _summaryReasoningExpanded = false;
       _summaryError = null;
       _spoilerIds = const {};
@@ -1647,8 +1664,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               IconButton(
                 visualDensity: VisualDensity.compact,
                 tooltip: _summaryExpanded ? '收起' : '展开',
-                onPressed: () =>
-                    setState(() => _summaryExpanded = !_summaryExpanded),
+                onPressed: _toggleSummaryExpanded,
                 icon: Icon(
                   _summaryExpanded ? Icons.expand_less : Icons.expand_more,
                   size: 20,

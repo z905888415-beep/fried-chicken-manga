@@ -154,6 +154,7 @@ class AiSettings extends ChangeNotifier {
   static const _keyAutoSummary = 'zhipu_auto_summary';
   static const _keyAutoSummaryMin = 'zhipu_auto_summary_min';
   static const _keyAutoSummaryTiming = 'zhipu_auto_summary_timing';
+  static const _keySummaryCollapsed = 'zhipu_summary_collapsed';
   static const _keySpoilerWarn = 'zhipu_spoiler_warn';
   static const _keyCustomModels = 'zhipu_custom_models';
 
@@ -261,6 +262,7 @@ class AiSettings extends ChangeNotifier {
   bool _autoSummary = false;
   int _autoSummaryMin = 30;
   AiAutoSummaryTiming _autoSummaryTiming = AiAutoSummaryTiming.onOpen;
+  bool _summaryCollapsed = true;
   bool _spoilerWarn = true;
   List<PromptPreset> _presets = List.from(builtInPresets);
   String _activePresetId = presetBasicId;
@@ -280,6 +282,7 @@ class AiSettings extends ChangeNotifier {
   bool get autoSummary => _autoSummary;
   int get autoSummaryMin => _autoSummaryMin;
   AiAutoSummaryTiming get autoSummaryTiming => _autoSummaryTiming;
+  bool get summaryCollapsed => _summaryCollapsed;
   bool get spoilerWarn => _spoilerWarn;
   List<PromptPreset> get presets => List.unmodifiable(_presets);
   String get activePresetId => _activePresetId;
@@ -315,6 +318,7 @@ class AiSettings extends ChangeNotifier {
     _autoSummaryTiming = _parseAutoSummaryTiming(
       sp.getString(_keyAutoSummaryTiming),
     );
+    _summaryCollapsed = sp.getBool(_keySummaryCollapsed) ?? true;
     _spoilerWarn = sp.getBool(_keySpoilerWarn) ?? true;
     _activePresetId = sp.getString(_keyActivePreset) ?? presetBasicId;
     _customModels = sp.getStringList(_keyCustomModels) ?? [];
@@ -706,6 +710,13 @@ class AiSettings extends ChangeNotifier {
     _autoSummaryTiming = timing;
     final sp = await SharedPreferences.getInstance();
     await sp.setString(_keyAutoSummaryTiming, timing.name);
+    notifyListeners();
+  }
+
+  Future<void> setSummaryCollapsed(bool collapsed) async {
+    _summaryCollapsed = collapsed;
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_keySummaryCollapsed, collapsed);
     notifyListeners();
   }
 

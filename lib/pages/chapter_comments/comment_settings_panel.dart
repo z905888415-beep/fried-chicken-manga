@@ -385,6 +385,13 @@ class _CommentSettingsPanelState extends State<_CommentSettingsPanel> {
                       if (enabled && hasKey) ...[
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
+                          title: const Text('折叠 AI 评论'),
+                          subtitle: const Text('开启后 AI 评论默认折叠，生成中也保持折叠'),
+                          value: zhipu.summaryCollapsed,
+                          onChanged: (v) => zhipu.setSummaryCollapsed(v),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
                           title: const Text('自动 AI 总结'),
                           subtitle: Text(
                             '评论数 ≥ ${zhipu.autoSummaryMin} 条时自动生成',
