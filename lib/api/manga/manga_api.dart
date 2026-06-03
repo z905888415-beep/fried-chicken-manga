@@ -158,7 +158,72 @@ mixin _MangaApi on _ApiClientBase {
     return (list: list, total: results['total'] as int? ?? 0);
   }
 
-  // 9.2 漫画评论 / 评论回复
+  // 9.2 章节发表评论
+  Future<void> postChapterComment(String chapterId, String content) async {
+    final trimmed = content.trim();
+    final length = trimmed.runes.length;
+    if (length < 3 || length > 200) {
+      throw ArgumentError('评论字数需在 3-200 之间');
+    }
+
+    final token = _user.token;
+    if (token == null || token.isEmpty) {
+      throw const HttpException('请先登录后再发表评论');
+    }
+
+    final hosts = <String>[_hostComment, _hostMemberComment];
+    DioException? lastNetworkError;
+
+    for (final host in hosts) {
+      try {
+        final resp = await _commentDio.post(
+          'https://$host/api/v3/member/roast',
+          data: {'chapter_id': chapterId, 'roast': trimmed, '_update': true},
+          options: _browserRequestOptions(
+            host,
+            contentType: Headers.formUrlEncodedContentType,
+            headers: {'Authorization': 'Token $token'},
+          ),
+        );
+
+        final data = resp.data;
+        if (data is Map) {
+          final code = data['code'];
+          if (code != null && code != 200) {
+            final message = data['message']?.toString() ?? '发表评论失败';
+            throw DioException(
+              requestOptions: resp.requestOptions,
+              response: resp,
+              message: message,
+              error: message,
+              type: DioExceptionType.badResponse,
+            );
+          }
+        }
+        return;
+      } on DioException catch (e) {
+        if (_isTransientCommentNetworkError(e)) {
+          lastNetworkError = e;
+          continue;
+        }
+        rethrow;
+      }
+    }
+
+    if (lastNetworkError != null) {
+      throw lastNetworkError;
+    }
+  }
+
+  bool _isTransientCommentNetworkError(DioException error) {
+    if (error.type != DioExceptionType.unknown) return false;
+    final inner = error.error;
+    return inner is HandshakeException ||
+        inner is SocketException ||
+        inner is HttpException;
+  }
+
+  // 9.3 漫画评论 / 评论回复
   Future<({List<ComicComment> list, int total})> getComicComments(
     String comicId, {
     String replyId = '',

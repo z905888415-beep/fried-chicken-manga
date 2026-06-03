@@ -24,6 +24,7 @@ const _hostMangaHome = 'api.2024manga.com';
 // const _hostComment = 'api.mangacopy.com';
 const _hostComment = 'api.copy2000.online';
 const _hostComicComment = 'api.copy2000.online';
+const _hostMemberComment = 'api.mangacopy.com';
 const _hostCopy = 'www.mangacopy.com';
 const _hostWeb = 'www.manga2026.xyz';
 
@@ -59,14 +60,14 @@ abstract class _ApiClientBase {
           'pragma': 'no-cache',
           'priority': 'u=1, i',
           'sec-ch-ua':
-              '"Not:A-Brand";v="99", "Microsoft Edge";v="145", "Chromium";v="145"',
+              '"Chromium";v="148", "Microsoft Edge";v="148", "Not/A)Brand";v="99"',
           'sec-ch-ua-mobile': '?0',
           'sec-ch-ua-platform': '"Windows"',
           'sec-fetch-dest': 'empty',
           'sec-fetch-mode': 'cors',
           'sec-fetch-site': 'same-site',
           'user-agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0',
           'Host': _hostComment,
           'Connection': 'keep-alive',
         },
@@ -232,12 +233,16 @@ abstract class _ApiClientBase {
   Options _browserRequestOptions(
     String host, {
     String secFetchSite = 'same-site',
+    String? contentType,
+    Map<String, dynamic>? headers,
   }) {
     return Options(
+      contentType: contentType,
       headers: {
         'Host': host,
         'referer': 'https://www.mangacopy.com/',
         'sec-fetch-site': secFetchSite,
+        if (headers != null) ...headers,
       },
     );
   }

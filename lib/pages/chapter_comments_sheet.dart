@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -239,8 +240,14 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     );
   }
 
-  Future<void> _loadComments({bool loadMore = false}) async {
-    if (!loadMore && widget.initialComments != null && _comments.isNotEmpty) {
+  Future<void> _loadComments({
+    bool loadMore = false,
+    bool force = false,
+  }) async {
+    if (!force &&
+        !loadMore &&
+        widget.initialComments != null &&
+        _comments.isNotEmpty) {
       return;
     }
     if (loadMore) {
@@ -557,6 +564,268 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     return '${(diff.inDays / 365).floor()}年前';
   }
 
+  int _commentTextLength(String text) => text.trim().runes.length;
+
+  String _extractCommentPostErrorMessage(Object error) {
+    if (error is DioException) {
+      final inner = error.error;
+      final innerText = inner?.toString().trim();
+      if (innerText != null && innerText.isNotEmpty) {
+        return innerText;
+      }
+      final message = error.message?.trim();
+      if (message != null && message.isNotEmpty) {
+        return message;
+      }
+    }
+    return NetworkError.message(error);
+  }
+
+  String _formatCommentPostErrorLog(Object error) {
+    if (error is DioException) {
+      final buffer = StringBuffer();
+      buffer.writeln('DioException');
+      buffer.writeln('type: ${error.type}');
+      final message = error.message?.trim();
+      if (message != null && message.isNotEmpty) {
+        buffer.writeln('message: $message');
+      }
+      buffer.writeln(
+        'request: ${error.requestOptions.method} ${error.requestOptions.uri}',
+      );
+
+      final requestData = error.requestOptions.data;
+      if (requestData != null) {
+        buffer.writeln('requestData: ${_formatLogValue(requestData)}');
+      }
+
+      final response = error.response;
+      if (response != null) {
+        buffer.writeln('statusCode: ${response.statusCode}');
+        if (response.data != null) {
+          buffer.writeln('responseData: ${_formatLogValue(response.data)}');
+        }
+      }
+
+      buffer.writeln('toString: ${error.toString()}');
+      return buffer.toString().trimRight();
+    }
+
+    return error.toString();
+  }
+
+  String _formatLogValue(Object? value) {
+    if (value == null) return 'null';
+    if (value is String) return value;
+    try {
+      return jsonEncode(value);
+    } catch (_) {
+      return value.toString();
+    }
+  }
+
+  Widget _buildPostCommentErrorPanel(
+    BuildContext context, {
+    required String message,
+    required String log,
+    required VoidCallback onCopy,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.errorContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.error.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline, size: 18, color: cs.error),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Dio 异常',
+                  style: tt.labelLarge?.copyWith(
+                    color: cs.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onCopy,
+                style: TextButton.styleFrom(foregroundColor: cs.error),
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('复制日志'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            style: tt.bodySmall?.copyWith(
+              color: cs.onErrorContainer,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 140),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                log,
+                style: tt.bodySmall?.copyWith(
+                  color: cs.onErrorContainer.withValues(alpha: 0.9),
+                  fontFamily: 'monospace',
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showPostCommentDialog() async {
+    if (!_user.isLoggedIn) {
+      showToast(context, '请先登录后再发表评论', isError: true);
+      return;
+    }
+
+    final controller = TextEditingController();
+    var submitting = false;
+    String? errorText;
+    String? errorLog;
+
+    Future<void> submit(
+      BuildContext dialogContext,
+      StateSetter setLocal,
+    ) async {
+      final content = controller.text.trim();
+      final length = _commentTextLength(content);
+      if (length < 3 || length > 200) {
+        setLocal(() {
+          errorText = '评论字数需在 3-200 之间';
+          errorLog = 'ValidationError: 评论字数需在 3-200 之间';
+        });
+        return;
+      }
+
+      setLocal(() {
+        submitting = true;
+        errorText = null;
+        errorLog = null;
+      });
+
+      try {
+        await _api.postChapterComment(widget.chapterUuid, content);
+        if (!mounted) return;
+        if (dialogContext.mounted) {
+          Navigator.of(dialogContext).pop();
+        }
+        showToast(context, '评论已发布');
+        await _loadComments(force: true);
+      } catch (e) {
+        if (!dialogContext.mounted) return;
+        setLocal(() {
+          submitting = false;
+          errorText = _extractCommentPostErrorMessage(e);
+          errorLog = _formatCommentPostErrorLog(e);
+        });
+      }
+    }
+
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (dialogContext, setLocal) {
+              final length = _commentTextLength(controller.text);
+              final canSubmit = !submitting && length >= 3 && length <= 200;
+              return AlertDialog(
+                title: const Text('发表评论'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        enabled: !submitting,
+                        minLines: 3,
+                        maxLines: 6,
+                        maxLength: 200,
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(200),
+                        ],
+                        textInputAction: TextInputAction.newline,
+                        decoration: InputDecoration(
+                          hintText: '说点什么吧',
+                          helperText: '评论字数 3-200',
+                          errorText: errorText,
+                          border: const OutlineInputBorder(),
+                        ),
+                        onChanged: (_) => setLocal(() {
+                          errorText = null;
+                          errorLog = null;
+                        }),
+                      ),
+                      if (errorText != null && errorLog != null) ...[
+                        const SizedBox(height: 12),
+                        _buildPostCommentErrorPanel(
+                          dialogContext,
+                          message: errorText!,
+                          log: errorLog!,
+                          onCopy: () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: errorLog!),
+                            );
+                            if (!mounted) return;
+                            showToast(context, '日志已复制');
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: submitting
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    onPressed: canSubmit
+                        ? () => submit(dialogContext, setLocal)
+                        : null,
+                    child: submitting
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('发布'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
   void _showCommentSettings() {
     showModalBottomSheet(
       context: context,
@@ -657,207 +926,223 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                     child: Column(
                       children: [
                         const SizedBox(height: 10),
-                    Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: cs.onSurfaceVariant.withValues(alpha: 0.35),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '章节评论',
-                                  style: tt.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                        Container(
+                          width: 36,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '章节评论',
+                                      style: tt.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      widget.chapterName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: tt.bodySmall?.copyWith(
+                                        color: cs.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  widget.chapterName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: tt.bodySmall?.copyWith(
-                                    color: cs.onSurfaceVariant,
+                              ),
+                              if (!_allCommentsLoaded)
+                                _loadingAll
+                                    ? const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: Padding(
+                                          padding: EdgeInsets.all(2),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                      )
+                                    : IconButton(
+                                        tooltip: '加载全部评论',
+                                        onPressed: _loadAllComments,
+                                        icon: const Icon(Icons.refresh),
+                                      ),
+                              if (_aiSettings.hasApiKey &&
+                                  _aiSettings.summaryEnabled) ...[
+                                IconButton(
+                                  tooltip: _aiSummary.isEmpty
+                                      ? 'AI 总结评论'
+                                      : '重新生成 AI 总结',
+                                  onPressed: _summarizing
+                                      ? null
+                                      : _summarizeComments,
+                                  icon: Icon(
+                                    Icons.smart_toy_outlined,
+                                    color: _summarizing
+                                        ? cs.onSurfaceVariant
+                                        : cs.primary,
                                   ),
                                 ),
                               ],
-                            ),
-                          ),
-                          if (!_allCommentsLoaded)
-                            _loadingAll
-                                ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: Padding(
-                                      padding: EdgeInsets.all(2),
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                  )
-                                : IconButton(
-                                    tooltip: '加载全部评论',
-                                    onPressed: _loadAllComments,
-                                    icon: const Icon(Icons.refresh),
-                                  ),
-                          if (_aiSettings.hasApiKey &&
-                              _aiSettings.summaryEnabled) ...[
-                            IconButton(
-                              tooltip: _aiSummary.isEmpty
-                                  ? 'AI 总结评论'
-                                  : '重新生成 AI 总结',
-                              onPressed: _summarizing
-                                  ? null
-                                  : _summarizeComments,
-                              icon: Icon(
-                                Icons.smart_toy_outlined,
-                                color: _summarizing
-                                    ? cs.onSurfaceVariant
-                                    : cs.primary,
+                              IconButton(
+                                tooltip: _useCompactLayout
+                                    ? '切换为列表布局'
+                                    : '切换为紧凑布局',
+                                onPressed: () {
+                                  setState(
+                                    () =>
+                                        _useCompactLayout = !_useCompactLayout,
+                                  );
+                                  _user.setCommentCompactLayout(
+                                    _useCompactLayout,
+                                  );
+                                },
+                                icon: Icon(
+                                  _useCompactLayout
+                                      ? Icons.view_agenda_outlined
+                                      : Icons.dashboard_outlined,
+                                ),
                               ),
-                            ),
-                          ],
-                          IconButton(
-                            tooltip: _useCompactLayout ? '切换为列表布局' : '切换为紧凑布局',
-                            onPressed: () {
-                              setState(
-                                () => _useCompactLayout = !_useCompactLayout,
-                              );
-                              _user.setCommentCompactLayout(_useCompactLayout);
-                            },
-                            icon: Icon(
-                              _useCompactLayout
-                                  ? Icons.view_agenda_outlined
-                                  : Icons.dashboard_outlined,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '评论区设置',
-                            onPressed: _showCommentSettings,
-                            icon: const Icon(Icons.tune),
-                          ),
-                          Text(
-                            _total > 0
-                                ? (_allCommentsLoaded
-                                      ? '$_total 条'
-                                      : '${_comments.length}/$_total')
-                                : '',
-                            style: tt.bodySmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Divider(height: 1, color: cs.outlineVariant),
-                    Expanded(
-                      child: ExcludeSemantics(
-                        child: _buildBody(context, cs, tt),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: AnimatedSlide(
-                offset: _showFloatingButtons
-                    ? Offset.zero
-                    : const Offset(0, 1.2),
-                curve: Curves.easeInOutCubic,
-                duration: const Duration(milliseconds: 260),
-                child: AnimatedOpacity(
-                  opacity: _showFloatingButtons ? 1.0 : 0.0,
-                  curve: Curves.easeInOutCubic,
-                  duration: const Duration(milliseconds: 260),
-                  child: SafeArea(
-                    top: false,
-                    child: Builder(
-                      builder: (context) {
-                        final buttonBackgroundColor = cs.primaryContainer;
-                        final buttonForegroundColor = cs.onPrimaryContainer;
-                        final buttonStyle = FilledButton.styleFrom(
-                          backgroundColor: buttonBackgroundColor,
-                          foregroundColor: buttonForegroundColor,
-                          elevation: 6,
-                          shadowColor: Colors.black.withValues(alpha: 0.22),
-                          minimumSize: const Size(0, 52),
-                          maximumSize: const Size.fromHeight(52),
-                          fixedSize: const Size.fromHeight(52),
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        );
-
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            FilledButton.icon(
-                              style: buttonStyle,
-                              onPressed: () {
-                                widget.onBackToCatalog?.call();
-                                Navigator.of(context).pop('back_to_catalog');
-                              },
-                              icon: const Icon(Icons.list_rounded),
-                              label: const Text('返回目录'),
-                            ),
-                            if (widget.hasNextChapter) ...[
-                              const SizedBox(width: 8),
-                              FilledButton.icon(
-                                style: buttonStyle,
-                                onPressed: widget.onNextChapter,
-                                icon: const Icon(Icons.skip_next_rounded),
-                                label: const Text('下一话'),
+                              IconButton(
+                                tooltip: '评论区设置',
+                                onPressed: _showCommentSettings,
+                                icon: const Icon(Icons.tune),
+                              ),
+                              Text(
+                                _total > 0
+                                    ? (_allCommentsLoaded
+                                          ? '$_total 条'
+                                          : '${_comments.length}/$_total')
+                                    : '',
+                                style: tt.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
                               ),
                             ],
-                            const SizedBox(width: 8),
-                            SizedBox.square(
-                              dimension: 52,
-                              child: FilledButton(
-                                style: buttonStyle.copyWith(
-                                  padding: const WidgetStatePropertyAll(
-                                    EdgeInsets.zero,
-                                  ),
-                                  minimumSize: const WidgetStatePropertyAll(
-                                    Size.square(52),
-                                  ),
-                                  maximumSize: const WidgetStatePropertyAll(
-                                    Size.square(52),
-                                  ),
-                                ),
-                                onPressed: () =>
-                                    Navigator.of(context).maybePop(),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                          ),
+                        ),
+                        Divider(height: 1, color: cs.outlineVariant),
+                        Expanded(
+                          child: ExcludeSemantics(
+                            child: _buildBody(context, cs, tt),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ),
-            ),
-          ],
-        ), // Stack
-        ), // SizedBox
-      ), // GestureDetector (inner)
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: AnimatedSlide(
+                    offset: _showFloatingButtons
+                        ? Offset.zero
+                        : const Offset(0, 1.2),
+                    curve: Curves.easeInOutCubic,
+                    duration: const Duration(milliseconds: 260),
+                    child: AnimatedOpacity(
+                      opacity: _showFloatingButtons ? 1.0 : 0.0,
+                      curve: Curves.easeInOutCubic,
+                      duration: const Duration(milliseconds: 260),
+                      child: SafeArea(
+                        top: false,
+                        child: Builder(
+                          builder: (context) {
+                            final buttonBackgroundColor = cs.primaryContainer;
+                            final buttonForegroundColor = cs.onPrimaryContainer;
+                            final buttonStyle = FilledButton.styleFrom(
+                              backgroundColor: buttonBackgroundColor,
+                              foregroundColor: buttonForegroundColor,
+                              elevation: 6,
+                              shadowColor: Colors.black.withValues(alpha: 0.22),
+                              minimumSize: const Size(0, 52),
+                              maximumSize: const Size.fromHeight(52),
+                              fixedSize: const Size.fromHeight(52),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            );
+
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                FilledButton.icon(
+                                  style: buttonStyle,
+                                  onPressed: _showPostCommentDialog,
+                                  icon: const Icon(Icons.comment_outlined),
+                                  label: const Text('评论'),
+                                ),
+                                const SizedBox(width: 8),
+                                FilledButton.icon(
+                                  style: buttonStyle,
+                                  onPressed: () {
+                                    widget.onBackToCatalog?.call();
+                                    Navigator.of(
+                                      context,
+                                    ).pop('back_to_catalog');
+                                  },
+                                  icon: const Icon(Icons.list_rounded),
+                                  label: const Text('目录'),
+                                ),
+                                if (widget.hasNextChapter) ...[
+                                  const SizedBox(width: 8),
+                                  FilledButton.icon(
+                                    style: buttonStyle,
+                                    onPressed: widget.onNextChapter,
+                                    icon: const Icon(Icons.skip_next_rounded),
+                                    label: const Text('下一话'),
+                                  ),
+                                ],
+                                const SizedBox(width: 8),
+                                SizedBox.square(
+                                  dimension: 52,
+                                  child: FilledButton(
+                                    style: buttonStyle.copyWith(
+                                      padding: const WidgetStatePropertyAll(
+                                        EdgeInsets.zero,
+                                      ),
+                                      minimumSize: const WidgetStatePropertyAll(
+                                        Size.square(52),
+                                      ),
+                                      maximumSize: const WidgetStatePropertyAll(
+                                        Size.square(52),
+                                      ),
+                                    ),
+                                    onPressed: () =>
+                                        Navigator.of(context).maybePop(),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ), // Stack
+          ), // SizedBox
+        ), // GestureDetector (inner)
       ), // Align
     ); // GestureDetector (outer)
   }
