@@ -573,21 +573,23 @@ class _AiConfigPageState extends State<AiConfigPage> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  initialValue: models.contains(selectedModel)
-                      ? selectedModel
-                      : null,
+                  initialValue: models.contains(selectedModel) ? selectedModel : null,
                   decoration: const InputDecoration(
                     labelText: '默认模型',
                     border: OutlineInputBorder(),
                   ),
-                  items: models
-                      .map(
-                        (model) =>
-                            DropdownMenuItem(value: model, child: Text(model)),
-                      )
-                      .toList(),
+                  items: [
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('未选择'),
+                    ),
+                    ...models.map(
+                      (model) =>
+                          DropdownMenuItem(value: model, child: Text(model)),
+                    ),
+                  ],
                   onChanged: (value) {
-                    if (value != null) setLocal(() => selectedModel = value);
+                    setLocal(() => selectedModel = value ?? '');
                   },
                 ),
                 const SizedBox(height: 8),
@@ -604,20 +606,18 @@ class _AiConfigPageState extends State<AiConfigPage> {
                           onSelected: (_) => setLocal(() {
                             selectedModel = model;
                           }),
-                          onDeleted: models.length <= 1
-                              ? null
-                              : () => setLocal(() {
-                                  models = models
-                                      .where((item) => item != model)
-                                      .toList();
-                                  if (selectedModel == model) {
-                                    selectedModel = models.first;
-                                  }
-                                }),
+                          onDeleted: () => setLocal(() {
+                            models = models
+                                .where((item) => item != model)
+                                .toList();
+                            if (selectedModel == model) {
+                              selectedModel = models.isEmpty ? '' : models.first;
+                            }
+                          }),
                         ),
                       ActionChip(
                         avatar: const Icon(Icons.add, size: 18),
-                        label: const Text('添加模型'),
+                        label: const Text('添加'),
                         onPressed: () => addModel(setLocal),
                       ),
                       ActionChip(
@@ -625,9 +625,21 @@ class _AiConfigPageState extends State<AiConfigPage> {
                           Icons.cloud_download_outlined,
                           size: 18,
                         ),
-                        label: const Text('获取模型'),
+                        label: const Text('获取'),
                         onPressed: () => fetchModels(setLocal),
                       ),
+                      if (models.isNotEmpty)
+                        ActionChip(
+                          avatar: const Icon(
+                            Icons.clear_all,
+                            size: 18,
+                          ),
+                          label: const Text('清空'),
+                          onPressed: () => setLocal(() {
+                            models = [];
+                            selectedModel = '';
+                          }),
+                        ),
                     ],
                   ),
                 ),
@@ -671,28 +683,25 @@ class _AiConfigPageState extends State<AiConfigPage> {
             FilledButton(
               onPressed: () {
                 final model = selectedModel.trim();
-                if (model.isEmpty) {
-                  showToast(context, '请先添加或获取一个模型', isError: true);
-                  return;
-                }
+                final name = providerPreset == zhipuPreset
+                    ? '智谱清言'
+                    : nameCtrl.text.trim().isEmpty
+                        ? (isNew ? '自定义供应商' : editing.name)
+                        : nameCtrl.text.trim();
                 Navigator.pop(
                   ctx,
                   AiProviderConfig(
                     id: isNew
                         ? 'custom_${DateTime.now().millisecondsSinceEpoch}'
                         : editing.id,
-                    name: providerPreset == zhipuPreset
-                        ? '智谱清言'
-                        : nameCtrl.text.trim().isEmpty
-                        ? (isNew ? '自定义供应商' : editing.name)
-                        : nameCtrl.text.trim(),
+                    name: name,
                     baseUrl: baseUrlCtrl.text.trim(),
                     apiKey: apiKeyCtrl.text.trim().isEmpty
                         ? null
                         : apiKeyCtrl.text.trim(),
                     apiFormat: apiFormat,
                     model: model,
-                    models: {...models, model}.toList(),
+                    models: {...models, if (model.isNotEmpty) model}.toList(),
                     isBuiltIn: isNew ? false : editing.isBuiltIn,
                     enabled: isNew ? true : editing.enabled,
                   ),

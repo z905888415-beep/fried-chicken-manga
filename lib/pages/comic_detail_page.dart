@@ -814,19 +814,36 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         ? '排队中'
         : '${chapter.size}P';
 
+    final brightness = Theme.of(context).brightness;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       decoration: BoxDecoration(
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isSelected ? cs.primary : Colors.transparent,
-          width: 1.4,
+          color: isSelected
+              ? cs.primary
+              : cs.outlineVariant.withValues(
+                  alpha: brightness == Brightness.dark ? 0.22 : 0.45,
+                ),
+          width: isSelected ? 1.4 : 0.6,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: brightness == Brightness.dark ? 0.30 : 0.14,
+            ),
+            blurRadius: brightness == Brightness.dark ? 12 : 14,
+            spreadRadius: brightness == Brightness.dark ? 0 : -1,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Stack(
         children: [
           Material(
-            color: backgroundColor,
+            color: Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             child: InkWell(
               borderRadius: BorderRadius.circular(10),

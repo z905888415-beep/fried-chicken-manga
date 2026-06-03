@@ -633,25 +633,30 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     final tt = Theme.of(context).textTheme;
     final sheetWidth = MediaQuery.of(context).size.width;
 
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: SizedBox(
-        width: sheetWidth,
-        height: MediaQuery.of(context).size.height * _sheetMaxHeightFactor,
-        child: Stack(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  children: [
-                    const SizedBox(height: 10),
+    return GestureDetector(
+      onTap: () => Navigator.of(context).pop(),
+      behavior: HitTestBehavior.translucent,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: GestureDetector(
+          onTap: () {},
+          child: SizedBox(
+            width: sheetWidth,
+            height: MediaQuery.of(context).size.height * _sheetMaxHeightFactor,
+            child: Stack(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 10),
                     Container(
                       width: 36,
                       height: 4,
@@ -850,9 +855,11 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               ),
             ),
           ],
-        ),
-      ),
-    );
+        ), // Stack
+        ), // SizedBox
+      ), // GestureDetector (inner)
+      ), // Align
+    ); // GestureDetector (outer)
   }
 
   Widget _buildBody(BuildContext context, ColorScheme cs, TextTheme tt) {
