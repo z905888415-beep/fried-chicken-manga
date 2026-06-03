@@ -1,0 +1,698 @@
+part of '../chapter_comments_sheet.dart';
+
+class _CommentSkeleton extends StatefulWidget {
+  final bool compact;
+  const _CommentSkeleton({required this.compact});
+
+  @override
+  State<_CommentSkeleton> createState() => _CommentSkeletonState();
+}
+
+class _CommentSkeletonState extends State<_CommentSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final horizontalPadding = widget.compact ? 10.0 : 12.0;
+    final topPadding = widget.compact ? 8.0 : 12.0;
+    final bottomPadding = widget.compact ? 4.0 : 12.0;
+    final avatarSize = widget.compact ? 20.0 : 28.0;
+
+    return FadeTransition(
+      opacity: Tween<double>(
+        begin: 0.3,
+        end: 0.7,
+      ).animate(CurvedAnimation(parent: _anim, curve: Curves.easeInOut)),
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          topPadding,
+          horizontalPadding,
+          bottomPadding,
+        ),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(_commentCardCornerRadius),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: avatarSize,
+                  height: avatarSize,
+                  decoration: BoxDecoration(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 100,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              height: widget.compact ? 14 : 16,
+              decoration: BoxDecoration(
+                color: cs.onSurfaceVariant.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              width: MediaQuery.sizeOf(context).width * 0.6,
+              height: widget.compact ? 14 : 16,
+              decoration: BoxDecoration(
+                color: cs.onSurfaceVariant.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommentCard extends StatefulWidget {
+  final ChapterCommentDisplayEntry entry;
+  final String relativeTime;
+  final bool compact;
+  final bool showAvatar;
+  final bool showUserName;
+  final bool showCommentTime;
+  final double fontScale;
+  final Set<int> spoilerIds;
+
+  const _CommentCard({
+    required this.entry,
+    required this.relativeTime,
+    this.compact = false,
+    this.showAvatar = true,
+    this.showUserName = true,
+    this.showCommentTime = true,
+    this.fontScale = 1.0,
+    this.spoilerIds = const {},
+  });
+
+  @override
+  State<_CommentCard> createState() => _CommentCardState();
+}
+
+class _CommentCardState extends State<_CommentCard> {
+  bool _revealed = false;
+
+  bool get _isSpoiler {
+    // 合并评论：只要其中任一评论 id 在集合中就视为剧透
+    if (_revealed) return false;
+    for (final c in widget.entry.comments) {
+      if (widget.spoilerIds.contains(c.id)) return true;
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final brightness = Theme.of(context).brightness;
+    final entry = widget.entry;
+    final compact = widget.compact;
+    final showAvatar = widget.showAvatar;
+    final showUserName = widget.showUserName;
+    final showCommentTime = widget.showCommentTime;
+    final fontScale = widget.fontScale;
+    final relativeTime = widget.relativeTime;
+    final horizontalPadding = compact ? 10.0 : 12.0;
+    final topPadding = compact ? 8.0 : 12.0;
+    final bottomPadding = compact ? 4.0 : 12.0;
+    final avatarSize = compact ? 20.0 : 28.0;
+    final contentSpacing = compact ? 9.0 : 8.0;
+    final userStyle = _buildCommentUserStyle(tt, cs, compact: compact);
+    final timeStyle = _buildCommentTimeStyle(tt, cs);
+    final bodyStyle = _buildCommentBodyStyle(
+      tt,
+      compact: compact,
+      fontScale: fontScale,
+    );
+    final showMetaRow = showAvatar || showUserName || showCommentTime;
+    final isHotMergedComment =
+        entry.isMerged && _isHotMergedComment(entry.count);
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        topPadding,
+        horizontalPadding,
+        bottomPadding,
+      ),
+      decoration: _buildCommentCardDecoration(
+        cs,
+        brightness: brightness,
+        highlightAsHot: isHotMergedComment,
+      ),
+      child: entry.isMerged
+          ? _MergedCommentContent(
+              entry: entry,
+              compact: compact,
+              contentSpacing: contentSpacing,
+              bodyStyle: bodyStyle,
+              showAvatar: showAvatar,
+              spoilerIds: widget.spoilerIds,
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (showMetaRow) ...[
+                  Row(
+                    children: [
+                      if (showAvatar) ...[
+                        _CommentAvatar(
+                          imageUrl: entry.primaryComment.userAvatar,
+                          size: avatarSize,
+                        ),
+                        SizedBox(width: compact ? 6 : 8),
+                      ],
+                      if (showUserName)
+                        Expanded(
+                          child: Text(
+                            entry.primaryComment.userName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: userStyle,
+                          ),
+                        ),
+                      if (showUserName && showCommentTime)
+                        SizedBox(width: compact ? 6 : 8),
+                      if (showCommentTime) Text(relativeTime, style: timeStyle),
+                    ],
+                  ),
+                  SizedBox(height: contentSpacing),
+                ],
+                Stack(
+                  children: [
+                    SelectableText(
+                      entry.content,
+                      minLines: compact ? 1 : null,
+                      style: bodyStyle,
+                    ),
+                    if (_isSpoiler)
+                      Positioned.fill(
+                        child: GestureDetector(
+                          onTap: () async {
+                            final settings = AiSettings();
+                            if (!settings.spoilerWarn) {
+                              setState(() => _revealed = true);
+                              return;
+                            }
+                            var noRemind = false;
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => StatefulBuilder(
+                                builder: (ctx, setLocal) => AlertDialog(
+                                  title: const Text('剧透警告'),
+                                  content: const Text('真的要打开吗？前方是地狱啊！'),
+                                  actions: [
+                                    SizedBox(
+                                      height: 32,
+                                      child: GestureDetector(
+                                        onTap: () => setLocal(
+                                          () => noRemind = !noRemind,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: Checkbox(
+                                                value: noRemind,
+                                                onChanged: (v) => setLocal(
+                                                  () => noRemind = v ?? false,
+                                                ),
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              '不再提醒',
+                                              style: Theme.of(
+                                                ctx,
+                                              ).textTheme.bodySmall,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, false),
+                                      child: const Text('算了'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('打开'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                            if (ok == true) {
+                              if (noRemind) {
+                                await settings.setSpoilerWarn(false);
+                              }
+                              setState(() => _revealed = true);
+                            }
+                          },
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                              child: Container(
+                                color: cs.surface.withValues(alpha: 0.5),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.visibility_off_outlined,
+                                        size: compact ? 16 : 20,
+                                        color: cs.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '这是一条高度剧透嫌疑的评论',
+                                        style: tt.labelSmall?.copyWith(
+                                          color: cs.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _MergedCommentContent extends StatefulWidget {
+  final ChapterCommentDisplayEntry entry;
+  final bool compact;
+  final double contentSpacing;
+  final TextStyle? bodyStyle;
+  final bool showAvatar;
+  final Set<int> spoilerIds;
+
+  const _MergedCommentContent({
+    required this.entry,
+    required this.compact,
+    required this.contentSpacing,
+    required this.bodyStyle,
+    this.showAvatar = true,
+    this.spoilerIds = const {},
+  });
+
+  @override
+  State<_MergedCommentContent> createState() => _MergedCommentContentState();
+}
+
+class _MergedCommentContentState extends State<_MergedCommentContent> {
+  bool _revealed = false;
+
+  bool get _isSpoiler {
+    if (_revealed) return false;
+    for (final c in widget.entry.comments) {
+      if (widget.spoilerIds.contains(c.id)) return true;
+    }
+    return false;
+  }
+
+  Widget _buildSpoilerOverlay(ColorScheme cs, TextTheme tt) {
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: () async {
+          final settings = AiSettings();
+          if (!settings.spoilerWarn) {
+            setState(() => _revealed = true);
+            return;
+          }
+          var noRemind = false;
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => StatefulBuilder(
+              builder: (ctx, setLocal) => AlertDialog(
+                title: const Text('剧透警告'),
+                content: const Text('真的要打开吗？前方是地狱啊！'),
+                actions: [
+                  SizedBox(
+                    height: 32,
+                    child: GestureDetector(
+                      onTap: () => setLocal(() => noRemind = !noRemind),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: Checkbox(
+                              value: noRemind,
+                              onChanged: (v) =>
+                                  setLocal(() => noRemind = v ?? false),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '不再提醒',
+                            style: Theme.of(ctx).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('算了'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('打开'),
+                  ),
+                ],
+              ),
+            ),
+          );
+          if (ok == true) {
+            if (noRemind) await settings.setSpoilerWarn(false);
+            setState(() => _revealed = true);
+          }
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              color: cs.surface.withValues(alpha: 0.5),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.visibility_off_outlined,
+                      size: widget.compact ? 16 : 20,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '含剧透，点击查看',
+                      style: tt.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final entry = widget.entry;
+    final compact = widget.compact;
+    final showAvatar = widget.showAvatar;
+    final showCountTag = _shouldShowMergedCountTag(entry.count);
+
+    Widget spoilerWrap(Widget child) {
+      if (!_isSpoiler) return child;
+      return Stack(children: [child, _buildSpoilerOverlay(cs, tt)]);
+    }
+
+    if (!showAvatar) {
+      if (!showCountTag) {
+        return spoilerWrap(
+          SelectableText(
+            entry.content,
+            minLines: compact ? 1 : null,
+            style: widget.bodyStyle,
+          ),
+        );
+      }
+      return spoilerWrap(
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: EdgeInsets.only(bottom: compact ? 4 : 6),
+                child: _MergedCommentCountTag(
+                  count: entry.count,
+                  compact: compact,
+                ),
+              ),
+            ),
+            SelectableText(
+              entry.content,
+              minLines: compact ? 1 : null,
+              style: widget.bodyStyle,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            _CommentAvatarStack(
+              comments: entry.avatarComments(),
+              avatarSize: compact ? 22.0 : 26.0,
+              overlap: compact ? 8.0 : 10.0,
+            ),
+            const Spacer(),
+            if (showCountTag) ...[
+              const SizedBox(width: 8),
+              _MergedCommentCountTag(count: entry.count, compact: compact),
+            ],
+          ],
+        ),
+        SizedBox(height: widget.contentSpacing + (compact ? 1 : 2)),
+        spoilerWrap(
+          SelectableText(
+            entry.content,
+            minLines: compact ? 1 : null,
+            style: widget.bodyStyle,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MergedCommentCountTag extends StatelessWidget {
+  final int count;
+  final bool compact;
+
+  const _MergedCommentCountTag({required this.count, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final isHot = _isHotMergedComment(count);
+    final tagHeight = _mergedCountTagHeight(compact: compact);
+    final minWidth = _mergedCountTagMinWidth(compact: compact, isHot: isHot);
+    final horizontalPadding = _mergedCountTagHorizontalPadding(
+      compact: compact,
+    );
+    final colors = _mergedCountTagColors(cs, isHot: isHot);
+    final decoration = _buildMergedCountTagDecoration(cs, isHot: isHot);
+    final label = _formatMergedCount(count);
+    final iconSize = _hotCommentTagIconSize(compact: compact);
+
+    return Container(
+      constraints: BoxConstraints(minWidth: minWidth, minHeight: tagHeight),
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding / 2),
+      decoration: decoration,
+      child: Center(
+        widthFactor: 1,
+        heightFactor: 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (isHot) ...[
+              Icon(
+                Icons.local_fire_department_rounded,
+                size: iconSize,
+                color: colors.foreground,
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              textHeightBehavior: const TextHeightBehavior(
+                applyHeightToFirstAscent: false,
+                applyHeightToLastDescent: false,
+              ),
+              strutStyle: const StrutStyle(height: 1, forceStrutHeight: true),
+              style: tt.labelSmall?.copyWith(
+                color: colors.foreground,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0,
+                height: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommentAvatarStack extends StatelessWidget {
+  final List<ChapterComment> comments;
+  final double avatarSize;
+  final double overlap;
+
+  const _CommentAvatarStack({
+    required this.comments,
+    required this.avatarSize,
+    required this.overlap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final items = comments.isEmpty
+        ? const <ChapterComment>[]
+        : comments.take(5).toList(growable: false);
+
+    if (items.isEmpty) {
+      return _CommentAvatar(imageUrl: '', size: avatarSize);
+    }
+
+    final width = _avatarStackWidth(
+      items.length,
+      avatarSize: avatarSize,
+      overlap: overlap,
+    );
+    final inset = _avatarInset(avatarSize);
+
+    return SizedBox(
+      width: width,
+      height: avatarSize,
+      child: Stack(
+        children: [
+          for (var i = 0; i < items.length; i++)
+            Positioned(
+              left: i * (avatarSize - overlap),
+              child: Container(
+                width: avatarSize,
+                height: avatarSize,
+                padding: EdgeInsets.all(inset),
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: _CommentAvatar(
+                  imageUrl: items[i].userAvatar,
+                  size: avatarSize - inset * 2,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommentAvatar extends StatelessWidget {
+  final String imageUrl;
+  final double size;
+
+  const _CommentAvatar({required this.imageUrl, this.size = 40});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return ClipOval(
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: imageUrl.isEmpty
+            ? ColoredBox(
+                color: cs.surfaceContainerHighest,
+                child: Icon(
+                  Icons.person,
+                  size: size * 0.5,
+                  color: cs.onSurfaceVariant,
+                ),
+              )
+            : CachedNetworkImage(
+                imageUrl: imageUrl,
+                fit: BoxFit.cover,
+                placeholder: (_, _) => ColoredBox(
+                  color: cs.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.person,
+                    size: size * 0.5,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                errorWidget: (_, _, _) => ColoredBox(
+                  color: cs.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.person,
+                    size: size * 0.5,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+}

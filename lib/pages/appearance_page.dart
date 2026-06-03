@@ -726,10 +726,7 @@ class _DesktopFontCardState extends State<_DesktopFontCard> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       else
-                        Icon(
-                          Icons.arrow_drop_down,
-                          color: cs.onSurfaceVariant,
-                        ),
+                        Icon(Icons.arrow_drop_down, color: cs.onSurfaceVariant),
                     ],
                   ),
                 ),

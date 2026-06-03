@@ -394,10 +394,12 @@ class _BangumiRatingBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final badgeBackground =
-        isDark ? const Color(0xFF5C4A10) : const Color(0xFFFFF3CD);
-    final badgeForeground =
-        isDark ? const Color(0xFFF5D86A) : const Color(0xFFB7791F);
+    final badgeBackground = isDark
+        ? const Color(0xFF5C4A10)
+        : const Color(0xFFFFF3CD);
+    final badgeForeground = isDark
+        ? const Color(0xFFF5D86A)
+        : const Color(0xFFB7791F);
     const starColor = Color(0xFFFFB800);
 
     return Container(

@@ -489,8 +489,9 @@ class _VideoPlayerSurfaceState extends State<_VideoPlayerSurface> {
                                     );
                                     _isSliderDragging = false;
                                   },
-                                  activeColor:
-                                      Theme.of(context).colorScheme.primary,
+                                  activeColor: Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
                                   inactiveColor: Colors.white38,
                                 ),
                               ),
