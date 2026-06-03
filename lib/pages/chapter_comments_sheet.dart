@@ -769,7 +769,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                         ],
                         textInputAction: TextInputAction.newline,
                         decoration: InputDecoration(
-                          hintText: '说点什么吧',
+                          hintText: '吐槽一下',
                           helperText: '评论字数 3-200',
                           errorText: errorText,
                           border: const OutlineInputBorder(),
@@ -824,6 +824,135 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
     } finally {
       controller.dispose();
     }
+  }
+
+  Future<void> _showCommentActionMenu(ChapterCommentDisplayEntry entry) async {
+    final content = entry.content.trim();
+    if (content.isEmpty) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final cs = Theme.of(sheetContext).colorScheme;
+        final tt = Theme.of(sheetContext).textTheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '评论操作',
+                      style: tt.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: cs.outlineVariant),
+                  ),
+                  child: Text(
+                    content,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.bodyMedium,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  leading: const Icon(Icons.copy_outlined),
+                  title: const Text('复制'),
+                  onTap: () => Navigator.of(sheetContext).pop('copy'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.add_comment_outlined),
+                  title: const Text('+1'),
+                  subtitle: const Text('发送一条相同评论'),
+                  onTap: () => Navigator.of(sheetContext).pop('plus_one'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || action == null) return;
+    if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: content));
+      if (!mounted) return;
+      showToast(context, '评论已复制');
+    } else if (action == 'plus_one') {
+      await _plusOneComment(content);
+    }
+  }
+
+  Future<void> _plusOneComment(String content) async {
+    if (!_user.isLoggedIn) {
+      showToast(context, '请先登录后再发表评论', isError: true);
+      return;
+    }
+
+    final length = _commentTextLength(content);
+    if (length < 3 || length > 200) {
+      showToast(context, '评论字数需在 3-200 之间，无法 +1', isError: true);
+      return;
+    }
+
+    try {
+      await _api.postChapterComment(widget.chapterUuid, content);
+      if (!mounted) return;
+      showToast(context, '+1 已发送');
+      await _loadComments(force: true);
+    } catch (e) {
+      if (!mounted) return;
+      await _showPostCommentErrorDialog(e);
+    }
+  }
+
+  Future<void> _showPostCommentErrorDialog(Object error) async {
+    final message = _extractCommentPostErrorMessage(error);
+    final log = _formatCommentPostErrorLog(error);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('发表评论失败'),
+        content: SingleChildScrollView(
+          child: _buildPostCommentErrorPanel(
+            dialogContext,
+            message: message,
+            log: log,
+            onCopy: () async {
+              await Clipboard.setData(ClipboardData(text: log));
+              if (!mounted) return;
+              showToast(context, '日志已复制');
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCommentSettings() {
@@ -1256,6 +1385,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
               showCommentTime: _showCommentTime,
               fontScale: _commentFontScale,
               spoilerIds: _aiSettings.spoilerAnalysis ? _spoilerIds : const {},
+              onLongPress: (entry) => _showCommentActionMenu(entry),
             );
           },
         ),
@@ -1315,6 +1445,7 @@ class _ChapterCommentsSheetState extends State<ChapterCommentsSheet> {
                           spoilerIds: _aiSettings.spoilerAnalysis
                               ? _spoilerIds
                               : const {},
+                          onLongPress: (entry) => _showCommentActionMenu(entry),
                         ),
                       ),
                       if (i != row.items.length - 1)

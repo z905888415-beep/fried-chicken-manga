@@ -105,6 +105,7 @@ class _CommentCard extends StatefulWidget {
   final bool showCommentTime;
   final double fontScale;
   final Set<int> spoilerIds;
+  final void Function(ChapterCommentDisplayEntry entry)? onLongPress;
 
   const _CommentCard({
     required this.entry,
@@ -115,6 +116,7 @@ class _CommentCard extends StatefulWidget {
     this.showCommentTime = true,
     this.fontScale = 1.0,
     this.spoilerIds = const {},
+    this.onLongPress,
   });
 
   @override
@@ -161,167 +163,174 @@ class _CommentCardState extends State<_CommentCard> {
     final isHotMergedComment =
         entry.isMerged && _isHotMergedComment(entry.count);
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        horizontalPadding,
-        topPadding,
-        horizontalPadding,
-        bottomPadding,
-      ),
-      decoration: _buildCommentCardDecoration(
-        cs,
-        brightness: brightness,
-        highlightAsHot: isHotMergedComment,
-      ),
-      child: entry.isMerged
-          ? _MergedCommentContent(
-              entry: entry,
-              compact: compact,
-              contentSpacing: contentSpacing,
-              bodyStyle: bodyStyle,
-              showAvatar: showAvatar,
-              spoilerIds: widget.spoilerIds,
-            )
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (showMetaRow) ...[
-                  Row(
-                    children: [
-                      if (showAvatar) ...[
-                        _CommentAvatar(
-                          imageUrl: entry.primaryComment.userAvatar,
-                          size: avatarSize,
-                        ),
-                        SizedBox(width: compact ? 6 : 8),
-                      ],
-                      if (showUserName)
-                        Expanded(
-                          child: Text(
-                            entry.primaryComment.userName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: userStyle,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: widget.onLongPress == null
+          ? null
+          : () => widget.onLongPress!(entry),
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          topPadding,
+          horizontalPadding,
+          bottomPadding,
+        ),
+        decoration: _buildCommentCardDecoration(
+          cs,
+          brightness: brightness,
+          highlightAsHot: isHotMergedComment,
+        ),
+        child: entry.isMerged
+            ? _MergedCommentContent(
+                entry: entry,
+                compact: compact,
+                contentSpacing: contentSpacing,
+                bodyStyle: bodyStyle,
+                showAvatar: showAvatar,
+                spoilerIds: widget.spoilerIds,
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (showMetaRow) ...[
+                    Row(
+                      children: [
+                        if (showAvatar) ...[
+                          _CommentAvatar(
+                            imageUrl: entry.primaryComment.userAvatar,
+                            size: avatarSize,
                           ),
-                        ),
-                      if (showUserName && showCommentTime)
-                        SizedBox(width: compact ? 6 : 8),
-                      if (showCommentTime) Text(relativeTime, style: timeStyle),
-                    ],
-                  ),
-                  SizedBox(height: contentSpacing),
-                ],
-                Stack(
-                  children: [
-                    SelectableText(
-                      entry.content,
-                      minLines: compact ? 1 : null,
-                      style: bodyStyle,
+                          SizedBox(width: compact ? 6 : 8),
+                        ],
+                        if (showUserName)
+                          Expanded(
+                            child: Text(
+                              entry.primaryComment.userName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: userStyle,
+                            ),
+                          ),
+                        if (showUserName && showCommentTime)
+                          SizedBox(width: compact ? 6 : 8),
+                        if (showCommentTime)
+                          Text(relativeTime, style: timeStyle),
+                      ],
                     ),
-                    if (_isSpoiler)
-                      Positioned.fill(
-                        child: GestureDetector(
-                          onTap: () async {
-                            final settings = AiSettings();
-                            if (!settings.spoilerWarn) {
-                              setState(() => _revealed = true);
-                              return;
-                            }
-                            var noRemind = false;
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => StatefulBuilder(
-                                builder: (ctx, setLocal) => AlertDialog(
-                                  title: const Text('剧透警告'),
-                                  content: const Text('真的要打开吗？前方是地狱啊！'),
-                                  actions: [
-                                    SizedBox(
-                                      height: 32,
-                                      child: GestureDetector(
-                                        onTap: () => setLocal(
-                                          () => noRemind = !noRemind,
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: Checkbox(
-                                                value: noRemind,
-                                                onChanged: (v) => setLocal(
-                                                  () => noRemind = v ?? false,
-                                                ),
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              '不再提醒',
-                                              style: Theme.of(
-                                                ctx,
-                                              ).textTheme.bodySmall,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(ctx, false),
-                                      child: const Text('算了'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () => Navigator.pop(ctx, true),
-                                      child: const Text('打开'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                            if (ok == true) {
-                              if (noRemind) {
-                                await settings.setSpoilerWarn(false);
+                    SizedBox(height: contentSpacing),
+                  ],
+                  Stack(
+                    children: [
+                      Text(entry.content, style: bodyStyle),
+                      if (_isSpoiler)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            onTap: () async {
+                              final settings = AiSettings();
+                              if (!settings.spoilerWarn) {
+                                setState(() => _revealed = true);
+                                return;
                               }
-                              setState(() => _revealed = true);
-                            }
-                          },
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                              child: Container(
-                                color: cs.surface.withValues(alpha: 0.5),
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.visibility_off_outlined,
-                                        size: compact ? 16 : 20,
-                                        color: cs.onSurfaceVariant,
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '这是一条高度剧透嫌疑的评论',
-                                        style: tt.labelSmall?.copyWith(
-                                          color: cs.onSurfaceVariant,
+                              var noRemind = false;
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => StatefulBuilder(
+                                  builder: (ctx, setLocal) => AlertDialog(
+                                    title: const Text('剧透警告'),
+                                    content: const Text('真的要打开吗？前方是地狱啊！'),
+                                    actions: [
+                                      SizedBox(
+                                        height: 32,
+                                        child: GestureDetector(
+                                          onTap: () => setLocal(
+                                            () => noRemind = !noRemind,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: Checkbox(
+                                                  value: noRemind,
+                                                  onChanged: (v) => setLocal(
+                                                    () => noRemind = v ?? false,
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '不再提醒',
+                                                style: Theme.of(
+                                                  ctx,
+                                                ).textTheme.bodySmall,
+                                              ),
+                                            ],
+                                          ),
                                         ),
+                                      ),
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
+                                        child: const Text('算了'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
+                                        child: const Text('打开'),
                                       ),
                                     ],
+                                  ),
+                                ),
+                              );
+                              if (ok == true) {
+                                if (noRemind) {
+                                  await settings.setSpoilerWarn(false);
+                                }
+                                setState(() => _revealed = true);
+                              }
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(
+                                  sigmaX: 12,
+                                  sigmaY: 12,
+                                ),
+                                child: Container(
+                                  color: cs.surface.withValues(alpha: 0.5),
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.visibility_off_outlined,
+                                          size: compact ? 16 : 20,
+                                          color: cs.onSurfaceVariant,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '这是一条高度剧透嫌疑的评论',
+                                          style: tt.labelSmall?.copyWith(
+                                            color: cs.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
+                    ],
+                  ),
+                ],
+              ),
+      ),
     );
   }
 }
@@ -466,13 +475,7 @@ class _MergedCommentContentState extends State<_MergedCommentContent> {
 
     if (!showAvatar) {
       if (!showCountTag) {
-        return spoilerWrap(
-          SelectableText(
-            entry.content,
-            minLines: compact ? 1 : null,
-            style: widget.bodyStyle,
-          ),
-        );
+        return spoilerWrap(Text(entry.content, style: widget.bodyStyle));
       }
       return spoilerWrap(
         Column(
@@ -489,11 +492,7 @@ class _MergedCommentContentState extends State<_MergedCommentContent> {
                 ),
               ),
             ),
-            SelectableText(
-              entry.content,
-              minLines: compact ? 1 : null,
-              style: widget.bodyStyle,
-            ),
+            Text(entry.content, style: widget.bodyStyle),
           ],
         ),
       );
@@ -518,13 +517,7 @@ class _MergedCommentContentState extends State<_MergedCommentContent> {
           ],
         ),
         SizedBox(height: widget.contentSpacing + (compact ? 1 : 2)),
-        spoilerWrap(
-          SelectableText(
-            entry.content,
-            minLines: compact ? 1 : null,
-            style: widget.bodyStyle,
-          ),
-        ),
+        spoilerWrap(Text(entry.content, style: widget.bodyStyle)),
       ],
     );
   }

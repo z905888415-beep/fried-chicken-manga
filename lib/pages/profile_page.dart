@@ -408,7 +408,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               color: Color(0xFFE07AD0),
                             ),
                             title: const Text('AI配置'),
-                            subtitle: const Text('配置 OpenAI 兼容模型，总结评论与剧透提醒'),
+                            subtitle: const Text('配置 AI 模型总结评论'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.push(
                               context,
