@@ -74,6 +74,27 @@ void main() {
     expect(user.animeFeatureEnabled, isFalse);
   });
 
+  test('last nav key defaults to comic and persists', () async {
+    final user = UserManager();
+    await user.init();
+
+    expect(user.lastNavKey, UserManager.defaultNavKey);
+
+    await user.setLastNavKey('search');
+    await user.init();
+
+    expect(user.lastNavKey, 'search');
+  });
+
+  test('last nav key falls back to comic when saved key is invalid', () async {
+    SharedPreferences.setMockInitialValues({'last_nav_key': 'missing'});
+
+    final user = UserManager();
+    await user.init();
+
+    expect(user.lastNavKey, UserManager.defaultNavKey);
+  });
+
   test('dark mode cover brightness defaults and persists', () async {
     final user = UserManager();
     await user.init();

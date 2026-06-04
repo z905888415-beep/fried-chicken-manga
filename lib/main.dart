@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -228,11 +229,10 @@ class _DisclaimerDialogState extends State<_DisclaimerDialog> {
 }
 
 class _MainPageState extends State<MainPage> {
-  int _index = 0;
   final _user = UserManager();
+  String _selectedNavKey = UserManager.defaultNavKey;
   bool _didAutoCheckUpdate = false;
   bool _didCheckDisclaimer = false;
-  bool _pendingIndexReset = false;
 
   static const _disclaimerItems = [
     '本应用为非官方第三方客户端，仅基于第三方平台提供的接口或公开可访问资源进行内容展示与访问。',
@@ -250,6 +250,11 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
+    final visibleKeys = _visibleNavKeys();
+    _selectedNavKey = _resolveVisibleNavKey(_user.lastNavKey, visibleKeys);
+    if (_selectedNavKey != _user.lastNavKey) {
+      unawaited(_user.setLastNavKey(_selectedNavKey));
+    }
     _user.addListener(_onUserChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _runStartupFlow();
@@ -290,9 +295,13 @@ class _MainPageState extends State<MainPage> {
 
   void _onUserChanged() {
     if (!mounted) return;
+    final visibleKeys = _visibleNavKeys();
+    final nextNavKey = _resolveVisibleNavKey(_selectedNavKey, visibleKeys);
+    if (nextNavKey != _selectedNavKey) {
+      unawaited(_user.setLastNavKey(nextNavKey));
+    }
     setState(() {
-      final maxIndex = _visibleNavKeys().length - 1;
-      if (_index > maxIndex) _index = 0;
+      _selectedNavKey = nextNavKey;
     });
   }
 
@@ -343,22 +352,21 @@ class _MainPageState extends State<MainPage> {
         .where((k) => _user.isLoggedIn || k != 'bookshelf')
         .where((k) => _user.animeFeatureEnabled || k != 'anime')
         .toList();
-    return keys.isEmpty ? const ['comic'] : keys;
+    return keys.isEmpty ? const [UserManager.defaultNavKey] : keys;
   }
 
-  int _safeSelectedIndex(int destinationsLength) {
-    if (_index >= 0 && _index < destinationsLength) return _index;
-
-    if (!_pendingIndexReset) {
-      _pendingIndexReset = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _pendingIndexReset = false;
-        if (!mounted) return;
-        setState(() => _index = 0);
-      });
+  String _resolveVisibleNavKey(String navKey, List<String> visibleKeys) {
+    if (visibleKeys.contains(navKey)) return navKey;
+    if (visibleKeys.contains(UserManager.defaultNavKey)) {
+      return UserManager.defaultNavKey;
     }
+    return visibleKeys.isEmpty ? UserManager.defaultNavKey : visibleKeys.first;
+  }
 
-    return 0;
+  int _selectedIndex(List<String> orderedKeys) {
+    final selectedKey = _resolveVisibleNavKey(_selectedNavKey, orderedKeys);
+    final index = orderedKeys.indexOf(selectedKey);
+    return index < 0 ? 0 : index;
   }
 
   @override
@@ -375,13 +383,17 @@ class _MainPageState extends State<MainPage> {
     final orderedPages = [
       for (final key in orderedKeys) _navItemData[key]!.page,
     ];
-    final selectedIndex = _safeSelectedIndex(destinations.length);
+    final selectedIndex = _selectedIndex(orderedKeys);
 
     return Scaffold(
       body: IndexedStack(index: selectedIndex, children: orderedPages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) {
+          final navKey = orderedKeys[i];
+          setState(() => _selectedNavKey = navKey);
+          unawaited(_user.setLastNavKey(navKey));
+        },
         height: _user.bottomNavShowLabels ? null : 64,
         labelBehavior: _user.bottomNavShowLabels
             ? NavigationDestinationLabelBehavior.alwaysShow

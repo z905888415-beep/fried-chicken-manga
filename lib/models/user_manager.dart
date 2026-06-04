@@ -69,6 +69,14 @@ class UserManager extends ChangeNotifier {
   static const double minDarkModeCoverBrightness = 0.10;
   static const double maxDarkModeCoverBrightness = 1.0;
   static const double defaultDarkModeCoverBrightness = 0.85;
+  static const defaultNavKey = 'comic';
+  static const defaultNavOrder = [
+    'comic',
+    'anime',
+    'search',
+    'bookshelf',
+    'profile',
+  ];
 
   static const _keyToken = 'user_token';
   static const _keyUsername = 'user_username';
@@ -85,6 +93,7 @@ class UserManager extends ChangeNotifier {
   static const _keyDarkModeCoverBrightness = 'dark_mode_cover_brightness';
   static const _keyBottomNavShowLabels = 'bottom_nav_show_labels';
   static const _keyNavOrder = 'nav_order';
+  static const _keyLastNavKey = 'last_nav_key';
   static const _keyDesktopFontFamily = 'desktop_font_family';
   static const _keyBookshelfOrdering = 'bookshelf_ordering';
   static const _keyReaderMode = 'reader_mode';
@@ -142,13 +151,8 @@ class UserManager extends ChangeNotifier {
   int _customThemeColorValue = defaultCustomThemeColor.toARGB32();
   double _darkModeCoverBrightness = defaultDarkModeCoverBrightness;
   bool _bottomNavShowLabels = true;
-  List<String> _navOrder = const [
-    'comic',
-    'anime',
-    'search',
-    'bookshelf',
-    'profile',
-  ];
+  List<String> _navOrder = defaultNavOrder;
+  String _lastNavKey = defaultNavKey;
   String _desktopFontFamily = '';
   String _bookshelfOrdering = '-datetime_updated';
   int _readerMode = 0;
@@ -205,6 +209,7 @@ class UserManager extends ChangeNotifier {
   double get darkModeCoverBrightness => _darkModeCoverBrightness;
   bool get bottomNavShowLabels => _bottomNavShowLabels;
   List<String> get navOrder => _navOrder;
+  String get lastNavKey => _lastNavKey;
   String get desktopFontFamily => _desktopFontFamily;
   AppThemeOption get themeOption {
     if (_themeColor == customThemeOptionId) {
@@ -314,9 +319,17 @@ class UserManager extends ChangeNotifier {
           defaultDarkModeCoverBrightness,
     );
     _bottomNavShowLabels = prefs.getBool(_keyBottomNavShowLabels) ?? true;
-    _navOrder =
-        prefs.getStringList(_keyNavOrder) ??
-        const ['comic', 'anime', 'search', 'bookshelf', 'profile'];
+    final savedNavOrder = prefs.getStringList(_keyNavOrder);
+    _navOrder = _normalizeNavOrder(savedNavOrder);
+    if (savedNavOrder != null &&
+        savedNavOrder.join('\u0000') != _navOrder.join('\u0000')) {
+      await prefs.setStringList(_keyNavOrder, _navOrder);
+    }
+    final savedLastNavKey = prefs.getString(_keyLastNavKey);
+    _lastNavKey = _normalizeNavKey(savedLastNavKey);
+    if (savedLastNavKey != null && savedLastNavKey != _lastNavKey) {
+      await prefs.setString(_keyLastNavKey, _lastNavKey);
+    }
     _desktopFontFamily = prefs.getString(_keyDesktopFontFamily) ?? '';
     _bookshelfOrdering =
         prefs.getString(_keyBookshelfOrdering) ?? '-datetime_updated';
@@ -582,10 +595,19 @@ class UserManager extends ChangeNotifier {
   }
 
   Future<void> setNavOrder(List<String> order) async {
-    _navOrder = order;
+    _navOrder = _normalizeNavOrder(order);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_keyNavOrder, order);
+    await prefs.setStringList(_keyNavOrder, _navOrder);
     notifyListeners();
+  }
+
+  Future<void> setLastNavKey(String key) async {
+    final nextKey = _normalizeNavKey(key);
+    if (_lastNavKey == nextKey && key == nextKey) return;
+
+    _lastNavKey = nextKey;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyLastNavKey, nextKey);
   }
 
   Future<void> setDesktopFontFamily(String fontFamily) async {
@@ -900,5 +922,24 @@ class UserManager extends ChangeNotifier {
     return value
         .clamp(minDarkModeCoverBrightness, maxDarkModeCoverBrightness)
         .toDouble();
+  }
+
+  static String _normalizeNavKey(String? key) {
+    return defaultNavOrder.contains(key) ? key! : defaultNavKey;
+  }
+
+  static List<String> _normalizeNavOrder(List<String>? order) {
+    final normalized = <String>[];
+    for (final key in order ?? defaultNavOrder) {
+      if (defaultNavOrder.contains(key) && !normalized.contains(key)) {
+        normalized.add(key);
+      }
+    }
+    for (final key in defaultNavOrder) {
+      if (!normalized.contains(key)) {
+        normalized.add(key);
+      }
+    }
+    return normalized;
   }
 }
