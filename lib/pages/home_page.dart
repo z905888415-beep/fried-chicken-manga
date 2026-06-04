@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,20 @@ class HomePage extends StatefulWidget {
 }
 
 const _mangaHomeCardWidth = 112.0;
+const _mangaHomeCardAspectRatio = 0.55;
+const _mangaHomeCardSpacing = 12.0;
+
+double _mangaHomeGridCardWidth(double crossAxisExtent) {
+  final crossAxisCount = math.max(
+    1,
+    (crossAxisExtent / (_mangaHomeCardWidth + _mangaHomeCardSpacing)).ceil(),
+  );
+  final usableCrossAxisExtent = math.max(
+    0.0,
+    crossAxisExtent - _mangaHomeCardSpacing * (crossAxisCount - 1),
+  );
+  return usableCrossAxisExtent / crossAxisCount;
+}
 
 class _HomePageState extends State<HomePage> {
   static const _cacheKey = 'manga_home_v1';
@@ -218,9 +233,9 @@ class _HomePageState extends State<HomePage> {
                 }, childCount: _rankingPreview.length),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                   maxCrossAxisExtent: _mangaHomeCardWidth,
-                  childAspectRatio: 0.55,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
+                  childAspectRatio: _mangaHomeCardAspectRatio,
+                  mainAxisSpacing: _mangaHomeCardSpacing,
+                  crossAxisSpacing: _mangaHomeCardSpacing,
                 ),
               ),
             ),
@@ -553,9 +568,11 @@ class _MangaHorizontalList extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
     final contentWidth = screenWidth < 900 ? screenWidth : 900.0;
     final hp = (screenWidth - contentWidth) / 2 + 16;
+    final cardWidth = _mangaHomeGridCardWidth(contentWidth - 32);
+    final cardHeight = cardWidth / _mangaHomeCardAspectRatio;
 
     return SizedBox(
-      height: 190,
+      height: cardHeight,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.symmetric(horizontal: hp),
@@ -569,6 +586,7 @@ class _MangaHorizontalList extends StatelessWidget {
           );
           return _MangaCard(
             comic: comic,
+            width: cardWidth,
             heroTagBase: heroTagBase,
             onTap: () => onTap(comic, heroTagBase),
           );
@@ -580,11 +598,13 @@ class _MangaHorizontalList extends StatelessWidget {
 
 class _MangaCard extends StatelessWidget {
   final Comic comic;
+  final double width;
   final String? heroTagBase;
   final VoidCallback onTap;
 
   const _MangaCard({
     required this.comic,
+    required this.width,
     this.heroTagBase,
     required this.onTap,
   });
@@ -597,8 +617,8 @@ class _MangaCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: _mangaHomeCardWidth,
-        margin: const EdgeInsets.only(right: 12),
+        width: width,
+        margin: const EdgeInsets.only(right: _mangaHomeCardSpacing),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -612,7 +632,7 @@ class _MangaCard extends StatelessWidget {
                     child: CachedNetworkImage(
                       imageUrl: comic.cover,
                       fit: BoxFit.cover,
-                      width: _mangaHomeCardWidth,
+                      width: width,
                       height: double.infinity,
                       fadeInDuration: Duration.zero,
                       fadeOutDuration: Duration.zero,
