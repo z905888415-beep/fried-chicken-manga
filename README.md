@@ -75,8 +75,8 @@
 ### 克隆与运行
 
 ```bash
-git clone https://github.com/youfengknight/Android-Code-Skills.git
-cd kira-source
+git clone https://github.com/z905888415-beep/fried-chicken-manga.git
+cd fried-chicken-manga
 
 # 拉取依赖
 flutter pub get
