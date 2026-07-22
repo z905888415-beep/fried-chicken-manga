@@ -9,9 +9,14 @@
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.44+-02569B?logo=flutter&logoColor=white"/>
   <img alt="Dart" src="https://img.shields.io/badge/Dart-3.12+-0175C2?logo=dart&logoColor=white"/>
   <img alt="Platform" src="https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white"/>
+  <a href="https://github.com/z905888415-beep/fried-chicken-manga/releases/tag/v1.1.1-bl"><img alt="Download APK" src="https://img.shields.io/badge/Download-APK%20v1.1.1-orange?logo=android&logoColor=white"/></a>
   <img alt="License" src="https://img.shields.io/github/license/caolib/kira"/>
-  <img alt="Stars" src="https://img.shields.io/github/stars/caolib/kira"/>
 </p>
+
+<p align="center">
+  👉 <strong><a href="https://github.com/z905888415-beep/fried-chicken-manga/releases/tag/v1.1.1-bl">点击下载最新 APK 安装包 (v1.1.1)</a></strong>
+</p>
+
 
 ---
 
