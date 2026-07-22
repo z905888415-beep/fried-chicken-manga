@@ -1,15 +1,13 @@
 part of '../api_client.dart';
 
+const danmeiThemePathWord = 'danmei';
+
 mixin _MangaApi on _ApiClientBase {
   // ── 漫画相关 ──
 
   /// 漫画主页
   Future<MangaHome> getMangaHome() async {
-    final data = await _get(
-      '/api/v3/h5/discoverIndex/freeComic',
-      params: {'platform': 3, '_update': true},
-      host: _hostMangaHome,
-    );
+    final data = await JsSourceManager().getMangaHome();
     return MangaHome.fromJson(data);
   }
 
@@ -19,7 +17,12 @@ mixin _MangaApi on _ApiClientBase {
       '/api/v3/search/key',
       params: {'limit': 20, 'offset': 0},
     );
-    return (data['list'] as List).map((e) => e['keyword'] as String).toList();
+    final rawList = safeRawList<Map>(data['list'], required: true);
+    return rawList
+        .map((e) => e['keyword']?.toString())
+        .whereType<String>()
+        .where((k) => k.isNotEmpty)
+        .toList();
   }
 
   // 2. 全部漫画标签
@@ -29,7 +32,10 @@ mixin _MangaApi on _ApiClientBase {
       params: {'free_type': 1, 'limit': 500, 'offset': 0, '_update': true},
       host: _hostSd,
     );
-    return (data['list'] as List).map((e) => Theme.fromJson(e)).toList();
+    return safeRawList<Map>(
+      data['list'],
+      required: true,
+    ).map((e) => Theme.fromJson(Map<String, dynamic>.from(e))).toList();
   }
 
   // 3. 推荐漫画
@@ -43,9 +49,9 @@ mixin _MangaApi on _ApiClientBase {
       params: {'pos': pos, 'limit': limit, 'offset': offset, 'free_type': 1},
       host: _hostSg,
     );
-    return (data['list'] as List)
+    return safeRawList<Map>(data['list'], required: true)
         .where((e) => e['comic'] != null)
-        .map((e) => Comic.fromJson(e['comic']))
+        .map((e) => Comic.fromJson(Map<String, dynamic>.from(e['comic'])))
         .toList();
   }
 
@@ -64,17 +70,19 @@ mixin _MangaApi on _ApiClientBase {
     };
     if (theme != null) params['theme'] = theme;
     final data = await _get('/api/v3/comics', params: params, host: _hostSg);
-    final list = (data['list'] as List).map((e) => Comic.fromJson(e)).toList();
-    return (list: list, total: data['total'] as int);
+    final list = safeRawList<Map>(
+      data['list'],
+      required: true,
+    ).map((e) => Comic.fromJson(Map<String, dynamic>.from(e))).toList();
+    return (
+      list: list,
+      total: safeInt(data['total'], required: false, fallback: 0),
+    );
   }
 
   // 5. 漫画详情
   Future<Comic> getComicDetail(String pathWord) async {
-    final data = await _get(
-      '/api/v3/comic2/$pathWord',
-      params: {'platform': 3},
-      host: _hostSd,
-    );
+    final data = await JsSourceManager().getComicDetail(pathWord);
     return Comic.fromDetailJson(data);
   }
 
@@ -95,31 +103,68 @@ mixin _MangaApi on _ApiClientBase {
       params: {'limit': limit, 'offset': offset},
       host: _hostSd,
     );
-    final list = (data['list'] as List)
-        .map((e) => Chapter.fromJson(e))
-        .toList();
-    return (list: list, total: data['total'] as int);
+    final list = safeRawList<Map>(
+      data['list'],
+      required: true,
+    ).map((e) => Chapter.fromJson(Map<String, dynamic>.from(e))).toList();
+    return (
+      list: list,
+      total: safeInt(data['total'], required: false, fallback: 0),
+    );
   }
 
-  // 8. 搜索漫画
+  // 8. 搜索漫画（通过 JS 引擎，含 BL 过滤）
   Future<({List<Comic> list, int total})> searchComics(
     String query, {
     int limit = 20,
     int offset = 0,
+    String? theme,
   }) async {
+    final data = await JsSourceManager().searchComics(query, offset);
+    final rawList = safeRawList<Map>(data['list'], required: true);
+    final list = rawList
+        .map((e) => Comic.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return (
+      list: list,
+      total: safeInt(data['total'], required: false, fallback: 0),
+    );
+  }
+
+  // 8.1 在指定 theme 范围内搜索漫画（直接调 API，不走 JS 引擎）
+  //
+  // 用于：在 theme=danmei 范围内按关键词搜索子题材。
+  // CopyManga: /api/v3/search/comic?q=keyword&theme=danmei
+  //
+  // 重要：不要给搜索接口传 ordering。
+  // 实测部分线路在 search 上叠加 ordering 会忽略 theme 围栏，放出非耽美结果。
+  // 分类页的最热/最新请走 getComicList(theme=danmei, ordering=...)。
+  Future<({List<Comic> list, int total})> searchComicsWithinTheme(
+    String query, {
+    String theme = 'danmei',
+    int limit = 21,
+    int offset = 0,
+  }) async {
+    final params = <String, dynamic>{
+      'q': query,
+      'theme': theme,
+      'limit': limit,
+      'offset': offset,
+      'free_type': 1,
+    };
     final data = await _get(
       '/api/v3/search/comic',
-      params: {
-        'platform': 3,
-        'q': query,
-        'limit': limit,
-        'offset': offset,
-        'free_type': 1,
-        '_update': true,
-      },
+      params: params,
+      host: _hostSg,
     );
-    final list = (data['list'] as List).map((e) => Comic.fromJson(e)).toList();
-    return (list: list, total: data['total'] as int);
+    final rawList = safeRawList<Map>(data['list'], required: true);
+    final list = rawList
+        .map((e) => Comic.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return (
+      list: list,
+      total: safeInt(data['total'], required: false, fallback: 0),
+    );
   }
 
   // 9. 章节详情
@@ -127,10 +172,9 @@ mixin _MangaApi on _ApiClientBase {
     String pathWord,
     String chapterUuid,
   ) async {
-    final data = await _get(
-      '/api/v3/comic/$pathWord/chapter/$chapterUuid',
-      params: {'platform': 3},
-      host: _hostSd,
+    final data = await JsSourceManager().getChapterDetail(
+      pathWord,
+      chapterUuid,
     );
     return ChapterDetail.fromJson(data);
   }
@@ -151,11 +195,14 @@ mixin _MangaApi on _ApiClientBase {
       },
       options: _browserRequestOptions(_hostComment),
     );
-    final results = resp.data['results'] as Map<String, dynamic>;
-    final list = (results['list'] as List)
+    final results = resp.data['results'] as Map<String, dynamic>? ?? const {};
+    final list = safeRawList<Map>(results['list'], required: true)
         .map((e) => ChapterComment.fromJson(Map<String, dynamic>.from(e)))
         .toList();
-    return (list: list, total: results['total'] as int? ?? 0);
+    return (
+      list: list,
+      total: safeInt(results['total'], required: false, fallback: 0),
+    );
   }
 
   // 9.2 章节发表评论
@@ -244,11 +291,15 @@ mixin _MangaApi on _ApiClientBase {
         secFetchSite: 'cross-site',
       ),
     );
-    final results = resp.data['results'] as Map<String, dynamic>;
-    final list = (results['list'] as List)
-        .map((e) => ComicComment.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    return (list: list, total: results['total'] as int? ?? 0);
+    final results = resp.data['results'] as Map<String, dynamic>? ?? const {};
+    final list = safeRawList<Map>(
+      results['list'],
+      required: true,
+    ).map((e) => ComicComment.fromJson(Map<String, dynamic>.from(e))).toList();
+    return (
+      list: list,
+      total: safeInt(results['total'], required: false, fallback: 0),
+    );
   }
 
   // 10. 个人书架
@@ -268,8 +319,12 @@ mixin _MangaApi on _ApiClientBase {
       },
       host: _hostSg,
     );
-    final list = (data['list'] as List).map((e) {
-      final comic = Comic.fromJson(e['comic']);
+    final list = safeRawList<Map>(data['list'], required: true).map((e) {
+      final comic = Comic.fromJson(
+        e['comic'] is Map
+            ? Map<String, dynamic>.from(e['comic'])
+            : <String, dynamic>{},
+      );
       final browse = e['last_browse'];
       return BookshelfItem(
         comic: comic,
@@ -281,7 +336,10 @@ mixin _MangaApi on _ApiClientBase {
             : null,
       );
     }).toList();
-    return (list: list, total: data['total'] as int);
+    return (
+      list: list,
+      total: safeInt(data['total'], required: false, fallback: 0),
+    );
   }
 
   // 11. 收藏/取消收藏漫画

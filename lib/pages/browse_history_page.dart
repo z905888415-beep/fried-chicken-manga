@@ -3,16 +3,15 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
-import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/user_manager.dart';
 import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
+import '../utils/layout.dart';
 import '../utils/toast.dart';
-import 'anime_detail_page.dart';
+import '../widgets/kira_app_bar.dart';
+import '../widgets/state_views.dart';
 import 'comic_detail_page.dart';
-
-enum _HistoryMode { comic, anime }
 
 class BrowseHistoryPage extends StatefulWidget {
   final WidgetBuilder loginPageBuilder;
@@ -27,9 +26,7 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   final _api = ApiClient();
   final _user = UserManager();
 
-  _HistoryMode _mode = _HistoryMode.comic;
   List<BrowseHistoryItem> _comicItems = [];
-  List<AnimeBrowseHistoryItem> _animeItems = [];
   bool _loading = true;
   bool _refreshing = false;
   bool _loadingMore = false;
@@ -37,13 +34,8 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
   int _offset = 0;
   int _total = 0;
 
-  bool get _animeFeatureEnabled => _user.animeFeatureEnabled;
-  bool get _isAnimeMode => _animeFeatureEnabled && _mode == _HistoryMode.anime;
-  String get _modeLabel => _isAnimeMode ? '动漫' : '漫画';
-  bool get _currentItemsEmpty =>
-      _isAnimeMode ? _animeItems.isEmpty : _comicItems.isEmpty;
-  int get _currentLength =>
-      _isAnimeMode ? _animeItems.length : _comicItems.length;
+  bool get _currentItemsEmpty => _comicItems.isEmpty;
+  int get _currentLength => _comicItems.length;
 
   @override
   void initState() {
@@ -64,61 +56,27 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
 
   void _onUserChanged() {
     if (!mounted) return;
-    if (!_animeFeatureEnabled && _mode == _HistoryMode.anime) {
-      setState(() {
-        _mode = _HistoryMode.comic;
-        _clearItems();
-      });
-    }
-    if (_user.isLoggedIn) {
-      _load(silent: true, force: true);
-    } else {
-      setState(() {
-        _clearItems();
-        _loading = false;
-      });
-    }
+    setState(() {});
   }
 
-  void _clearItems() {
-    _comicItems = [];
-    _animeItems = [];
-    _offset = 0;
-    _total = 0;
-  }
-
-  Future<void> _load({bool silent = false, bool force = false}) async {
-    if (_refreshing && !force) return;
-    final mode = _mode;
+  Future<void> _load({bool silent = false, bool isInitial = false}) async {
+    if (_refreshing) return;
     _refreshing = true;
-    final isInitial = _currentItemsEmpty;
-    if (isInitial) {
-      setState(() => _loading = true);
-    } else {
+    if (!silent && !isInitial) {
       setState(() {});
     }
+
     _offset = 0;
 
     try {
-      if (mode == _HistoryMode.anime) {
-        final data = await _api.getAnimeBrowseHistory();
-        if (!mounted || _mode != mode) return;
-        setState(() {
-          _animeItems = data.list;
-          _total = data.total;
-          _offset = data.list.length;
-          _loading = false;
-        });
-      } else {
-        final data = await _api.getBrowseHistory();
-        if (!mounted || _mode != mode) return;
-        setState(() {
-          _comicItems = data.list;
-          _total = data.total;
-          _offset = data.list.length;
-          _loading = false;
-        });
-      }
+      final data = await _api.getBrowseHistory();
+      if (!mounted) return;
+      setState(() {
+        _comicItems = data.list;
+        _total = data.total;
+        _offset = data.list.length;
+        _loading = false;
+      });
       if (!silent && mounted) {
         showToast(context, '刷新成功');
       }
@@ -138,24 +96,14 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
 
   Future<void> _loadMore() async {
     if (_loadingMore || _refreshing || _offset >= _total) return;
-    final mode = _mode;
     _loadingMore = true;
     try {
-      if (mode == _HistoryMode.anime) {
-        final data = await _api.getAnimeBrowseHistory(offset: _offset);
-        if (!mounted || _mode != mode) return;
-        setState(() {
-          _animeItems.addAll(data.list);
-          _offset = _animeItems.length;
-        });
-      } else {
-        final data = await _api.getBrowseHistory(offset: _offset);
-        if (!mounted || _mode != mode) return;
-        setState(() {
-          _comicItems.addAll(data.list);
-          _offset = _comicItems.length;
-        });
-      }
+      final data = await _api.getBrowseHistory(offset: _offset);
+      if (!mounted) return;
+      setState(() {
+        _comicItems.addAll(data.list);
+        _offset = _comicItems.length;
+      });
     } catch (e) {
       debugPrint('BrowseHistoryPage loadMore error: $e');
       if (_isUnauthorized(e)) {
@@ -163,18 +111,6 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
       }
     } finally {
       _loadingMore = false;
-    }
-  }
-
-  void _setMode(_HistoryMode mode) {
-    if (mode == _HistoryMode.anime && !_animeFeatureEnabled) return;
-    if (_mode == mode) return;
-    setState(() {
-      _mode = mode;
-      _clearItems();
-    });
-    if (_user.isLoggedIn) {
-      _load(silent: true);
     }
   }
 
@@ -237,69 +173,25 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
     }
   }
 
-  void _openAnime(AnimeBrowseHistoryItem item) {
-    if (!_animeFeatureEnabled) return;
-    if (item.anime.pathWord.isEmpty) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AnimeDetailPage(
-          pathWord: item.anime.pathWord,
-          initialAnime: item.anime,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final contentWidth = screenWidth.clamp(0.0, 900.0);
-    final hp = (screenWidth - contentWidth) / 2 + 16;
+    final hp = MaxWidthCenter.hp(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('浏览记录')),
+      appBar: KiraAppBar(titleText: '娴忚璁板綍', onBack: () => Navigator.pop(context)),
       body: !_user.isLoggedIn
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.lock_outline,
-                      size: 64,
-                      color: cs.onSurfaceVariant,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      '登录后可查看浏览记录',
-                      style: tt.titleMedium?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _animeFeatureEnabled
-                          ? '浏览过的漫画和动漫会同步显示在这里'
-                          : '浏览过的漫画会同步显示在这里',
-                      textAlign: TextAlign.center,
-                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _goLogin,
-                      icon: const Icon(Icons.login),
-                      label: const Text('去登录'),
-                    ),
-                  ],
-                ),
+          ? EmptyView(
+              message: '登录后可查看浏览记录',
+              action: FilledButton.icon(
+                onPressed: _goLogin,
+                icon: const Icon(Icons.login),
+                label: const Text('去登录'),
               ),
             )
           : _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : RefreshIndicator(
               onRefresh: _load,
               child: NotificationListener<ScrollNotification>(
@@ -317,74 +209,24 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
                       const SliverToBoxAdapter(
                         child: LinearProgressIndicator(minHeight: 2),
                       ),
-                    if (_animeFeatureEnabled)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
-                          child: SegmentedButton<_HistoryMode>(
-                            segments: const [
-                              ButtonSegment(
-                                value: _HistoryMode.comic,
-                                label: Text('漫画'),
-                                icon: Icon(Icons.menu_book_outlined),
-                              ),
-                              ButtonSegment(
-                                value: _HistoryMode.anime,
-                                label: Text('动漫'),
-                                icon: Icon(Icons.movie_outlined),
-                              ),
-                            ],
-                            selected: {_mode},
-                            onSelectionChanged: (v) => _setMode(v.first),
-                          ),
-                        ),
-                      ),
                     if (_currentItemsEmpty)
                       SliverFillRemaining(
                         hasScrollBody: false,
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.history,
-                                  size: 64,
-                                  color: cs.onSurfaceVariant,
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  '还没有$_modeLabel浏览记录',
-                                  style: tt.titleMedium?.copyWith(
-                                    color: cs.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '去看几部$_modeLabel后，这里会显示最近浏览内容',
-                                  textAlign: TextAlign.center,
-                                  style: tt.bodySmall?.copyWith(
-                                    color: cs.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                FilledButton.tonalIcon(
-                                  onPressed: _user.isLoggedIn ? _load : null,
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('刷新'),
-                                ),
-                              ],
-                            ),
+                        child: EmptyView(
+                          message: '还没有漫画浏览记录',
+                          action: FilledButton.tonalIcon(
+                            onPressed: _load,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('刷新'),
                           ),
                         ),
                       )
                     else ...[
                       SliverToBoxAdapter(
                         child: Padding(
-                          padding: EdgeInsets.fromLTRB(hp, 4, hp, 8),
+                          padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
                           child: Text(
-                            '共 $_total 条$_modeLabel浏览记录',
+                            '共 $_total 条漫画浏览记录',
                             style: tt.bodySmall?.copyWith(
                               color: cs.onSurfaceVariant,
                             ),
@@ -398,14 +240,9 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage> {
                           itemBuilder: (_, i) {
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: _isAnimeMode
-                                  ? _AnimeBrowseHistoryCard(
-                                      item: _animeItems[i],
-                                      onTap: () => _openAnime(_animeItems[i]),
-                                    )
-                                  : _ComicBrowseHistoryCard(
-                                      item: _comicItems[i],
-                                    ),
+                              child: _ComicBrowseHistoryCard(
+                                item: _comicItems[i],
+                              ),
                             );
                           },
                         ),
@@ -458,23 +295,20 @@ class _ComicBrowseHistoryCard extends StatelessWidget {
           pathWord: comic.pathWord,
           initialComic: comic,
           heroTagBase: heroTagBase,
-          lastBrowseId: item.lastBrowseId,
-          lastBrowseName: item.lastBrowseName,
         ),
       ),
-      cover: _hero(
-        heroTagBase,
-        ComicHeroTags.cover,
-        _HistoryCover(imageUrl: comic.cover, icon: Icons.image),
+      cover: _HistoryCover(
+        imageUrl: comic.cover,
+        icon: Icons.menu_book_outlined,
       ),
       title: comic.name,
-      subtitle: authors.isEmpty ? null : authors.join(' / '),
+      subtitle: authors.isEmpty ? null : authors.join(', '),
       lastBrowseName: item.lastBrowseName,
-      lastBrowseIcon: Icons.menu_book_outlined,
+      lastBrowseIcon: Icons.play_circle_outline,
       latestText:
-          comic.lastChapterName == null || comic.lastChapterName!.isEmpty
-          ? null
-          : '最新 ${comic.lastChapterName}',
+          (comic.lastChapterName != null && comic.lastChapterName!.isNotEmpty)
+          ? '最新 ${comic.lastChapterName}'
+          : null,
       chips: [
         _HistoryMetaChip(
           icon: Icons.local_fire_department,
@@ -485,67 +319,6 @@ class _ComicBrowseHistoryCard extends StatelessWidget {
             icon: Icons.schedule,
             label: _BrowseHistoryPageState.formatRelativeTime(
               comic.datetimeUpdated!,
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _hero(
-    String heroTagBase,
-    String Function(String base) tagOf,
-    Widget child,
-  ) {
-    return Hero(
-      tag: tagOf(heroTagBase),
-      createRectTween: ComicHeroTags.createRectTween,
-      placeholderBuilder: _buildHeroPlaceholder,
-      child: child,
-    );
-  }
-
-  Widget _buildHeroPlaceholder(
-    BuildContext context,
-    Size heroSize,
-    Widget child,
-  ) {
-    return SizedBox(width: heroSize.width, height: heroSize.height);
-  }
-}
-
-class _AnimeBrowseHistoryCard extends StatelessWidget {
-  final AnimeBrowseHistoryItem item;
-  final VoidCallback onTap;
-
-  const _AnimeBrowseHistoryCard({required this.item, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final anime = item.anime;
-    final subtitle = [
-      if (anime.company != null && anime.company!.name.isNotEmpty)
-        anime.company!.name,
-      if (anime.years != null && anime.years!.isNotEmpty) anime.years!,
-    ].join(' / ');
-
-    return _HistoryCardShell(
-      onTap: onTap,
-      cover: _HistoryCover(imageUrl: anime.cover, icon: Icons.movie_outlined),
-      title: anime.name,
-      subtitle: subtitle.isEmpty ? null : subtitle,
-      lastBrowseName: item.lastBrowseName,
-      lastBrowseIcon: Icons.play_circle_outline,
-      latestText: anime.count > 0 ? '共 ${anime.count} 集' : null,
-      chips: [
-        _HistoryMetaChip(
-          icon: Icons.local_fire_department,
-          label: _BrowseHistoryPageState.formatPopular(anime.popular),
-        ),
-        if (anime.datetimeUpdated != null)
-          _HistoryMetaChip(
-            icon: Icons.schedule,
-            label: _BrowseHistoryPageState.formatRelativeTime(
-              anime.datetimeUpdated!,
             ),
           ),
       ],

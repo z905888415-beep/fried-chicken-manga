@@ -1,13 +1,16 @@
-import 'dart:io';
 import 'dart:async';
+import 'dart:io' show Directory, File, Process;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../utils/cover_brightness_filter.dart';
 import '../utils/download_manager.dart';
+import '../utils/layout.dart';
 import '../utils/reading_history.dart';
 import '../utils/toast.dart';
+import '../widgets/kira_app_bar.dart';
 import 'chapter_comments_sheet.dart';
 import 'comic_detail_page.dart';
 import 'reader_page.dart';
@@ -29,8 +32,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   bool _selectionMode = false;
   bool _loading = true;
 
-  bool get _isDesktopPlatform =>
-      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  bool get _isDesktopPlatform => !kIsWeb;
 
   @override
   void initState() {
@@ -65,22 +67,18 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   }
 
   Future<void> _openDownloadFolder() async {
+    if (kIsWeb) {
+      showToast(context, 'Web 端不支持打开文件夹', isError: true);
+      return;
+    }
     try {
       final docsDir = await getApplicationDocumentsDirectory();
-      final folder = Directory(
-        '${docsDir.path}${Platform.pathSeparator}$_downloadFolderName',
-      );
+      final folder = Directory('${docsDir.path}/$_downloadFolderName');
       if (!await folder.exists()) {
         await folder.create(recursive: true);
       }
       final path = folder.path;
-      if (Platform.isWindows) {
-        await Process.run('explorer', [path]);
-      } else if (Platform.isMacOS) {
-        await Process.run('open', [path]);
-      } else if (Platform.isLinux) {
-        await Process.run('xdg-open', [path]);
-      }
+      await Process.run('explorer', [path]);
     } catch (e) {
       if (!mounted) return;
       showToast(context, '打开文件夹失败：$e', isError: true);
@@ -122,6 +120,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final hp = MaxWidthCenter.hp(context);
     final items = _downloads.localComics();
 
     final body = _loading
@@ -147,7 +146,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
             ),
           )
         : GridView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(hp),
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 150,
               childAspectRatio: 0.58,
@@ -212,10 +211,10 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _selectionMode ? '已选 ${_selectedPathWords.length} 部' : '本地漫画',
-        ),
+      appBar: KiraAppBar(
+        titleText: _selectionMode
+            ? '已选 ${_selectedPathWords.length} 部'
+            : '本地漫画',
         actions: [
           if (!_selectionMode && items.isNotEmpty)
             IconButton(
@@ -572,10 +571,10 @@ class _LocalComicDetailPageState extends State<LocalComicDetailPage> {
     final nextChapter = _findNextDownloadedChapter(chapters);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _selectionMode ? '已选 ${_selectedChapterIds.length} 章' : comic.name,
-        ),
+      appBar: KiraAppBar(
+        titleText: _selectionMode
+            ? '已选 ${_selectedChapterIds.length} 章'
+            : comic.name,
         actions: [
           if (!_selectionMode)
             IconButton(

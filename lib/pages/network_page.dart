@@ -80,17 +80,24 @@ class _NetworkPageState extends State<NetworkPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: SegmentedButton<int>(
-                          segments: const [
-                            ButtonSegment(value: 0, label: Text('线路 1')),
-                            ButtonSegment(value: 1, label: Text('线路 2')),
-                          ],
-                          selected: {_user.apiRoute},
-                          onSelectionChanged: (v) => _user.setApiRoute(v.first),
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _RoutePill(
+                              label: '线路 1',
+                              selected: _user.apiRoute == 0,
+                              onTap: () => _user.setApiRoute(0),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _RoutePill(
+                              label: '线路 2',
+                              selected: _user.apiRoute == 1,
+                              onTap: () => _user.setApiRoute(1),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -373,5 +380,47 @@ class _NetworkPageState extends State<NetworkPage> {
       if (!mounted) return;
       setState(() => _testingLatency = false);
     }
+  }
+}
+
+class _RoutePill extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _RoutePill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? cs.primary : cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? cs.primary : cs.outlineVariant,
+            width: 1.5,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: selected ? cs.onPrimary : cs.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

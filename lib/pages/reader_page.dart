@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,7 @@ part 'reader/reader_widgets.dart';
 class ReaderPage extends StatefulWidget {
   final String pathWord;
   final String? comicName;
+  final String? coverUrl;
   final String? group;
   final String chapterUuid;
   final String chapterName;
@@ -37,6 +39,7 @@ class ReaderPage extends StatefulWidget {
     super.key,
     required this.pathWord,
     this.comicName,
+    this.coverUrl,
     this.group,
     required this.chapterUuid,
     required this.chapterName,
@@ -264,13 +267,24 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _saveReadingHistory() {
+    final chapterName = _detail?.name ?? widget.chapterName;
+    final page = _currentPage;
+    final totalPage = _detail?.contents.length ?? 0;
     ReadingHistory.save(
       pathWord: widget.pathWord,
       group: widget.group,
       chapterUuid: _currentUuid,
-      chapterName: _detail?.name ?? widget.chapterName,
-      page: _currentPage,
-      totalPage: _detail?.contents.length ?? 0,
+      chapterName: chapterName,
+      page: page,
+      totalPage: totalPage,
+    );
+    ReadingHistory.saveLastRead(
+      pathWord: widget.pathWord,
+      comicName: widget.comicName ?? widget.pathWord,
+      coverUrl: widget.coverUrl,
+      chapterName: chapterName,
+      page: page,
+      totalPage: totalPage,
     );
   }
 
@@ -1251,30 +1265,41 @@ class _ReaderPageState extends State<ReaderPage> {
         child: AnimatedSlide(
           duration: const Duration(milliseconds: 200),
           offset: Offset(0, _showToolbar ? 0 : -_hiddenToolbarSlideOffset),
-          child: Container(
-            color: Colors.black,
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.55),
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
                     ),
-                    Expanded(
-                      child: Text(
-                        _detail?.name ?? widget.chapterName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.arrow_back,
+                            color: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(context),
                         ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                        Expanded(
+                          child: Text(
+                            _detail?.name ?? widget.chapterName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -1295,127 +1320,163 @@ class _ReaderPageState extends State<ReaderPage> {
         child: AnimatedSlide(
           duration: const Duration(milliseconds: 200),
           offset: Offset(0, _showToolbar ? 0 : _hiddenToolbarSlideOffset),
-          child: Container(
-            color: Colors.black,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 滚动条 Slider
-                    Row(
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.55),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          '$_currentPage',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                        Expanded(
-                          child: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 7,
+                        // 滚动条 Slider
+                        Row(
+                          children: [
+                            Text(
+                              '$_currentPage',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
                               ),
-                              activeTrackColor: cs.primary,
-                              inactiveTrackColor: Colors.white24,
-                              thumbColor: cs.primary,
-                              overlayColor: cs.primary.withValues(alpha: 0.2),
                             ),
-                            child: Slider(
-                              value: _currentPage.toDouble(),
-                              min: 1,
-                              max: total.toDouble(),
-                              onChangeStart: (_) {
-                                _isDraggingSlider = true;
-                              },
-                              onChangeEnd: (_) {
-                                _isDraggingSlider = false;
-                              },
-                              onChanged: (v) {
-                                final page = v.round();
-                                setState(() => _currentPage = page);
-                                if (_isPageMode) {
-                                  _pageController.jumpToPage(page - 1);
-                                } else {
-                                  _jumpToScrollPage(page, totalPages: total);
-                                }
-                              },
+                            Expanded(
+                              child: SliderTheme(
+                                data: SliderThemeData(
+                                  trackHeight: 3,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 7,
+                                  ),
+                                  activeTrackColor: cs.primary,
+                                  inactiveTrackColor: Colors.white24,
+                                  thumbColor: cs.primary,
+                                  overlayColor: cs.primary.withValues(
+                                    alpha: 0.2,
+                                  ),
+                                ),
+                                child: Slider(
+                                  value: _currentPage.toDouble(),
+                                  min: 1,
+                                  max: total.toDouble(),
+                                  onChangeStart: (_) {
+                                    _isDraggingSlider = true;
+                                  },
+                                  onChangeEnd: (_) {
+                                    _isDraggingSlider = false;
+                                  },
+                                  onChanged: (v) {
+                                    final page = v.round();
+                                    setState(() => _currentPage = page);
+                                    if (_isPageMode) {
+                                      _pageController.jumpToPage(page - 1);
+                                    } else {
+                                      _jumpToScrollPage(
+                                        page,
+                                        totalPages: total,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
                             ),
-                          ),
+                            Text(
+                              '$total',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          '$total',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
+                        // 按钮行
+                        Row(
+                          children: [
+                            FilledButton.tonal(
+                              onPressed: _detail!.prev != null
+                                  ? () => _goChapter(_detail!.prev)
+                                  : null,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.15,
+                                ),
+                                disabledBackgroundColor: Colors.white
+                                    .withValues(alpha: 0.06),
+                                foregroundColor: Colors.white,
+                                disabledForegroundColor: Colors.white38,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 8,
+                                ),
+                                textStyle: const TextStyle(fontSize: 13),
+                              ),
+                              child: const Text('上一章'),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.list, color: Colors.white),
+                              onPressed: () => Navigator.pop(context),
+                              tooltip: '目录',
+                            ),
+                            IconButton(
+                              icon: Badge(
+                                isLabelVisible: _commentCount > 0,
+                                backgroundColor: Colors.white,
+                                textColor: Colors.black,
+                                label: Text(
+                                  '$_commentCount',
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                                child: const Icon(
+                                  Icons.forum_outlined,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              onPressed: _showChapterComments,
+                              tooltip: '章节评论',
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.settings,
+                                color: Colors.white,
+                              ),
+                              onPressed: _showSettingsPanel,
+                              tooltip: '阅读设置',
+                            ),
+                            const Spacer(),
+                            FilledButton.tonal(
+                              onPressed: _detail!.next != null
+                                  ? () => _goChapter(_detail!.next)
+                                  : null,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.15,
+                                ),
+                                disabledBackgroundColor: Colors.white
+                                    .withValues(alpha: 0.06),
+                                foregroundColor: Colors.white,
+                                disabledForegroundColor: Colors.white38,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 8,
+                                ),
+                                textStyle: const TextStyle(fontSize: 13),
+                              ),
+                              child: const Text('下一章'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    // 按钮行
-                    Row(
-                      children: [
-                        TextButton.icon(
-                          onPressed: _detail!.prev != null
-                              ? () => _goChapter(_detail!.prev)
-                              : null,
-                          icon: const Icon(Icons.chevron_left),
-                          label: const Text('上一章'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: _detail!.prev != null
-                                ? Colors.white
-                                : Colors.white38,
-                          ),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.list, color: Colors.white),
-                          onPressed: () => Navigator.pop(context),
-                          tooltip: '目录',
-                        ),
-                        IconButton(
-                          icon: Badge(
-                            isLabelVisible: _commentCount > 0,
-                            backgroundColor: Colors.white,
-                            textColor: Colors.black,
-                            label: Text(
-                              '$_commentCount',
-                              style: const TextStyle(fontSize: 10),
-                            ),
-                            child: const Icon(
-                              Icons.forum_outlined,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onPressed: _showChapterComments,
-                          tooltip: '章节评论',
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.settings, color: Colors.white),
-                          onPressed: _showSettingsPanel,
-                          tooltip: '阅读设置',
-                        ),
-                        const Spacer(),
-                        TextButton.icon(
-                          onPressed: _detail!.next != null
-                              ? () => _goChapter(_detail!.next)
-                              : null,
-                          icon: const Text('下一章'),
-                          label: const Icon(Icons.chevron_right),
-                          style: TextButton.styleFrom(
-                            foregroundColor: _detail!.next != null
-                                ? Colors.white
-                                : Colors.white38,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),

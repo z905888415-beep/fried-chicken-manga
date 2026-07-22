@@ -8,14 +8,15 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api/api_client.dart';
 import '../models/user_manager.dart';
 import '../utils/app_update.dart';
+import '../utils/layout.dart';
+import '../utils/theme_tokens.dart';
 import '../utils/toast.dart';
 import 'acknowledgement_page.dart';
-import 'appearance_page.dart';
 import 'browse_history_page.dart';
 import 'download_center_page.dart';
 import 'general_page.dart';
 import 'network_page.dart';
-import 'ai_config_page.dart';
+import '../main.dart' show globalNavIndex;
 
 const _appDisclaimerItems = [
   '本应用为非官方第三方客户端，仅基于第三方平台提供的接口或公开可访问资源进行内容展示与访问。',
@@ -309,188 +310,277 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final hp = MaxWidthCenter.hp(context);
 
     return Scaffold(
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
-            child: SizedBox(height: MediaQuery.of(context).padding.top),
+            child: SizedBox(height: MediaQuery.of(context).padding.top + 8),
           ),
+          // ── 顶栏标题 ──
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(hp, 4, hp, 16),
+              child: Text(
+                '炸鸡腿漫画',
+                style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          // ── 用户卡片 / 登录卡片 ──
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: hp),
               child: _user.isLoggedIn
-                  ? _buildUserCard(cs, tt)
+                  ? _buildUserCardV2(cs, tt)
                   : _buildLoginCard(cs, tt),
             ),
           ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          // ── 菜单列表 ──
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  Card(
-                    color: cs.surfaceContainerLow,
-                    shadowColor: Colors.black.withValues(alpha: 0.08),
-                    elevation: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Column(
-                        children: [
-                          ListTile(
-                            leading: const _SettingIcon(
-                              icon: Icons.tune_rounded,
-                              color: Color(0xFF6E9D5B),
-                            ),
-                            title: const Text('通用'),
-                            subtitle: Text(
-                              _user.isLoggedIn &&
-                                      _user.savedUsername != null &&
-                                      _user.savedPassword != null
-                                  ? '自动登录、设置导入导出'
-                                  : '设置导入导出',
-                              style: tt.bodySmall,
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const GeneralPage(),
-                              ),
-                            ),
+              padding: EdgeInsets.symmetric(horizontal: hp),
+              child: GlassCard(
+                radius: 20,
+                opacity: 0.72,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  children: [
+                    _MenuItem(
+                      icon: Icons.access_time_rounded,
+                      iconColor: kAccentPink,
+                      title: '阅读历史',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => BrowseHistoryPage(
+                            loginPageBuilder: (_) => const LoginPage(),
                           ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            leading: const _SettingIcon(
-                              icon: Icons.palette_rounded,
-                              color: Color(0xFF7C8CFF),
-                            ),
-                            title: const Text('外观'),
-                            subtitle: Text(
-                              '${_user.themeOption.label} · ${_user.themeVariantOption.label} · ${_user.themeMode == ThemeMode.system
-                                  ? '跟随系统'
-                                  : _user.themeMode == ThemeMode.light
-                                  ? '浅色'
-                                  : '深色'}',
-                              style: tt.bodySmall,
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const AppearancePage(),
-                              ),
-                            ),
-                          ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            leading: const _SettingIcon(
-                              icon: Icons.dns_rounded,
-                              color: Color(0xFF2BB8A5),
-                            ),
-                            title: const Text('网络'),
-                            subtitle: Text(
-                              'API 线路 ${_user.apiRoute + 1}',
-                              style: tt.bodySmall,
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const NetworkPage(),
-                              ),
-                            ),
-                          ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            leading: const _SettingIcon(
-                              icon: Icons.smart_toy_outlined,
-                              color: Color(0xFFE07AD0),
-                            ),
-                            title: const Text('AI配置'),
-                            subtitle: const Text('配置 AI 模型总结评论'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const AiConfigPage(),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: cs.surfaceContainerLow,
-                    shadowColor: Colors.black.withValues(alpha: 0.08),
-                    elevation: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Column(
-                        children: [
-                          ListTile(
-                            leading: const _SettingIcon(
-                              icon: Icons.download_done_rounded,
-                              color: Color(0xFFFFA24C),
-                            ),
-                            title: const Text('下载中心'),
-                            subtitle: const Text('查看和管理已下载的资源'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const DownloadCenterPage(),
-                              ),
-                            ),
-                          ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            leading: const _SettingIcon(
-                              icon: Icons.history_rounded,
-                              color: Color(0xFF9B7BFF),
-                            ),
-                            title: const Text('浏览记录'),
-                            subtitle: const Text('查看最近浏览过的漫画'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => BrowseHistoryPage(
-                                  loginPageBuilder: (_) => const LoginPage(),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: cs.surfaceContainerLow,
-                    shadowColor: Colors.black.withValues(alpha: 0.08),
-                    elevation: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: ListTile(
-                        leading: const _SettingIcon(
-                          icon: Icons.info_rounded,
-                          color: Color(0xFF4FA8FF),
-                        ),
-                        title: const Text('关于'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const AboutPage()),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    const Divider(height: 1, indent: 56, endIndent: 16),
+                    _MenuItem(
+                      icon: Icons.favorite_border_rounded,
+                      iconColor: kAccentPink,
+                      title: '我的收藏',
+                      onTap: () => globalNavIndex.value = 1,
+                    ),
+                    const Divider(height: 1, indent: 56, endIndent: 16),
+                    _MenuItem(
+                      icon: Icons.download_rounded,
+                      iconColor: const Color(0xFF8E8E93),
+                      title: '下载管理',
+                      trailing: '3部漫画',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DownloadCenterPage(),
+                        ),
+                      ),
+                    ),
+                    _MenuItem(
+                      icon: Icons.dns_outlined,
+                      iconColor: const Color(0xFF007AFF),
+                      title: '网络节点',
+                      trailing: '线路 ',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const NetworkPage()),
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 56, endIndent: 16),
+                    const Divider(height: 1, indent: 56, endIndent: 16),
+                    _MenuItem(
+                      icon: Icons.palette_outlined,
+                      iconColor: const Color(0xFF8E8E93),
+                      title: '主题设置',
+                      trailing: '跟随系统',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const GeneralPage()),
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 56, endIndent: 16),
+                    // 数据源扩展入口已隐藏，保留代码以备后用
+                    // _MenuItem(
+                    //   icon: Icons.extension_outlined,
+                    //   iconColor: const Color(0xFF007AFF),
+                    //   title: '数据源扩展',
+                    //   trailing: '管理与选择',
+                    //   onTap: () => Navigator.push(
+                    //     context,
+                    //     MaterialPageRoute(
+                    //       builder: (_) => const ExtensionSourcesPage(),
+                    //     ),
+                    //   ),
+                    // ),
+                  ],
+                ),
               ),
             ),
+          ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserCardV2(ColorScheme cs, TextTheme tt) {
+    return GlassCard(
+      radius: 22,
+      opacity: 0.72,
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              // 头像
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: cs.outlineVariant, width: 2),
+                ),
+                child: ClipOval(
+                  child:
+                      _user.avatar != null && _user.avatar!.startsWith('http')
+                      ? CachedNetworkImage(
+                          imageUrl: _user.avatar!,
+                          fit: BoxFit.cover,
+                        )
+                      : Icon(
+                          Icons.person,
+                          size: 36,
+                          color: cs.onSurfaceVariant,
+                        ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              // 名字 + ID
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _user.nickname ?? _user.username ?? '',
+                            style: tt.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          'ID: ${_user.userId ?? "--"}',
+                          style: tt.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: _copyToken,
+                          child: Text(
+                            '复制',
+                            style: tt.bodySmall?.copyWith(color: cs.primary),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '在漫画的世界里，遇见更多美好。',
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // 编辑按钮
+              GestureDetector(
+                onTap: () {
+                  setState(() => _userActionsExpanded = !_userActionsExpanded);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_outlined, size: 14, color: cs.onSurface),
+                      const SizedBox(width: 4),
+                      Text('编辑', style: tt.labelMedium),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          // 统计行
+          Row(
+            children: [
+              _StatItem(value: '128', label: '阅读漫画'),
+              _StatDivider(),
+              _StatItem(value: '56', label: '收藏漫画'),
+              _StatDivider(),
+              _StatItem(value: '23', label: '关注作者'),
+            ],
+          ),
+          // 展开操作区
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: _userActionsExpanded
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildUserActionButton(
+                          icon: Icons.refresh,
+                          label: '刷新用户',
+                          onPressed: () => _refreshUserInfo(),
+                        ),
+                        _buildUserActionButton(
+                          icon: Icons.switch_account,
+                          label: '切换账号',
+                          onPressed: () => _switchAccount(),
+                        ),
+                        _buildUserActionButton(
+                          icon: Icons.logout,
+                          label: '退出登录',
+                          onPressed: () => _logout(),
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
         ],
       ),
@@ -498,160 +588,41 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildLoginCard(ColorScheme cs, TextTheme tt) {
-    return Card(
-      color: cs.surfaceContainerLow,
-      shadowColor: Colors.black.withValues(alpha: 0.08),
-      elevation: 4,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: _goLogin,
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 32,
-                backgroundColor: cs.primaryContainer,
-                child: Icon(
-                  Icons.person,
-                  size: 32,
-                  color: cs.onPrimaryContainer,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('未登录', style: tt.titleMedium),
-                    const SizedBox(height: 4),
-                    Text(
-                      '点击登录以使用书架等功能',
-                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
-            ],
+    return GlassCard(
+      radius: 22,
+      opacity: 0.72,
+      padding: const EdgeInsets.all(24),
+      onTap: _goLogin,
+      child: Row(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(Icons.person, size: 32, color: cs.onPrimaryContainer),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUserCard(ColorScheme cs, TextTheme tt) {
-    return Card(
-      color: cs.surfaceContainerLow,
-      shadowColor: Colors.black.withValues(alpha: 0.08),
-      elevation: 4,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          setState(() {
-            _userActionsExpanded = !_userActionsExpanded;
-          });
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  CircleAvatar(
-                    radius: 32,
-                    backgroundColor: cs.primaryContainer,
-                    child:
-                        _user.avatar != null && _user.avatar!.startsWith('http')
-                        ? ClipOval(
-                            child: CachedNetworkImage(
-                              imageUrl: _user.avatar!,
-                              width: 64,
-                              height: 64,
-                              fit: BoxFit.cover,
-                            ),
-                          )
-                        : Icon(
-                            Icons.person,
-                            size: 32,
-                            color: cs.onPrimaryContainer,
-                          ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      _user.nickname ?? _user.username ?? '',
-                      style: tt.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: _userActionsExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(Icons.expand_more, color: cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                child: _userActionsExpanded
-                    ? Column(
-                        children: [
-                          const SizedBox(height: 12),
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              final buttonWidth =
-                                  (constraints.maxWidth - 8) / 2;
-                              return Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  SizedBox(
-                                    width: buttonWidth,
-                                    child: _buildUserActionButton(
-                                      icon: Icons.refresh,
-                                      label: '刷新用户',
-                                      onPressed: () => _refreshUserInfo(),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: buttonWidth,
-                                    child: _buildUserActionButton(
-                                      icon: Icons.switch_account,
-                                      label: '切换账号',
-                                      onPressed: () => _switchAccount(),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: buttonWidth,
-                                    child: _buildUserActionButton(
-                                      icon: Icons.copy_outlined,
-                                      label: '复制令牌',
-                                      onPressed: () => _copyToken(),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: buttonWidth,
-                                    child: _buildUserActionButton(
-                                      icon: Icons.logout,
-                                      label: '退出登录',
-                                      onPressed: () => _logout(),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ],
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '未登录',
+                  style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '点击登录以使用书架等功能',
+                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
           ),
-        ),
+          Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
+        ],
       ),
     );
   }
@@ -1576,22 +1547,83 @@ class DisclaimerPage extends StatelessWidget {
   }
 }
 
-class _SettingIcon extends StatelessWidget {
+class _MenuItem extends StatelessWidget {
   final IconData icon;
-  final Color color;
+  final Color iconColor;
+  final String title;
+  final String? trailing;
+  final VoidCallback onTap;
 
-  const _SettingIcon({required this.icon, required this.color});
+  const _MenuItem({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    this.trailing,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(12),
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    return ListTile(
+      leading: Icon(icon, color: iconColor, size: 24),
+      title: Text(
+        title,
+        style: tt.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
       ),
-      child: Icon(icon, color: color, size: 20),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (trailing != null)
+            Text(
+              trailing!,
+              style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          const SizedBox(width: 4),
+          Icon(Icons.chevron_right, size: 20, color: cs.onSurfaceVariant),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _StatItem extends StatelessWidget {
+  final String value;
+  final String label;
+
+  const _StatItem({required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 30,
+      color: Theme.of(context).colorScheme.outlineVariant,
     );
   }
 }
@@ -1684,6 +1716,20 @@ class _AboutPageState extends State<AboutPage> {
                       onChanged: _user.setAutoCheckUpdate,
                     ),
                     const Divider(height: 1),
+                    // 数据源扩展入口已隐藏
+                    // ListTile(
+                    //   leading: const Icon(Icons.extension),
+                    //   title: const Text('数据源扩展'),
+                    //   subtitle: const Text('管理与选择漫画源仓库'),
+                    //   trailing: const Icon(Icons.chevron_right),
+                    //   onTap: () => Navigator.push(
+                    //     context,
+                    //     MaterialPageRoute(
+                    //       builder: (_) => const ExtensionSourcesPage(),
+                    //     ),
+                    //   ),
+                    // ),
+                    // const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.gavel_outlined),
                       title: const Text('免责声明'),

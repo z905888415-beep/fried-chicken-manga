@@ -3,8 +3,11 @@ import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../utils/comic_hero_tags.dart';
 import '../utils/comic_card_skeleton.dart';
+import '../utils/network_error.dart';
+import '../widgets/comic_cover_card.dart';
+import '../widgets/kira_app_bar.dart';
+import '../widgets/state_views.dart';
 import 'comic_detail_page.dart';
-import 'home_page.dart';
 
 /// 漫画排行完整列表页，支持排序切换
 class RankingPage extends StatefulWidget {
@@ -21,6 +24,7 @@ class _RankingPageState extends State<RankingPage> {
   int _offset = 0;
   int _total = 0;
   bool _loadingMore = false;
+  String? _error;
   String _ordering = '-datetime_updated';
 
   @override
@@ -32,11 +36,16 @@ class _RankingPageState extends State<RankingPage> {
   Future<void> _load() async {
     setState(() {
       _loading = true;
+      _error = null;
       _comics = [];
       _offset = 0;
     });
     try {
-      final data = await _api.getComicList(ordering: _ordering, limit: 21);
+      final data = await _api.getComicList(
+        ordering: _ordering,
+        limit: 21,
+        theme: danmeiThemePathWord,
+      );
       if (!mounted) return;
       setState(() {
         _comics = data.list;
@@ -44,8 +53,11 @@ class _RankingPageState extends State<RankingPage> {
         _offset = data.list.length;
         _loading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        _error = NetworkError.message(e);
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -57,13 +69,23 @@ class _RankingPageState extends State<RankingPage> {
         ordering: _ordering,
         limit: 21,
         offset: _offset,
+        theme: danmeiThemePathWord,
       );
       if (!mounted) return;
       setState(() {
         _comics.addAll(data.list);
         _offset = _comics.length;
       });
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(NetworkError.message(e)),
+            action: SnackBarAction(label: '重试', onPressed: _loadMore),
+          ),
+        );
+      }
+    }
     if (mounted) {
       setState(() => _loadingMore = false);
     } else {
@@ -79,14 +101,14 @@ class _RankingPageState extends State<RankingPage> {
 
     const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
       maxCrossAxisExtent: 130,
-      childAspectRatio: 0.55,
+      childAspectRatio: 0.62,
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
     );
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('漫画排行'),
+      appBar: KiraAppBar(
+        titleText: '耽美更新',
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -123,6 +145,10 @@ class _RankingPageState extends State<RankingPage> {
               gridDelegate: gridDelegate,
               itemBuilder: (_, _) => const ComicCardSkeleton(),
             )
+          : _error != null && _comics.isEmpty
+          ? ErrorView(message: _error!, onRetry: _load)
+          : _comics.isEmpty
+          ? const EmptyView(message: '暂无排行数据')
           : NotificationListener<ScrollNotification>(
               onNotification: (n) {
                 if (n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
@@ -146,7 +172,7 @@ class _RankingPageState extends State<RankingPage> {
                           pathWord: comic.pathWord,
                           index: i,
                         );
-                        return ComicCard(
+                        return ComicCoverCard(
                           comic: comic,
                           heroTagBase: heroTagBase,
                           onTap: () => Navigator.push(

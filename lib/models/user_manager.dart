@@ -70,13 +70,7 @@ class UserManager extends ChangeNotifier {
   static const double maxDarkModeCoverBrightness = 1.0;
   static const double defaultDarkModeCoverBrightness = 0.85;
   static const defaultNavKey = 'comic';
-  static const defaultNavOrder = [
-    'comic',
-    'anime',
-    'search',
-    'bookshelf',
-    'profile',
-  ];
+  static const defaultNavOrder = ['comic', 'search', 'bookshelf', 'profile'];
 
   static const _keyToken = 'user_token';
   static const _keyUsername = 'user_username';

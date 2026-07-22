@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'api_helpers.dart';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -395,8 +396,9 @@ class AiSettings extends ChangeNotifier {
     var providers = <AiProviderConfig>[];
     if (raw != null && raw.isNotEmpty) {
       try {
-        providers = (jsonDecode(raw) as List)
-            .map((e) => AiProviderConfig.fromJson(e as Map<String, dynamic>))
+        providers = safeRawList<dynamic>(jsonDecode(raw), required: false)
+            .whereType<Map>()
+            .map((e) => AiProviderConfig.fromJson(Map<String, dynamic>.from(e)))
             .where((p) => p.id.trim().isNotEmpty)
             .toList();
       } catch (_) {
@@ -477,8 +479,9 @@ class AiSettings extends ChangeNotifier {
     var migrated = false;
     if (raw != null && raw.isNotEmpty) {
       try {
-        final list = (jsonDecode(raw) as List)
-            .map((e) => PromptPreset.fromJson(e as Map<String, dynamic>))
+        final list = safeRawList<dynamic>(jsonDecode(raw), required: false)
+            .whereType<Map>()
+            .map((e) => PromptPreset.fromJson(Map<String, dynamic>.from(e)))
             .where((preset) {
               final keep = _shouldKeepStoredPreset(preset);
               if (!keep) migrated = true;
@@ -935,7 +938,7 @@ class AiApi {
       final data = line.substring(5).trim();
       if (data == '[DONE]') return;
       try {
-        final json = jsonDecode(data) as Map<String, dynamic>;
+        final json = safeMap(jsonDecode(data), required: false);
         final chunk = _parseStreamChunk(json, apiFormat);
         if (chunk != null && chunk.text.isNotEmpty) yield chunk;
       } catch (_) {

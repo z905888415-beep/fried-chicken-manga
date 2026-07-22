@@ -39,19 +39,14 @@ void main() {
     expect(button().onPressed, isNotNull);
   });
 
-  testWidgets('anime feature switch updates setting', (tester) async {
+  testWidgets('anime feature getter reflects enabled default', (tester) async {
     final user = UserManager();
     await user.init();
 
     await tester.pumpWidget(const MaterialApp(home: GeneralPage()));
     await tester.pumpAndSettle();
 
+    // 动漫功能 UI 开关已随功能移除，但模型层 getter 仍应返回持久化的真实值
     expect(user.animeFeatureEnabled, isTrue);
-    expect(find.text('动漫功能'), findsOneWidget);
-
-    await tester.tap(find.text('动漫功能'));
-    await tester.pumpAndSettle();
-
-    expect(user.animeFeatureEnabled, isFalse);
   });
 }

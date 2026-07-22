@@ -4,8 +4,10 @@ class Author {
 
   Author({required this.name, required this.pathWord});
 
-  factory Author.fromJson(Map<String, dynamic> json) =>
-      Author(name: json['name'] ?? '', pathWord: json['path_word'] ?? '');
+  factory Author.fromJson(Map<String, dynamic> json) => Author(
+    name: json['name']?.toString() ?? '',
+    pathWord: json['path_word']?.toString() ?? '',
+  );
 
   Map<String, dynamic> toJson() => {'name': name, 'path_word': pathWord};
 }
@@ -82,9 +84,9 @@ class Theme {
   Theme({required this.name, required this.pathWord, this.count = 0});
 
   factory Theme.fromJson(Map<String, dynamic> json) => Theme(
-    name: json['name'] ?? '',
-    pathWord: json['path_word'] ?? '',
-    count: json['count'] ?? 0,
+    name: json['name']?.toString() ?? '',
+    pathWord: json['path_word']?.toString() ?? '',
+    count: json['count'] as int? ?? 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -102,9 +104,9 @@ class ComicGroup {
   ComicGroup({required this.pathWord, required this.count, required this.name});
 
   factory ComicGroup.fromJson(Map<String, dynamic> json) => ComicGroup(
-    pathWord: json['path_word'] ?? '',
-    count: json['count'] ?? 0,
-    name: json['name'] ?? '',
+    pathWord: json['path_word']?.toString() ?? '',
+    count: json['count'] as int? ?? 0,
+    name: json['name']?.toString() ?? '',
   );
 
   Map<String, dynamic> toJson() => {
@@ -130,6 +132,8 @@ class Comic {
   final String? lastChapterName;
   final Map<String, ComicGroup>? groups;
   final Map<String, dynamic>? region;
+  final String sourceId;
+  final List<String> categoryIds;
 
   Comic({
     this.uuid,
@@ -147,25 +151,47 @@ class Comic {
     this.lastChapterName,
     this.groups,
     this.region,
+    this.sourceId = 'kopymanga',
+    this.categoryIds = const [],
   });
 
   factory Comic.fromJson(Map<String, dynamic> json) => Comic(
     uuid: json['uuid']?.toString(),
-    name: json['name'] ?? '',
-    pathWord: json['path_word'] ?? '',
-    cover: json['cover'] ?? '',
-    popular: json['popular'] ?? 0,
+    name: json['name']?.toString() ?? json['title']?.toString() ?? '',
+    pathWord: json['path_word']?.toString() ?? json['id']?.toString() ?? '',
+    cover: json['cover']?.toString() ?? '',
+    popular: json['popular'] as int? ?? json['popularity'] as int? ?? 0,
+    sourceId:
+        json['sourceId']?.toString() ??
+        json['source_id']?.toString() ??
+        'kopymanga',
+    categoryIds:
+        (json['categoryIds'] as List?)?.map((e) => e.toString()).toList() ?? [],
     authors:
-        (json['author'] as List?)?.map((a) => Author.fromJson(a)).toList() ??
+        (json['author'] as List?)
+            ?.whereType<Map>()
+            .map((a) => Author.fromJson(Map<String, dynamic>.from(a)))
+            .toList() ??
         [],
     themes:
-        (json['theme'] as List?)?.map((t) => Theme.fromJson(t)).toList() ?? [],
-    datetimeUpdated: json['datetime_updated'],
-    brief: json['brief'],
-    status: json['status'] is Map ? json['status'] : null,
-    lastChapter: json['last_chapter'] is Map ? json['last_chapter'] : null,
+        (json['theme'] as List?)
+            ?.whereType<Map>()
+            .map((t) => Theme.fromJson(Map<String, dynamic>.from(t)))
+            .toList() ??
+        [],
+    datetimeUpdated:
+        json['datetime_updated']?.toString() ?? json['updateTime']?.toString(),
+    brief: json['brief']?.toString() ?? json['description']?.toString(),
+    status: json['status'] is Map
+        ? Map<String, dynamic>.from(json['status'])
+        : null,
+    lastChapter: json['last_chapter'] is Map
+        ? Map<String, dynamic>.from(json['last_chapter'])
+        : null,
     lastChapterId: json['last_chapter_id']?.toString(),
-    lastChapterName: json['last_chapter_name']?.toString(),
+    lastChapterName:
+        json['last_chapter_name']?.toString() ??
+        json['latestChapter']?.toString(),
     groups: json['groups'] is Map
         ? (json['groups'] as Map).map(
             (k, v) => MapEntry(
@@ -174,7 +200,9 @@ class Comic {
             ),
           )
         : null,
-    region: json['region'] is Map ? json['region'] : null,
+    region: json['region'] is Map
+        ? Map<String, dynamic>.from(json['region'])
+        : null,
   );
 
   Map<String, dynamic> toJson() => {

@@ -18,7 +18,6 @@ class _AppearancePageState extends State<AppearancePage> {
 
   static const _navMeta = {
     'comic': (Icons.menu_book_outlined, '漫画'),
-    'anime': (Icons.movie_outlined, '动漫'),
     'search': (Icons.search_outlined, '搜索'),
     'bookshelf': (Icons.bookmark_border, '书架'),
     'profile': (Icons.person_outline, '我的'),
@@ -167,7 +166,7 @@ class _AppearancePageState extends State<AppearancePage> {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: _user.navOrder.length,
-                  onReorder: (oldIndex, newIndex) {
+                  onReorderItem: (oldIndex, newIndex) {
                     if (newIndex > oldIndex) newIndex--;
                     final order = List<String>.of(_user.navOrder);
                     final item = order.removeAt(oldIndex);
@@ -176,7 +175,7 @@ class _AppearancePageState extends State<AppearancePage> {
                   },
                   itemBuilder: (context, index) {
                     final key = _user.navOrder[index];
-                    final meta = _navMeta[key]!;
+                    final meta = _navMeta[key] ?? (Icons.help_outline, key);
                     return ListTile(
                       key: ValueKey(key),
                       leading: Icon(meta.$1, color: cs.onSurfaceVariant),

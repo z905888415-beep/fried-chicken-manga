@@ -214,20 +214,9 @@ class _GeneralPageState extends State<GeneralPage> {
                   ),
                   const Divider(height: 1, indent: 16, endIndent: 16),
                   SwitchListTile(
-                    secondary: const Icon(Icons.movie_outlined),
-                    title: const Text('动漫功能'),
-                    subtitle: Text('关闭后隐藏动漫相关功能', style: tt.bodySmall),
-                    value: _user.animeFeatureEnabled,
-                    onChanged: _user.setAnimeFeatureEnabled,
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  SwitchListTile(
                     secondary: const Icon(Icons.view_carousel_outlined),
                     title: const Text('显示Banner'),
-                    subtitle: Text(
-                      '关闭后漫画和动漫主页顶部Banner不显示',
-                      style: tt.bodySmall,
-                    ),
+                    subtitle: Text('关闭后主页顶部Banner不显示', style: tt.bodySmall),
                     value: _user.bannerVisible,
                     onChanged: _user.setBannerVisible,
                   ),

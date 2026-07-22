@@ -1,18 +1,16 @@
 import 'dart:async';
-import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../api/copymanga_source_adapter.dart';
 import '../models/comic.dart' hide Theme;
-import '../models/user_manager.dart';
-import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
+import '../widgets/comic_cover_card.dart';
+import '../models/category_config.dart';
 import 'comic_detail_page.dart';
-import 'recommend_page.dart';
-import 'ranking_page.dart';
+import 'search_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -21,104 +19,114 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-const _mangaHomeCardWidth = 112.0;
-const _mangaHomeCardAspectRatio = 0.55;
-const _mangaHomeCardSpacing = 12.0;
-
-double _mangaHomeGridCardWidth(double crossAxisExtent) {
-  final crossAxisCount = math.max(
-    1,
-    (crossAxisExtent / (_mangaHomeCardWidth + _mangaHomeCardSpacing)).ceil(),
-  );
-  final usableCrossAxisExtent = math.max(
-    0.0,
-    crossAxisExtent - _mangaHomeCardSpacing * (crossAxisCount - 1),
-  );
-  return usableCrossAxisExtent / crossAxisCount;
-}
-
 class _HomePageState extends State<HomePage> {
-  static const _cacheKey = 'manga_home_v1';
-  static const _rankingOrdering = '-datetime_updated';
+  static const _cacheKey = 'danmei_home_v3';
+  static const _sortPopular = '-popular';
+  static const _sortUpdated = '-datetime_updated';
 
   final _api = ApiClient();
+  late final CopyMangaSourceAdapter _source;
   final _cache = DataCache();
-  final _user = UserManager();
-  MangaHome? _home;
-  List<Comic> _rankingPreview = [];
+
+  String _selectedCategoryId = CategoryConfig.rootCategoryId;
+  String _sortType = _sortPopular;
+
+  List<Comic> _comics = [];
+  int _page = 1;
+  bool _hasNextPage = false;
   bool _loading = true;
+  bool _loadingMore = false;
   bool _refreshing = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _user.addListener(_onUserChanged);
+    _source = CopyMangaSourceAdapter(_api);
     _loadFromCache();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _user.removeListener(_onUserChanged);
-    super.dispose();
-  }
-
-  void _onUserChanged() {
-    if (mounted) setState(() {});
+    _loadCategory(reset: true);
   }
 
   Future<void> _loadFromCache() async {
     final cached = await _cache.get(_cacheKey);
     if (!mounted || cached == null || !_loading) return;
-    setState(() {
-      _home = MangaHome.fromJson(Map<String, dynamic>.from(cached['home']));
-      _rankingPreview =
-          (cached['ranking'] as List?)
-              ?.map((j) => Comic.fromJson(j))
-              .toList() ??
-          [];
-      _loading = false;
-    });
+    final key = '${_selectedCategoryId}_${_sortType}';
+    final list = (cached[key] as List?)
+        ?.map((j) => Comic.fromJson(j))
+        .toList();
+    if (list != null && list.isNotEmpty) {
+      setState(() {
+        _comics = list;
+        _loading = false;
+      });
+    }
   }
 
-  Future<void> _load() async {
-    final hasData = _home != null;
-    if (!hasData) {
+  Future<void> _loadCategory({bool reset = false}) async {
+    if (reset) {
       setState(() {
         _loading = true;
         _error = null;
+        _page = 1;
+        _comics = [];
       });
     } else {
       setState(() => _refreshing = true);
     }
+
     try {
-      final homeFuture = _api.getMangaHome();
-      final rankingFuture = _api.getComicList(
-        ordering: _rankingOrdering,
-        limit: 6,
+      final result = await _source.browseByCategory(
+        _selectedCategoryId,
+        page: _page,
+        ordering: _sortType,
       );
-      final home = await homeFuture;
-      final ranking = await rankingFuture;
       if (!mounted) return;
       setState(() {
-        _home = home;
-        _rankingPreview = ranking.list;
+        if (reset) _comics = [];
+        _comics.addAll(result.comics);
+        _hasNextPage = result.hasNextPage;
         _loading = false;
         _refreshing = false;
       });
-      _cache.put(_cacheKey, {
-        'home': home.toJson(),
-        'ranking': ranking.list.map((c) => c.toJson()).toList(),
-      });
+      if (_page == 1) {
+        final key = '${_selectedCategoryId}_${_sortType}';
+        final cached = await _cache.get(_cacheKey) ?? {};
+        cached[key] = result.comics.map((c) => c.toJson()).toList();
+        _cache.put(_cacheKey, cached);
+      }
     } catch (e) {
-      debugPrint('HomePage load error: $e');
+      debugPrint('HomePage category load error: $e');
       if (!mounted) return;
       setState(() {
         _loading = false;
         _refreshing = false;
         _error = e.toString();
       });
+    }
+  }
+
+  void _selectCategory(String categoryId) {
+    if (categoryId == _selectedCategoryId) return;
+    setState(() => _selectedCategoryId = categoryId);
+    _loadCategory(reset: true);
+  }
+
+  void _changeSort(String sort) {
+    if (sort == _sortType) return;
+    setState(() => _sortType = sort);
+    _loadCategory(reset: true);
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _loading || !_hasNextPage) return;
+    setState(() {
+      _loadingMore = true;
+      _page++;
+    });
+    try {
+      await _loadCategory(reset: false);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -137,789 +145,303 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(context).size.width;
     final contentWidth = screenWidth.clamp(0.0, 900.0);
     final hp = (screenWidth - contentWidth) / 2 + 16;
-    final home = _home;
-    final bannerItems = home == null
-        ? const <_MangaBannerItem>[]
-        : home.banners
-              .map(_MangaBannerItem.fromBanner)
-              .where((item) => item.cover.isNotEmpty)
-              .toList();
 
-    if (_loading) return const Center(child: CircularProgressIndicator());
-
-    if (_error != null && home == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off, size: 64, color: cs.onSurfaceVariant),
-            const SizedBox(height: 16),
-            Text('加载失败', style: tt.titleMedium),
-            const SizedBox(height: 8),
-            FilledButton.tonal(onPressed: _load, child: const Text('重试')),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: SizedBox(height: MediaQuery.of(context).padding.top),
-          ),
-          if (_refreshing)
-            const SliverToBoxAdapter(
-              child: LinearProgressIndicator(minHeight: 2),
-            ),
-          if (bannerItems.isNotEmpty && _user.bannerVisible)
-            SliverToBoxAdapter(
-              child: _MangaBannerCarousel(
-                items: bannerItems,
-                hp: hp,
-                onTap: (comic) => _openComic(
-                  comic,
-                  ComicHeroTags.base(
-                    scope: 'home-banner',
-                    pathWord: comic.pathWord,
-                    index: 0,
-                  ),
-                ),
+    return Scaffold(
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (sn) {
+          if (sn.metrics.pixels >= sn.metrics.maxScrollExtent - 300) {
+            _loadMore();
+          }
+          return false;
+        },
+        child: RefreshIndicator(
+          onRefresh: () => _loadCategory(reset: true),
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: SizedBox(height: MediaQuery.of(context).padding.top + 8),
               ),
-            ),
-          if (home != null && home.recommendations.isNotEmpty)
-            _MangaSection(
-              title: '热门推荐',
-              icon: Icons.auto_awesome,
-              hp: hp,
-              onMore: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RecommendPage()),
-              ),
-              child: _MangaHorizontalList(
-                items: home.recommendations,
-                onTap: _openComic,
-              ),
-            ),
-          if (_rankingPreview.isNotEmpty) ...[
-            _SectionTitle(
-              title: '漫画排行',
-              icon: Icons.leaderboard,
-              hp: hp,
-              onMore: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RankingPage()),
-              ),
-            ),
-            SliverPadding(
-              padding: EdgeInsets.symmetric(horizontal: hp),
-              sliver: SliverGrid(
-                delegate: SliverChildBuilderDelegate((_, i) {
-                  final comic = _rankingPreview[i];
-                  final heroTagBase = ComicHeroTags.base(
-                    scope: 'home-ranking',
-                    pathWord: comic.pathWord,
-                    index: i,
-                  );
-                  return ComicCard(
-                    comic: comic,
-                    heroTagBase: heroTagBase,
-                    onTap: () => _openComic(comic, heroTagBase),
-                  );
-                }, childCount: _rankingPreview.length),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: _mangaHomeCardWidth,
-                  childAspectRatio: _mangaHomeCardAspectRatio,
-                  mainAxisSpacing: _mangaHomeCardSpacing,
-                  crossAxisSpacing: _mangaHomeCardSpacing,
-                ),
-              ),
-            ),
-          ],
-          const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
-        ],
-      ),
-    );
-  }
-}
 
-// ── Banner ──
-
-class _MangaBannerItem {
-  final String cover;
-  final String title;
-  final String brief;
-  final Comic? comic;
-
-  const _MangaBannerItem({
-    required this.cover,
-    required this.title,
-    required this.brief,
-    this.comic,
-  });
-
-  factory _MangaBannerItem.fromBanner(MangaBanner banner) {
-    final comic = banner.comic;
-    final title = comic != null && comic.name.isNotEmpty
-        ? comic.name
-        : banner.brief;
-    return _MangaBannerItem(
-      cover: banner.cover.isNotEmpty ? banner.cover : (comic?.cover ?? ''),
-      title: title,
-      brief: banner.brief,
-      comic: comic,
-    );
-  }
-}
-
-class _MangaBannerCarousel extends StatefulWidget {
-  final List<_MangaBannerItem> items;
-  final double hp;
-  final ValueChanged<Comic> onTap;
-
-  const _MangaBannerCarousel({
-    required this.items,
-    required this.hp,
-    required this.onTap,
-  });
-
-  @override
-  State<_MangaBannerCarousel> createState() => _MangaBannerCarouselState();
-}
-
-class _MangaBannerCarouselState extends State<_MangaBannerCarousel> {
-  late final PageController _controller;
-  Timer? _timer;
-  late int _page;
-
-  @override
-  void initState() {
-    super.initState();
-    _page = _initialPage(widget.items.length);
-    _controller = PageController(initialPage: _page);
-    _restartTimer();
-  }
-
-  @override
-  void didUpdateWidget(covariant _MangaBannerCarousel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.items.length != widget.items.length) {
-      _page = _initialPage(widget.items.length);
-      if (_controller.hasClients) {
-        _controller.jumpToPage(_page);
-      }
-      _restartTimer();
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _restartTimer() {
-    _timer?.cancel();
-    if (widget.items.length <= 1) return;
-    _timer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _nextPage(restartTimer: false),
-    );
-  }
-
-  int _initialPage(int count) {
-    return count > 1 ? count * 1000 : 0;
-  }
-
-  void _nextPage({bool restartTimer = true}) {
-    if (!mounted || widget.items.length <= 1) return;
-    if (!_controller.hasClients) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _nextPage(restartTimer: restartTimer),
-      );
-      return;
-    }
-    _animateToPage(_page + 1, restartTimer: restartTimer);
-  }
-
-  void _animateToPage(int page, {bool restartTimer = true}) {
-    _controller.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-    );
-    if (restartTimer) {
-      _restartTimer();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Column(
-      children: [
-        SizedBox(
-          height: 176,
-          child: Stack(
-            children: [
-              PageView.builder(
-                controller: _controller,
-                physics: const PageScrollPhysics(),
-                itemCount: widget.items.length > 1 ? null : widget.items.length,
-                onPageChanged: (page) => setState(() => _page = page),
-                itemBuilder: (_, i) {
-                  final item = widget.items[i % widget.items.length];
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      left: widget.hp,
-                      right: widget.hp,
-                      bottom: 8,
+              // 毛玻璃搜索框
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hp, 4, hp, 10),
+                  child: GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SearchPage()),
                     ),
-                    child: _MangaBannerCard(
-                      item: item,
-                      onTap: item.comic == null
-                          ? null
-                          : () => widget.onTap(item.comic!),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        if (widget.items.length > 1)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var i = 0; i < widget.items.length; i++)
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: i == _page % widget.items.length ? 16 : 6,
-                    height: 6,
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    decoration: BoxDecoration(
-                      color: i == _page % widget.items.length
-                          ? cs.primary
-                          : cs.onSurfaceVariant.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _MangaBannerCard extends StatelessWidget {
-  final _MangaBannerItem item;
-  final VoidCallback? onTap;
-
-  const _MangaBannerCard({required this.item, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        margin: EdgeInsets.zero,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CoverBrightnessFilter(
-              child: CachedNetworkImage(
-                imageUrl: item.cover,
-                fit: BoxFit.cover,
-                fadeInDuration: Duration.zero,
-                fadeOutDuration: Duration.zero,
-                placeholder: (_, _) => _ImagePlaceholder(icon: Icons.book),
-                errorWidget: (_, _, _) =>
-                    _ImagePlaceholder(icon: Icons.broken_image),
-              ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.72),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              left: 14,
-              right: 14,
-              bottom: 12,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (item.title.isNotEmpty)
-                    Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tt.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+                    child: Container(
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: (isDark ? Colors.white : Colors.black)
+                            .withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: (isDark ? Colors.white : Colors.black)
+                              .withValues(alpha: 0.08),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 16),
+                          Icon(Icons.search_rounded,
+                              size: 20, color: cs.onSurfaceVariant),
+                          const SizedBox(width: 10),
+                          Text(
+                            '搜索漫画...',
+                            style: tt.bodyMedium?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  if (item.brief.isNotEmpty && item.brief != item.title) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      item.brief,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tt.bodySmall?.copyWith(color: cs.surface),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Section & Card ──
-
-class _MangaSection extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final double hp;
-  final Widget child;
-  final VoidCallback? onMore;
-
-  const _MangaSection({
-    required this.title,
-    required this.icon,
-    required this.hp,
-    required this.child,
-    this.onMore,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    return SliverToBoxAdapter(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(hp, 0, hp, 6),
-            child: Row(
-              children: [
-                Icon(icon, size: 20, color: cs.primary),
-                const SizedBox(width: 6),
-                Text(
-                  title,
-                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                  ),
                 ),
-                const Spacer(),
-                if (onMore != null)
-                  TextButton(
-                    onPressed: onMore,
-                    child: Row(
+              ),
+
+              // 分类药丸 Wrap
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: hp),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: CategoryConfig.categories.map((c) {
+                      final selected = c.categoryId == _selectedCategoryId;
+                      return _CategoryPill(
+                        label: c.categoryName,
+                        selected: selected,
+                        onTap: () => _selectCategory(c.categoryId),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+
+              // 最热/最新
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hp, 10, hp, 4),
+                  child: Row(
+                    children: [
+                      _SortChip(
+                        icon: Icons.whatshot,
+                        label: '最热',
+                        selected: _sortType == _sortPopular,
+                        onTap: () => _changeSort(_sortPopular),
+                      ),
+                      const SizedBox(width: 8),
+                      _SortChip(
+                        icon: Icons.schedule,
+                        label: '最新',
+                        selected: _sortType == _sortUpdated,
+                        onTap: () => _changeSort(_sortUpdated),
+                      ),
+                      const Spacer(),
+                      if (_refreshing)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+              // 漫画网格
+              if (_loading && _comics.isEmpty)
+                const SliverFillRemaining(
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_error != null && _comics.isEmpty)
+                SliverFillRemaining(
+                  child: Center(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('更多', style: TextStyle(color: cs.primary)),
-                        Icon(Icons.chevron_right, size: 18, color: cs.primary),
+                        Icon(Icons.cloud_off,
+                            size: 48, color: cs.onSurfaceVariant),
+                        const SizedBox(height: 12),
+                        Text('加载失败', style: tt.titleMedium),
+                        const SizedBox(height: 8),
+                        FilledButton.tonal(
+                          onPressed: () => _loadCategory(reset: true),
+                          child: const Text('重试'),
+                        ),
                       ],
                     ),
                   ),
-              ],
-            ),
-          ),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _MangaHorizontalList extends StatelessWidget {
-  final List<Comic> items;
-  final void Function(Comic, String) onTap;
-
-  const _MangaHorizontalList({required this.items, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final contentWidth = screenWidth < 900 ? screenWidth : 900.0;
-    final hp = (screenWidth - contentWidth) / 2 + 16;
-    final cardWidth = _mangaHomeGridCardWidth(contentWidth - 32);
-    final cardHeight = cardWidth / _mangaHomeCardAspectRatio;
-
-    return SizedBox(
-      height: cardHeight,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(horizontal: hp),
-        itemCount: items.length,
-        itemBuilder: (_, i) {
-          final comic = items[i];
-          final heroTagBase = ComicHeroTags.base(
-            scope: 'home-recommend',
-            pathWord: comic.pathWord,
-            index: i,
-          );
-          return _MangaCard(
-            comic: comic,
-            width: cardWidth,
-            heroTagBase: heroTagBase,
-            onTap: () => onTap(comic, heroTagBase),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _MangaCard extends StatelessWidget {
-  final Comic comic;
-  final double width;
-  final String? heroTagBase;
-  final VoidCallback onTap;
-
-  const _MangaCard({
-    required this.comic,
-    required this.width,
-    this.heroTagBase,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: width,
-        margin: const EdgeInsets.only(right: _mangaHomeCardSpacing),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _hero(
-                ComicHeroTags.cover,
-                Card(
-                  clipBehavior: Clip.antiAlias,
-                  margin: EdgeInsets.zero,
-                  child: CoverBrightnessFilter(
-                    child: CachedNetworkImage(
-                      imageUrl: comic.cover,
-                      fit: BoxFit.cover,
-                      width: width,
-                      height: double.infinity,
-                      fadeInDuration: Duration.zero,
-                      fadeOutDuration: Duration.zero,
-                      placeholder: (_, _) => Container(
-                        color: cs.surfaceContainerHighest,
-                        child: Center(
-                          child: Icon(
-                            Icons.image,
-                            color: cs.onSurfaceVariant,
-                            size: 32,
-                          ),
-                        ),
-                      ),
-                      errorWidget: (_, _, _) => Container(
-                        color: cs.surfaceContainerHighest,
-                        child: Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            color: cs.onSurfaceVariant,
-                            size: 32,
-                          ),
-                        ),
-                      ),
+                )
+              else if (_comics.isEmpty)
+                SliverFillRemaining(
+                  child: Center(
+                    child: Text('暂无漫画',
+                        style: tt.bodyLarge
+                            ?.copyWith(color: cs.onSurfaceVariant)),
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: EdgeInsets.symmetric(horizontal: hp),
+                  sliver: SliverGrid(
+                    delegate: SliverChildBuilderDelegate(
+                      (_, i) {
+                        if (i >= _comics.length) {
+                          return const Center(
+                              child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          ));
+                        }
+                        final comic = _comics[i];
+                        final heroTagBase = ComicHeroTags.base(
+                          scope: 'home-$_selectedCategoryId',
+                          pathWord: comic.pathWord,
+                          index: i,
+                        );
+                        return ComicCoverCard(
+                          comic: comic,
+                          heroTagBase: heroTagBase,
+                          showMeta: false,
+                          radius: 10,
+                          onTap: () => _openComic(comic, heroTagBase),
+                        );
+                      },
+                      childCount:
+                          _comics.length + (_loadingMore ? 1 : 0),
+                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 0.52,
                     ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              comic.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tt.bodySmall,
-            ),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Icon(Icons.local_fire_department, size: 12, color: cs.primary),
-                const SizedBox(width: 2),
-                Text(
-                  ComicCard.formatPopular(comic.popular),
-                  style: tt.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontSize: 10,
-                  ),
-                ),
-                if (comic.authors.isNotEmpty) ...[
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      comic.authors.map((a) => a.name).join(' / '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tt.labelSmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                        fontSize: 10,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _hero(String Function(String base) tagOf, Widget child) {
-    final base = heroTagBase;
-    if (base == null) return child;
-    return Hero(
-      tag: tagOf(base),
-      createRectTween: ComicHeroTags.createRectTween,
-      placeholderBuilder: _buildHeroPlaceholder,
-      child: child,
-    );
-  }
-
-  Widget _buildHeroPlaceholder(
-    BuildContext context,
-    Size heroSize,
-    Widget child,
-  ) {
-    return SizedBox(width: heroSize.width, height: heroSize.height);
-  }
-}
-
-// ── 通用组件 ──
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final double hp;
-  final VoidCallback? onMore;
-  const _SectionTitle({
-    required this.title,
-    required this.icon,
-    required this.hp,
-    this.onMore,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(hp, 0, hp - 8, 6),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: cs.primary),
-            const SizedBox(width: 6),
-            Text(
-              title,
-              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const Spacer(),
-            if (onMore != null)
-              TextButton(
-                onPressed: onMore,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('更多', style: TextStyle(color: cs.primary)),
-                    Icon(Icons.chevron_right, size: 18, color: cs.primary),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ImagePlaceholder extends StatelessWidget {
-  final IconData icon;
-
-  const _ImagePlaceholder({required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      color: cs.surfaceContainerHighest,
-      child: Center(child: Icon(icon, color: cs.onSurfaceVariant, size: 32)),
-    );
-  }
-}
-
-/// 漫画网格卡片，多页面复用
-class ComicCard extends StatelessWidget {
-  final Comic comic;
-  final String? heroTagBase;
-  final VoidCallback onTap;
-  const ComicCard({
-    super.key,
-    required this.comic,
-    this.heroTagBase,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    final title = Text(
-      comic.name,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: tt.bodySmall,
-    );
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: _hero(
-              ComicHeroTags.cover,
-              Card(
-                clipBehavior: Clip.antiAlias,
-                margin: EdgeInsets.zero,
-                child: CoverBrightnessFilter(
-                  child: CachedNetworkImage(
-                    imageUrl: comic.cover,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fadeInDuration: Duration.zero,
-                    fadeOutDuration: Duration.zero,
-                    placeholder: (_, _) => Container(
-                      color: cs.surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.image,
-                          color: cs.onSurfaceVariant,
-                          size: 32,
-                        ),
-                      ),
-                    ),
-                    errorWidget: (_, _, _) => Container(
-                      color: cs.surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.broken_image,
-                          color: cs.onSurfaceVariant,
-                          size: 32,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          title,
-          const SizedBox(height: 2),
-          Row(
-            children: [
-              Icon(Icons.local_fire_department, size: 12, color: cs.primary),
-              const SizedBox(width: 2),
-              Flexible(
-                child: Text(
-                  formatPopular(comic.popular),
-                  overflow: TextOverflow.ellipsis,
-                  style: tt.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-              if (comic.datetimeUpdated != null) ...[
-                const SizedBox(width: 4),
-                Text(
-                  formatRelativeTime(comic.datetimeUpdated!),
-                  style: tt.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontSize: 10,
-                  ),
-                ),
-              ],
+              const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
+}
 
-  Widget _hero(String Function(String base) tagOf, Widget child) {
-    final base = heroTagBase;
-    if (base == null) return child;
-    return Hero(
-      tag: tagOf(base),
-      createRectTween: ComicHeroTags.createRectTween,
-      placeholderBuilder: _buildHeroPlaceholder,
-      child: child,
+// ── 分类药丸 ──
+
+class _CategoryPill extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _CategoryPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? cs.primary
+              : (isDark ? Colors.white : cs.primary)
+                  .withValues(alpha: isDark ? 0.10 : 0.06),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? cs.primary
+                : (isDark ? Colors.white : cs.primary)
+                    .withValues(alpha: isDark ? 0.20 : 0.30),
+            width: 1.2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selected
+                ? cs.onPrimary
+                : isDark
+                    ? Colors.white.withValues(alpha: 0.85)
+                    : cs.primary,
+          ),
+        ),
+      ),
     );
   }
+}
 
-  Widget _buildHeroPlaceholder(
-    BuildContext context,
-    Size heroSize,
-    Widget child,
-  ) {
-    return SizedBox(width: heroSize.width, height: heroSize.height);
-  }
+// ── 排序切换 ──
 
-  static String formatPopular(int n) {
-    if (n >= 100000000) return '${(n / 100000000).toStringAsFixed(1)}亿';
-    if (n >= 10000) return '${(n / 10000).toStringAsFixed(1)}万';
-    return n.toString();
-  }
+class _SortChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
-  static String formatRelativeTime(String dateStr) {
-    final date = DateTime.tryParse(dateStr);
-    if (date == null) return dateStr;
-    final diff = DateTime.now().difference(date);
-    if (diff.inMinutes < 1) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-    if (diff.inHours < 24) return '${diff.inHours}小时前';
-    if (diff.inDays < 30) return '${diff.inDays}天前';
-    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}个月前';
-    return '${(diff.inDays / 365).floor()}年前';
+  const _SortChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? cs.primary : cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? cs.primary : cs.outlineVariant,
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 13,
+                color: selected ? cs.onPrimary : cs.onSurfaceVariant),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected ? cs.onPrimary : cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -14,12 +14,13 @@ mixin _NetworkApi on _ApiClientBase {
       hosts.map((host) async {
         try {
           final sw = Stopwatch()..start();
-          await SecureSocket.connect(
+          final socket = await SecureSocket.connect(
             host,
             443,
             timeout: const Duration(seconds: 3),
           );
           sw.stop();
+          socket.destroy();
           results[host] = sw.elapsedMilliseconds;
         } catch (_) {
           results[host] = null;

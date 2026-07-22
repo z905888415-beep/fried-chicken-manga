@@ -67,18 +67,45 @@ class SettingsBackupService {
     final prefs = await SharedPreferences.getInstance();
     final existingKeys = prefs.getKeys().where(_isUserPreferenceKey).toList();
 
-    for (final key in existingKeys) {
-      await prefs.remove(key);
-    }
+    // Snapshot existing values so we can roll back if the import fails.
+    final snapshot = <String, Object?>{
+      for (final key in existingKeys) key: prefs.get(key),
+    };
 
-    for (final entry in backup.preferences.entries) {
-      await _writePreference(prefs, entry.key, entry.value);
-    }
+    final writtenKeys = <String>{};
+    try {
+      for (final key in existingKeys) {
+        await prefs.remove(key);
+      }
 
-    return SettingsBackupSummary(
-      preferenceCount: backup.preferences.length,
-      exportedAt: backup.exportedAt,
-    );
+      for (final entry in backup.preferences.entries) {
+        await _writePreference(prefs, entry.key, entry.value);
+        writtenKeys.add(entry.key);
+      }
+
+      return SettingsBackupSummary(
+        preferenceCount: backup.preferences.length,
+        exportedAt: backup.exportedAt,
+      );
+    } catch (e) {
+      // Restore the original settings before reporting the failure.
+      for (final key in existingKeys) {
+        final original = snapshot[key];
+        if (original == null) {
+          await prefs.remove(key);
+        } else {
+          await _restorePreference(prefs, key, original);
+        }
+      }
+      // Drop any newly-written keys that were not part of the original set.
+      for (final key in writtenKeys) {
+        if (!snapshot.containsKey(key)) {
+          await prefs.remove(key);
+        }
+      }
+      if (e is SettingsBackupException) rethrow;
+      throw SettingsBackupException('导入失败，已还原原有设置：$e');
+    }
   }
 
   Future<int> clearAllPreferences() async {
@@ -197,6 +224,25 @@ class SettingsBackupService {
     }
 
     throw const SettingsBackupException('配置字段类型不受支持');
+  }
+
+  static Future<void> _restorePreference(
+    SharedPreferences prefs,
+    String key,
+    Object value,
+  ) async {
+    if (value is String) {
+      await prefs.setString(key, value);
+    } else if (value is bool) {
+      await prefs.setBool(key, value);
+    } else if (value is int) {
+      await prefs.setInt(key, value);
+    } else if (value is double) {
+      await prefs.setDouble(key, value);
+    } else if (value is List) {
+      // SharedPreferences only persists List<String>.
+      await prefs.setStringList(key, value.map((e) => e.toString()).toList());
+    }
   }
 
   static Future<void> _writePreference(

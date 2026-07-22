@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:ui';
 import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../models/chapter.dart';
@@ -7,8 +8,12 @@ import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_hero_tags.dart';
 import '../utils/data_cache.dart';
 import '../utils/download_manager.dart';
+import '../utils/local_favorites.dart';
 import '../utils/reading_history.dart';
 import '../utils/toast.dart';
+import '../widgets/circle_icon_button.dart';
+import '../widgets/kira_app_bar.dart';
+import '../widgets/state_views.dart';
 import 'comic_comments_sheet.dart';
 import 'reader_page.dart';
 
@@ -117,11 +122,18 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   Future<void> _initializePage() async {
     await Future.wait([_downloads.init(), _loadFromCache()]);
     await _loadLocalHistory();
+    await _loadLocalFavoriteState();
     await _loadComic();
   }
 
   void _handleDownloadChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadLocalFavoriteState() async {
+    final isFavorite = await LocalFavorites.contains(widget.pathWord);
+    if (!mounted) return;
+    setState(() => _isCollected = isFavorite || _isCollected);
   }
 
   Future<void> _loadLocalHistory({String? group}) async {
@@ -235,12 +247,17 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   Future<void> _loadCollectState() async {
+    final localFavorite = await LocalFavorites.contains(widget.pathWord);
     try {
       final query = await _api.getComicQuery(widget.pathWord);
       if (!mounted) return;
-      setState(() => _isCollected = query['collect'] != null);
+      setState(() => _isCollected = localFavorite || query['collect'] != null);
       await _saveCache();
-    } catch (_) {}
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isCollected = localFavorite);
+      await _saveCache();
+    }
   }
 
   Future<void> _loadChapterPage(
@@ -481,17 +498,20 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   Future<void> _toggleCollect() async {
-    final comicId = _comic?.uuid;
-    if (comicId == null || comicId.isEmpty) return;
+    final comic = _comic;
+    if (comic == null) return;
 
     final newState = !_isCollected;
     setState(() => _isCollected = newState);
+    await LocalFavorites.setFavorite(comic, newState);
+    await _saveCache();
+
+    final comicId = comic.uuid;
+    if (comicId == null || comicId.isEmpty) return;
     try {
       await _api.toggleCollect(comicId, collect: newState);
-      await _saveCache();
     } catch (_) {
-      setState(() => _isCollected = !newState);
-      await _saveCache();
+      // 本地收藏不依赖登录；账号同步失败时保留本地状态。
     }
   }
 
@@ -606,6 +626,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         builder: (_) => ReaderPage(
           pathWord: widget.pathWord,
           comicName: _comic?.name,
+          coverUrl: _comic?.cover,
           group: _selectedGroup,
           chapterUuid: chapter.uuid,
           chapterName: chapter.name,
@@ -623,29 +644,33 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     final tt = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: Text(_comic?.name ?? '')),
+      extendBodyBehindAppBar: true,
+      appBar: KiraAppBar(
+        glass: true,
+        leading: CircleIconButton(
+          glass: true,
+          icon: Icons.arrow_back_ios_new_rounded,
+          onTap: () => Navigator.pop(context),
+        ),
+        actions: [
+          CircleIconButton(
+            glass: true,
+            icon: Icons.share_outlined,
+            onTap: () {},
+          ),
+          const SizedBox(width: 4),
+          CircleIconButton(
+            glass: true,
+            icon: Icons.more_horiz_rounded,
+            onTap: () {},
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: _loadingComic
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : _comic == null
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 48,
-                    color: cs.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('加载失败'),
-                  const SizedBox(height: 8),
-                  FilledButton.tonal(
-                    onPressed: _loadComic,
-                    child: const Text('重试'),
-                  ),
-                ],
-              ),
-            )
+          ? ErrorView(message: '加载失败', onRetry: _loadComic)
           : Stack(
               children: [
                 _buildBody(cs, tt),
@@ -659,7 +684,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       alignment: WrapAlignment.end,
                       children: [
                         if (_nextBrowseChapter != null)
-                          FloatingActionButton.extended(
+                          _GlassFloatingButton(
                             heroTag: 'next_chapter',
                             onPressed: () => Navigator.push(
                               context,
@@ -667,6 +692,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                                 builder: (_) => ReaderPage(
                                   pathWord: widget.pathWord,
                                   comicName: _comic?.name,
+                                  coverUrl: _comic?.cover,
                                   group: _selectedGroup,
                                   chapterUuid: _nextBrowseChapter!.uuid,
                                   chapterName: _nextBrowseChapter!.name,
@@ -678,10 +704,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               _truncateNextChapterName(
                                 _nextBrowseChapter!.name,
                               ),
-                              style: const TextStyle(fontSize: 13),
                             ),
                           ),
-                        FloatingActionButton.extended(
+                        _GlassFloatingButton(
                           heroTag: 'continue_reading',
                           onPressed: () => Navigator.push(
                             context,
@@ -689,6 +714,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               builder: (_) => ReaderPage(
                                 pathWord: widget.pathWord,
                                 comicName: _comic?.name,
+                                coverUrl: _comic?.cover,
                                 group: _selectedGroup,
                                 chapterUuid: _lastBrowseId!,
                                 chapterName: _lastBrowseName ?? '',
@@ -697,10 +723,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                             ),
                           ).then((_) => _loadLocalHistory()),
                           icon: const Icon(Icons.play_arrow, size: 20),
-                          label: Text(
-                            _continueReadingLabel(),
-                            style: const TextStyle(fontSize: 13),
-                          ),
+                          label: Text(_continueReadingLabel()),
                         ),
                       ],
                     ),
@@ -990,39 +1013,88 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
-  Widget _buildBody(ColorScheme cs, TextTheme tt) {
-    final comic = _comic!;
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: CustomScrollView(
-        slivers: [
-          // ── 漫画信息卡片 ──
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _hero(
-                    ComicHeroTags.cover,
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
+  // ── 全宽头图 + 毛玻璃信息卡（苹果风）──
+  Widget _buildDetailHeader(Comic comic, ColorScheme cs, TextTheme tt) {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    return SizedBox(
+      height: 260,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 模糊大背景（取封面）
+          CachedNetworkImage(
+            imageUrl: comic.cover,
+            fit: BoxFit.cover,
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            placeholder: (_, _) => Container(color: cs.surfaceContainerHighest),
+            errorWidget: (_, _, _) =>
+                Container(color: cs.surfaceContainerHighest),
+          ),
+          Positioned.fill(
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+                child: Container(color: bg.withValues(alpha: 0.1)),
+              ),
+            ),
+          ),
+          // 底部渐变淡出到背景色，保证信息可读
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    bg.withValues(alpha: 0.15),
+                    bg.withValues(alpha: 0.55),
+                    bg,
+                  ],
+                  stops: const [0.0, 0.55, 1.0],
+                ),
+              ),
+            ),
+          ),
+          // 前景内容：封面缩略图 + 标题信息
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 14,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _hero(
+                  ComicHeroTags.cover,
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.28),
+                          blurRadius: 18,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
                       child: CoverBrightnessFilter(
                         child: CachedNetworkImage(
                           imageUrl: comic.cover,
-                          width: 120,
-                          height: 160,
+                          width: 112,
+                          height: 150,
                           fit: BoxFit.cover,
                           fadeInDuration: Duration.zero,
                           fadeOutDuration: Duration.zero,
                           placeholder: (_, _) => Container(
-                            width: 120,
-                            height: 160,
+                            width: 112,
+                            height: 150,
                             color: cs.surfaceContainerHighest,
                           ),
                           errorWidget: (_, _, _) => Container(
-                            width: 120,
-                            height: 160,
+                            width: 112,
+                            height: 150,
                             color: cs.surfaceContainerHighest,
                             child: Icon(
                               Icons.broken_image,
@@ -1033,114 +1105,120 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          comic.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: tt.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        comic.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
                         ),
+                      ),
+                      if (comic.authors.isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        if (comic.authors.isNotEmpty) ...[
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.person_outline,
-                                size: 16,
-                                color: cs.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  comic.authors.map((a) => a.name).join(' / '),
-                                  style: tt.bodyMedium,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
+                        Row(
                           children: [
-                            if (comic.status != null)
-                              _InfoChip(
-                                icon: Icons.timelapse,
-                                label: comic.status!['display'] ?? '',
-                                color: cs.primaryContainer,
-                                textColor: cs.onPrimaryContainer,
-                              ),
-                            if (comic.region != null)
-                              _InfoChip(
-                                icon: Icons.public,
-                                label: comic.region!['display'] ?? '',
-                                color: cs.secondaryContainer,
-                                textColor: cs.onSecondaryContainer,
-                              ),
-                            ...comic.themes.map(
-                              (t) => _InfoChip(
-                                icon: Icons.label_outline,
-                                label: t.name,
-                                color: cs.tertiaryContainer,
-                                textColor: cs.onTertiaryContainer,
+                            Icon(
+                              Icons.person_outline,
+                              size: 15,
+                              color: cs.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                comic.authors.map((a) => a.name).join(' / '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: tt.bodyMedium?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                        if (comic.popular > 0) ...[
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.local_fire_department,
-                                size: 16,
-                                color: cs.primary,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _formatPopular(comic.popular),
-                                style: tt.bodySmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (comic.datetimeUpdated != null) ...[
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.update,
-                                size: 16,
+                      ],
+                      if (comic.popular > 0) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.local_fire_department,
+                              size: 15,
+                              color: cs.primary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _formatPopular(comic.popular),
+                              style: tt.bodySmall?.copyWith(
                                 color: cs.onSurfaceVariant,
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _formatRelativeTime(comic.datetimeUpdated!),
-                                style: tt.bodySmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ],
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(ColorScheme cs, TextTheme tt) {
+    final comic = _comic!;
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: CustomScrollView(
+        slivers: [
+          // ── 全宽头图 + 毛玻璃信息卡 ──
+          SliverToBoxAdapter(child: _buildDetailHeader(comic, cs, tt)),
+          // ── 标签 chips ──
+          if (comic.status != null ||
+              comic.region != null ||
+              comic.themes.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (comic.status != null)
+                      _InfoChip(
+                        icon: Icons.timelapse,
+                        label: (comic.status!['display'] ?? '').toString(),
+                        color: cs.primaryContainer,
+                        textColor: cs.onPrimaryContainer,
+                      ),
+                    if (comic.region != null)
+                      _InfoChip(
+                        icon: Icons.public,
+                        label: (comic.region!['display'] ?? '').toString(),
+                        color: cs.secondaryContainer,
+                        textColor: cs.onSecondaryContainer,
+                      ),
+                    ...comic.themes.map(
+                      (t) => _InfoChip(
+                        icon: Icons.label_outline,
+                        label: t.name,
+                        color: cs.tertiaryContainer,
+                        textColor: cs.onTertiaryContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // ── 简介 ──
           if (comic.brief != null && comic.brief!.isNotEmpty)
             SliverToBoxAdapter(
@@ -1321,25 +1399,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     if (n >= 10000) return '${(n / 10000).toStringAsFixed(1)}万';
     return n.toString();
   }
-
-  static String _formatRelativeTime(String raw) {
-    if (raw.isEmpty) return '';
-    final normalized = raw.replaceFirst(' ', 'T');
-    final parsed = DateTime.tryParse(normalized);
-    if (parsed == null) return raw;
-    final now = DateTime.now();
-    final localTime = parsed.isUtc ? parsed.toLocal() : parsed;
-    final diff = now.difference(localTime);
-    if (diff.isNegative) return '刚刚';
-    if (diff.inSeconds < 60) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-    if (diff.inHours < 24) return '${diff.inHours}小时前';
-    if (diff.inDays < 30) return '${diff.inDays}天前';
-    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}个月前';
-    return '${(diff.inDays / 365).floor()}年前';
-  }
 }
 
+/// 悬浮圆形毛玻璃按钮（详情页顶部返回/分享/更多）
 class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1392,6 +1454,94 @@ class _DownloadedBadge extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(2),
         child: Icon(Icons.check, size: 12, color: Colors.white),
+      ),
+    );
+  }
+}
+
+class _GlassFloatingButton extends StatelessWidget {
+  final Widget icon;
+  final Widget label;
+  final VoidCallback onPressed;
+  final String heroTag;
+
+  const _GlassFloatingButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    required this.heroTag,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final themeColor = Theme.of(context).colorScheme.primary; // appleBlue
+    final bgColor = isDark
+        ? themeColor.withValues(alpha: 0.24)
+        : themeColor.withValues(alpha: 0.12);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.15)
+        : themeColor.withValues(alpha: 0.18);
+    final textColor = isDark ? Colors.white : themeColor;
+    final iconColor = isDark ? Colors.white : themeColor;
+
+    return Hero(
+      tag: heroTag,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              height: 44,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                color: bgColor,
+                border: Border.all(color: borderColor, width: 1.0),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onPressed,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Theme(
+                          data: Theme.of(context).copyWith(
+                            iconTheme: IconThemeData(color: iconColor),
+                          ),
+                          child: icon,
+                        ),
+                        const SizedBox(width: 8),
+                        DefaultTextStyle(
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          child: label,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

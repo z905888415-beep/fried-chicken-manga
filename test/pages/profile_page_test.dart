@@ -46,7 +46,8 @@ void main() {
   testWidgets('switch account sheet shows add account button', (tester) async {
     await pumpProfilePage(tester);
 
-    await tester.tap(find.text('Alice'));
+    // 新交互：先点「编辑」展开操作区，才出现「切换账号」按钮
+    await tester.tap(find.text('编辑'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('切换账号'));
@@ -60,7 +61,8 @@ void main() {
   testWidgets('profile page shows general settings entry', (tester) async {
     await pumpProfilePage(tester);
 
-    expect(find.text('通用'), findsOneWidget);
-    expect(find.text('自动登录、设置导入导出'), findsOneWidget);
+    // 「通用」入口已重设计为「主题设置」（trailing 显示当前主题模式）
+    expect(find.text('主题设置'), findsOneWidget);
+    expect(find.text('跟随系统'), findsOneWidget);
   });
 }

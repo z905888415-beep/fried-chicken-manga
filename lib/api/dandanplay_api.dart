@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'api_helpers.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -342,17 +343,29 @@ class DandanplayApi {
         queryParameters: {'anime': animeName},
       );
       if (response.data['success'] == true) {
-        final animes = response.data['animes'] as List;
+        final animes = safeRawList<Map>(
+          response.data['animes'],
+          required: false,
+        );
         final results = <DandanplayEpisode>[];
-        for (var anime in animes) {
-          final animeTitle = anime['animeTitle'] as String;
-          final episodes = anime['episodes'] as List;
+        for (var a in animes) {
+          final anime = a as Map?;
+          final animeTitle = anime?['animeTitle'] as String? ?? '';
+          final episodes = safeRawList<Map>(
+            anime?['episodes'],
+            required: false,
+          );
           for (var ep in episodes) {
+            final epMap = ep as Map?;
             results.add(
               DandanplayEpisode(
-                episodeId: ep['episodeId'] as int,
+                episodeId: safeInt(
+                  epMap?['episodeId'],
+                  required: false,
+                  fallback: 0,
+                ),
                 animeTitle: animeTitle,
-                episodeTitle: ep['episodeTitle'] as String,
+                episodeTitle: epMap?['episodeTitle'] as String? ?? '',
               ),
             );
           }
@@ -379,7 +392,7 @@ class DandanplayApi {
       );
       final data = response.data;
       if (data is Map && data['success'] == true) {
-        final animes = (data['animes'] as List?) ?? const [];
+        final animes = safeRawList<Map>(data['animes'], required: false);
         final results = animes
             .map(
               (e) => DandanplayAnimeSearchItem.fromJson(
@@ -496,19 +509,21 @@ class DandanplayApi {
         queryParameters: {'withRelated': 'true'},
       );
       final data = response.data;
-      if (data is Map && data['comments'] is List) {
-        final comments = data['comments'] as List;
+      if (data is Map) {
+        final comments = safeRawList<Map>(data['comments'], required: false);
         final results = <DandanplayComment>[];
         for (var c in comments) {
+          final cm = c as Map?;
           try {
-            final p = c['p'].toString().split(',');
+            if (cm == null) continue;
+            final p = cm['p'].toString().split(',');
             if (p.length < 3) continue;
             results.add(
               DandanplayComment(
                 time: double.parse(p[0]),
                 mode: int.parse(p[1]),
                 color: int.parse(p[2]),
-                text: c['m'] as String,
+                text: cm['m']?.toString() ?? '',
               ),
             );
           } catch (e) {
@@ -554,7 +569,7 @@ class DandanplayApi {
       );
       final data = response.data;
       if (data is Map && data['success'] == true) {
-        final comments = (data['comments'] as List? ?? const [])
+        final comments = safeRawList<Map>(data['comments'], required: false)
             .map(
               (item) => DandanplayBangumiComment.fromJson(
                 Map<String, dynamic>.from(item),
@@ -562,7 +577,7 @@ class DandanplayApi {
             )
             .toList(growable: false);
         final result = DandanplayBangumiCommentsPage(
-          count: data['count'] as int? ?? comments.length,
+          count: safeInt(data['count'], required: false, fallback: 0),
           hasMore: data['hasMore'] == true,
           comments: comments,
         );

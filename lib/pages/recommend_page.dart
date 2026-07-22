@@ -3,8 +3,11 @@ import '../api/api_client.dart';
 import '../models/comic.dart' hide Theme;
 import '../utils/comic_hero_tags.dart';
 import '../utils/comic_card_skeleton.dart';
+import '../utils/network_error.dart';
+import '../widgets/comic_cover_card.dart';
+import '../widgets/kira_app_bar.dart';
+import '../widgets/state_views.dart';
 import 'comic_detail_page.dart';
-import 'home_page.dart';
 
 /// 推荐漫画完整列表页
 class RecommendPage extends StatefulWidget {
@@ -20,6 +23,7 @@ class _RecommendPageState extends State<RecommendPage> {
   bool _loading = true;
   int _offset = 0;
   bool _loadingMore = false;
+  String? _error;
 
   @override
   void initState() {
@@ -28,16 +32,27 @@ class _RecommendPageState extends State<RecommendPage> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final data = await _api.getRecommendations(limit: 21);
+      final data = await _api.getComicList(
+        ordering: '-popular',
+        limit: 21,
+        theme: danmeiThemePathWord,
+      );
       if (!mounted) return;
       setState(() {
-        _comics = data;
-        _offset = data.length;
+        _comics = data.list;
+        _offset = data.list.length;
         _loading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        _error = NetworkError.message(e);
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -45,13 +60,27 @@ class _RecommendPageState extends State<RecommendPage> {
     if (_loadingMore) return;
     setState(() => _loadingMore = true);
     try {
-      final data = await _api.getRecommendations(limit: 21, offset: _offset);
+      final data = await _api.getComicList(
+        ordering: '-popular',
+        limit: 21,
+        offset: _offset,
+        theme: danmeiThemePathWord,
+      );
       if (!mounted) return;
       setState(() {
-        _comics.addAll(data);
+        _comics.addAll(data.list);
         _offset = _comics.length;
       });
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(NetworkError.message(e)),
+            action: SnackBarAction(label: '重试', onPressed: _loadMore),
+          ),
+        );
+      }
+    }
     if (mounted) {
       setState(() => _loadingMore = false);
     } else {
@@ -67,13 +96,13 @@ class _RecommendPageState extends State<RecommendPage> {
 
     const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
       maxCrossAxisExtent: 130,
-      childAspectRatio: 0.55,
+      childAspectRatio: 0.62,
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('热门推荐')),
+      appBar: KiraAppBar(titleText: '耽美热门'),
       body: _loading
           ? GridView.builder(
               padding: EdgeInsets.symmetric(horizontal: hp, vertical: 12),
@@ -81,6 +110,10 @@ class _RecommendPageState extends State<RecommendPage> {
               gridDelegate: gridDelegate,
               itemBuilder: (_, _) => const ComicCardSkeleton(),
             )
+          : _error != null && _comics.isEmpty
+          ? ErrorView(message: _error!, onRetry: _load)
+          : _comics.isEmpty
+          ? const EmptyView(message: '暂无推荐漫画')
           : NotificationListener<ScrollNotification>(
               onNotification: (n) {
                 if (n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
@@ -104,7 +137,7 @@ class _RecommendPageState extends State<RecommendPage> {
                           pathWord: comic.pathWord,
                           index: i,
                         );
-                        return ComicCard(
+                        return ComicCoverCard(
                           comic: comic,
                           heroTagBase: heroTagBase,
                           onTap: () => Navigator.push(

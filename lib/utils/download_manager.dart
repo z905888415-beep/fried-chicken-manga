@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../api/api_client.dart';
@@ -10,7 +11,7 @@ import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
 import '../models/comic.dart';
 
-class DownloadManager extends ChangeNotifier {
+class DownloadManager extends ChangeNotifier with WidgetsBindingObserver {
   static final DownloadManager _instance = DownloadManager._();
   factory DownloadManager() => _instance;
   DownloadManager._();
@@ -34,7 +35,16 @@ class DownloadManager extends ChangeNotifier {
   };
 
   final ApiClient _api = ApiClient();
-  final HttpClient _httpClient = HttpClient()..connectionTimeout = _timeout;
+  HttpClient? _httpClient;
+  bool _httpClientDisposed = false;
+  bool _observerRegistered = false;
+
+  /// Lazily creates and returns the shared [HttpClient].
+  HttpClient _client() {
+    _httpClient ??= HttpClient()..connectionTimeout = _timeout;
+    return _httpClient!;
+  }
+
   final Map<String, Map<String, DownloadedChapterSummary>> _manifest = {};
   final List<_DownloadTask> _queue = [];
   final Set<String> _queuedKeys = {};
@@ -49,6 +59,10 @@ class DownloadManager extends ChangeNotifier {
   bool get isBusy => _queuedKeys.isNotEmpty;
 
   Future<void> init() async {
+    if (!_observerRegistered) {
+      _observerRegistered = true;
+      WidgetsBinding.instance.addObserver(this);
+    }
     if (_initialized) return;
     _initFuture ??= _initialize();
     await _initFuture;
@@ -201,6 +215,10 @@ class DownloadManager extends ChangeNotifier {
   }
 
   Future<void> _initialize() async {
+    if (kIsWeb) {
+      _initialized = true;
+      return;
+    }
     final docsDir = await getApplicationDocumentsDirectory();
     _rootDirectory = Directory(_joinPath([docsDir.path, _rootFolderName]));
     await _rootDirectory!.create(recursive: true);
@@ -393,7 +411,7 @@ class DownloadManager extends ChangeNotifier {
     int index,
   ) async {
     final uri = Uri.parse(imageUrl);
-    final request = await _httpClient.getUrl(uri).timeout(_timeout);
+    final request = await _client().getUrl(uri).timeout(_timeout);
     final response = await request.close().timeout(_timeout);
 
     if (response.statusCode != HttpStatus.ok) {
@@ -502,7 +520,7 @@ class DownloadManager extends ChangeNotifier {
     final comicDir = _comicDirectory(pathWord);
     await comicDir.create(recursive: true);
     final uri = Uri.parse(coverUrl);
-    final request = await _httpClient.getUrl(uri).timeout(_timeout);
+    final request = await _client().getUrl(uri).timeout(_timeout);
     final response = await request.close().timeout(_timeout);
     if (response.statusCode != HttpStatus.ok) {
       throw HttpException(
@@ -634,9 +652,8 @@ class DownloadManager extends ChangeNotifier {
     return '.jpg';
   }
 
-  String _joinPath(List<String> segments) => segments
-      .where((segment) => segment.isNotEmpty)
-      .join(Platform.pathSeparator);
+  String _joinPath(List<String> segments) =>
+      segments.where((segment) => segment.isNotEmpty).join('/');
 
   String _safePathSegment(String segment) {
     final sanitized = segment.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
@@ -652,6 +669,32 @@ class DownloadManager extends ChangeNotifier {
       pathWord: parts.isNotEmpty ? parts.first : '',
       chapterUuid: parts.length > 1 ? parts.last : '',
     );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Release the shared HTTP client when the app is being destroyed.
+    if (state == AppLifecycleState.detached) {
+      _closeHttpClient();
+    }
+  }
+
+  /// Closes the shared [HttpClient] exactly once on the app exit path.
+  void _closeHttpClient() {
+    if (_httpClientDisposed) return;
+    _httpClientDisposed = true;
+    _httpClient?.close();
+    _httpClient = null;
+  }
+
+  @override
+  void dispose() {
+    _closeHttpClient();
+    if (_observerRegistered) {
+      WidgetsBinding.instance.removeObserver(this);
+      _observerRegistered = false;
+    }
+    super.dispose();
   }
 }
 

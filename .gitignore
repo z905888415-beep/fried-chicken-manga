@@ -49,3 +49,11 @@ ref/
 .codex
 # Environment Variables
 .env
+
+# Build Artifacts & Testing
+*.apk
+verify_screens/
+android/build/
+.qoder/
+
+

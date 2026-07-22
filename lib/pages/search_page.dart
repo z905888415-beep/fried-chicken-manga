@@ -1,219 +1,193 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
-import '../models/anime.dart';
 import '../models/comic.dart' hide Theme;
-import '../models/comic.dart' as m;
-import '../models/user_manager.dart';
-import '../utils/cover_brightness_filter.dart';
 import '../utils/comic_card_skeleton.dart';
 import '../utils/comic_hero_tags.dart';
-import '../utils/data_cache.dart';
-import 'anime_detail_page.dart';
+import '../utils/network_error.dart';
+import '../widgets/comic_cover_card.dart';
+import '../models/category_config.dart';
+import 'category_comics_page.dart';
 import 'comic_detail_page.dart';
 
-enum _SearchMode { comic, anime }
-
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  final String? initialQuery;
+  final String? initialTag;
+
+  const SearchPage({super.key, this.initialQuery, this.initialTag});
 
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
 
 class _SearchPageState extends State<SearchPage> {
-  static const _searchInitCacheKey = 'search_init_v2';
-  static const _searchInitCacheTtl = Duration(days: 3);
   static const _tagSpacing = 8.0;
 
+  static const List<String> _danmeiHotKeywords = [
+    '五號公寓',
+    '光逝去的夏天',
+    '绝对会变成BL的世界',
+    '没有味觉的男人',
+    '穿进妹妹的乙女游戏',
+    '原来我是BL主人公',
+    '野画集',
+    '水边之夜',
+    '勾心游戏',
+    '危险便利店',
+  ];
+
   final _api = ApiClient();
-  final _cache = DataCache();
-  final _user = UserManager();
   final _searchController = TextEditingController();
 
-  List<String> _keywords = [];
-  List<m.Theme> _tags = [];
   List<Comic> _comics = [];
-  List<Anime> _animes = [];
+  List<Comic> _suggestions = [];
+  Timer? _debounceTimer;
+  bool _showSuggestions = false;
 
-  _SearchMode _mode = _SearchMode.comic;
-  String? _selectedTag;
-  String _ordering = '-popular';
-  bool _loading = true;
-  bool _loadingMore = false;
   bool _searching = false;
+  bool _loadingMore = false;
   int _offset = 0;
   int _total = 0;
   String? _searchQuery;
+  String? _searchError;
 
-  bool get _animeFeatureEnabled => _user.animeFeatureEnabled;
-  bool get _isAnimeMode => _animeFeatureEnabled && _mode == _SearchMode.anime;
-  String get _modeLabel => _isAnimeMode ? '动漫' : '漫画';
-  bool get _hasResults => _comics.isNotEmpty || _animes.isNotEmpty;
+  bool get _hasResults => _comics.isNotEmpty;
 
   @override
   void initState() {
     super.initState();
-    _user.addListener(_onUserChanged);
-    _loadInit();
+
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _searchController.text = widget.initialQuery!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _doSearch(widget.initialQuery!);
+      });
+    } else if (widget.initialTag != null && widget.initialTag != 'danmei') {
+      _searchController.text = widget.initialTag!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _doSearch(widget.initialTag!);
+      });
+    }
+    // 默认不预加载列表，直接显示热门搜索+分类标签，避免闪屏
   }
 
   @override
   void dispose() {
-    _user.removeListener(_onUserChanged);
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onUserChanged() {
-    if (!mounted) return;
-    if (!_animeFeatureEnabled && _mode == _SearchMode.anime) {
-      _setMode(_SearchMode.comic);
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    final keyword = value.trim();
+    if (keyword.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _suggestions = [];
+          _showSuggestions = false;
+        });
+      }
       return;
     }
-    setState(() {});
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _fetchSuggestions(keyword);
+    });
   }
 
-  Future<void> _loadInit() async {
+  /// 联想搜索：在耽美范围内搜
+  Future<void> _fetchSuggestions(String keyword) async {
     try {
-      final cached = await _cache.get(_searchInitCacheKey);
-      if (cached != null) {
-        if (!mounted) return;
-        setState(() {
-          _keywords = List<String>.from(cached['keywords'] ?? []);
-          _tags =
-              (cached['tags'] as List?)
-                  ?.map((t) => m.Theme.fromJson(t))
-                  .toList() ??
-              [];
-          _loading = false;
-        });
-        return;
-      }
-
-      final keywordsFuture = _api.getHotKeywords();
-      final tagsFuture = _api.getComicTags();
-      final keywords = await keywordsFuture;
-      final tags = await tagsFuture;
-      if (!mounted) return;
+      final result = await _api.searchComicsWithinTheme(
+        keyword,
+        theme: 'danmei',
+        limit: 6,
+      );
+      if (!mounted || _searchController.text.trim() != keyword) return;
       setState(() {
-        _keywords = keywords;
-        _tags = tags;
-        _loading = false;
+        _suggestions = result.list;
+        _showSuggestions = result.list.isNotEmpty;
       });
-      _cache.put(_searchInitCacheKey, {
-        'keywords': keywords,
-        'tags': tags.map((t) => t.toJson()).toList(),
-      }, ttl: _searchInitCacheTtl);
-    } catch (e) {
-      debugPrint('SearchPage loadInit error: $e');
-      if (mounted) setState(() => _loading = false);
-    }
+    } catch (_) {}
   }
 
+  void _onSuggestionTap(Comic comic) {
+    _searchController.text = comic.name;
+    _searchController.selection = TextSelection.fromPosition(
+      TextPosition(offset: comic.name.length),
+    );
+    setState(() {
+      _showSuggestions = false;
+      _suggestions = [];
+    });
+    _doSearch(comic.name);
+  }
+
+  /// 搜索：在耽美范围内搜（theme=danmei）
   Future<void> _doSearch(String query) async {
     final keyword = query.trim();
     if (keyword.isEmpty) return;
-    final mode = _animeFeatureEnabled ? _mode : _SearchMode.comic;
     setState(() {
-      _mode = mode;
       _searching = true;
       _searchQuery = keyword;
       _comics = [];
-      _animes = [];
       _offset = 0;
       _total = 0;
-      _selectedTag = null;
+      _searchError = null;
+      _showSuggestions = false;
+      _suggestions = [];
     });
 
     try {
-      if (mode == _SearchMode.anime) {
-        final result = await _api.searchAnimes(keyword);
-        if (!mounted || _mode != mode || _searchQuery != keyword) return;
-        setState(() {
-          _animes = result.list;
-          _total = result.total;
-          _offset = result.list.length;
-          _searching = false;
-        });
-      } else {
-        final result = await _api.searchComics(keyword);
-        if (!mounted || _mode != mode || _searchQuery != keyword) return;
-        setState(() {
-          _comics = result.list;
-          _total = result.total;
-          _offset = result.list.length;
-          _searching = false;
-        });
+      final result = await _api.searchComicsWithinTheme(
+        keyword,
+        theme: 'danmei',
+        limit: 21,
+      );
+
+      if (!mounted || _searchQuery != keyword) {
+        if (mounted) setState(() => _searching = false);
+        return;
       }
+
+      setState(() {
+        _comics = result.list;
+        _total = result.total;
+        _offset = result.list.length;
+        _searching = false;
+      });
     } catch (e) {
       debugPrint('SearchPage search error: $e');
-      if (mounted) setState(() => _searching = false);
+      if (mounted) {
+        setState(() {
+          _searching = false;
+          _searchError = NetworkError.message(e);
+        });
+      }
     }
   }
 
-  Future<void> _loadComics({bool reset = true}) async {
-    if (reset) {
-      setState(() {
-        _mode = _SearchMode.comic;
-        _offset = 0;
-        _total = 0;
-        _comics = [];
-        _animes = [];
-        _searchQuery = null;
-      });
-    }
-    try {
-      final result = await _api.getComicList(
-        ordering: _ordering,
-        offset: _offset,
-        theme: _selectedTag,
-      );
-      if (!mounted) return;
-      setState(() {
-        if (reset) {
-          _comics = result.list;
-        } else {
-          _comics.addAll(result.list);
-        }
-        _total = result.total;
-        _offset = _comics.length;
-      });
-    } catch (e) {
-      debugPrint('SearchPage loadComics error: $e');
-    }
-  }
-
+  /// 加载更多：在耽美范围内翻页
   Future<void> _loadMore() async {
     if (_loadingMore || _offset >= _total) return;
+    final query = _searchQuery;
+    if (query == null) return;
     setState(() => _loadingMore = true);
     try {
-      if (_searchQuery != null) {
-        if (_isAnimeMode) {
-          final result = await _api.searchAnimes(
-            _searchQuery!,
-            offset: _offset,
-          );
-          if (!mounted) return;
-          setState(() {
-            _animes.addAll(result.list);
-            _offset = _animes.length;
-          });
-        } else {
-          final result = await _api.searchComics(
-            _searchQuery!,
-            offset: _offset,
-          );
-          if (!mounted) return;
-          setState(() {
-            _comics.addAll(result.list);
-            _offset = _comics.length;
-          });
-        }
-      } else if (!_isAnimeMode) {
-        await _loadComics(reset: false);
-      }
+      final result = await _api.searchComicsWithinTheme(
+        query,
+        theme: 'danmei',
+        offset: _offset,
+        limit: 21,
+      );
+      if (!mounted || _searchQuery != query) return;
+      setState(() {
+        _comics.addAll(result.list);
+        _offset = _comics.length;
+      });
     } catch (e) {
       debugPrint('SearchPage loadMore error: $e');
     } finally {
@@ -225,68 +199,50 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  void _setMode(_SearchMode mode) {
-    if (mode == _SearchMode.anime && !_animeFeatureEnabled) return;
-    if (_mode == mode) return;
-    final keyword = _searchController.text.trim();
-    setState(() {
-      _mode = mode;
-      _selectedTag = null;
-      _comics = [];
-      _animes = [];
-      _offset = 0;
-      _total = 0;
-      _searchQuery = keyword.isEmpty ? null : keyword;
-    });
-    if (keyword.isNotEmpty) {
-      _doSearch(keyword);
-    }
-  }
-
-  void _selectTag(String? tagPathWord) {
-    _searchController.clear();
-    final isToggleOff = tagPathWord != null && _selectedTag == tagPathWord;
-    final next = isToggleOff ? null : tagPathWord;
-    setState(() {
-      _mode = _SearchMode.comic;
-      _selectedTag = next;
-      _searchQuery = null;
-      _offset = 0;
-      _total = 0;
-      _comics = [];
-      _animes = [];
-    });
-    if (next != null) {
-      _loadComics();
-    }
-  }
-
   void _clearSearch() {
     _searchController.clear();
     setState(() {
       _searchQuery = null;
       _comics = [];
-      _animes = [];
       _offset = 0;
       _total = 0;
+      _searching = false;
+      _searchError = null;
     });
   }
 
   void _onKeywordTap(String keyword) {
     _searchController.text = keyword;
-    _doSearch(keyword);
+    _searchAndOpenDetail(keyword);
   }
 
-  void _openAnime(Anime anime) {
-    if (!_animeFeatureEnabled) return;
-    if (anime.pathWord.isEmpty) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            AnimeDetailPage(pathWord: anime.pathWord, initialAnime: anime),
-      ),
-    );
+  /// 热门关键词点击 → 在耽美范围内搜一本 + 直接跳详情
+  Future<void> _searchAndOpenDetail(String keyword) async {
+    try {
+      final result = await _api.searchComicsWithinTheme(
+        keyword,
+        theme: 'danmei',
+        limit: 3,
+      );
+      if (!mounted) return;
+
+      if (result.list.isNotEmpty) {
+        // 搜到了 → 直接打开第一个
+        final comic = result.list.first;
+        Navigator.push(
+          context,
+          ComicDetailPage.route(pathWord: comic.pathWord, initialComic: comic),
+        );
+        return;
+      }
+    } catch (e) {
+      debugPrint('_searchAndOpenDetail error: $e');
+    }
+
+    // 兜底：API 挂了 → 走搜索
+    if (mounted) {
+      _doSearch(keyword);
+    }
   }
 
   @override
@@ -297,221 +253,304 @@ class _SearchPageState extends State<SearchPage> {
     final contentWidth = screenWidth.clamp(0.0, 900.0);
     final hp = (screenWidth - contentWidth) / 2 + 16;
 
-    if (_loading) return const Center(child: CircularProgressIndicator());
-
-    return NotificationListener<ScrollNotification>(
-      onNotification: (n) {
-        if (_hasResults && n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
-          _loadMore();
-        }
-        return false;
-      },
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: SizedBox(height: MediaQuery.of(context).padding.top),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(hp, 12, hp, 8),
-              child: SearchBar(
-                controller: _searchController,
-                hintText: '搜索$_modeLabel...',
-                leading: const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: Icon(Icons.search),
-                ),
-                trailing: _searchQuery != null
-                    ? [
-                        IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: _clearSearch,
-                        ),
-                      ]
-                    : null,
-                onSubmitted: _doSearch,
-              ),
+    return Scaffold(
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (n) {
+          if (_hasResults &&
+              n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
+            _loadMore();
+          }
+          return false;
+        },
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: SizedBox(height: MediaQuery.of(context).padding.top),
             ),
-          ),
-          if (_animeFeatureEnabled)
+            // ── 搜索栏 ──
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(hp, 0, hp, 8),
-                child: SegmentedButton<_SearchMode>(
-                  segments: const [
-                    ButtonSegment(
-                      value: _SearchMode.comic,
-                      label: Text('漫画'),
-                      icon: Icon(Icons.menu_book_outlined),
-                    ),
-                    ButtonSegment(
-                      value: _SearchMode.anime,
-                      label: Text('动漫'),
-                      icon: Icon(Icons.movie_outlined),
-                    ),
-                  ],
-                  selected: {_mode},
-                  onSelectionChanged: (v) => _setMode(v.first),
-                ),
-              ),
-            ),
-          if (_searching)
-            const SliverFillRemaining(
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          if (_keywords.isNotEmpty && !_hasResults && !_searching)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hp, 8, hp, 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                padding: EdgeInsets.fromLTRB(hp - 8, 12, hp, 8),
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.local_fire_department,
-                          size: 20,
-                          color: cs.primary,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '热门搜索',
-                          style: tt.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                      onPressed: () => Navigator.pop(context),
                     ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _keywords
-                          .map(
-                            (k) => ActionChip(
-                              label: Text(k),
-                              onPressed: () => _onKeywordTap(k),
-                              avatar: Icon(
-                                Icons.trending_up,
-                                size: 16,
-                                color: cs.primary,
-                              ),
-                            ),
-                          )
-                          .toList(),
+                    Expanded(
+                      child: SearchBar(
+                        controller: _searchController,
+                        hintText: '搜索耽美漫画...',
+                        leading: const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: Icon(Icons.search),
+                        ),
+                        trailing: _searchQuery != null
+                            ? [
+                                IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: _clearSearch,
+                                ),
+                              ]
+                            : null,
+                        onChanged: _onSearchChanged,
+                        onSubmitted: _doSearch,
+                      ),
                     ),
-                    const SizedBox(height: 20),
                   ],
                 ),
               ),
             ),
-          if (!_isAnimeMode &&
-              _tags.isNotEmpty &&
-              _searchQuery == null &&
-              !_searching)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hp, 0, hp, 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            // ── 联想列表 ──
+            if (_showSuggestions && _suggestions.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hp, 4, hp, 8),
+                  child: _SuggestionsCard(
+                    suggestions: _suggestions,
+                    onTap: _onSuggestionTap,
+                  ),
+                ),
+              ),
+            // ── 搜索中 ──
+            if (_searching)
+              const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            // ── 搜索失败 ──
+            if (_searchError != null && !_searching)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.category, size: 20, color: cs.primary),
-                        const SizedBox(width: 6),
+                        Icon(Icons.error_outline, size: 48, color: cs.error),
+                        const SizedBox(height: 12),
+                        Text('搜索失败', style: tt.titleMedium),
+                        const SizedBox(height: 8),
                         Text(
-                          '全部标签',
-                          style: tt.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_tags.length} 个',
+                          _searchError!,
+                          textAlign: TextAlign.center,
                           style: tt.bodySmall?.copyWith(
                             color: cs.onSurfaceVariant,
                           ),
                         ),
+                        const SizedBox(height: 16),
+                        FilledButton.tonal(
+                          onPressed: () {
+                            if (_searchQuery != null) {
+                              _doSearch(_searchQuery!);
+                            }
+                          },
+                          child: const Text('重试'),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: _tagSpacing,
-                      runSpacing: _tagSpacing,
-                      children: [
-                        for (final t in _tags)
-                          if (_selectedTag == null ||
-                              _selectedTag == t.pathWord)
-                            FilterChip(
-                              label: Text(
-                                t.count > 0 ? '${t.name} ${t.count}' : t.name,
-                              ),
-                              selected: _selectedTag == t.pathWord,
-                              showCheckmark: false,
-                              onSelected: (_) => _selectTag(t.pathWord),
-                            ),
-                      ],
-                    ),
-                    if (_comics.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: '-popular',
-                            label: Text('热度'),
-                            icon: Icon(Icons.whatshot),
+                  ),
+                ),
+              ),
+            // ── 默认首页：热门搜索 + 耽美分类（无预加载列表，不闪屏）──
+            if (_searchQuery == null &&
+                !_searching &&
+                _searchError == null) ...[
+              // 热门搜索
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hp, 8, hp, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.local_fire_department,
+                            size: 20,
+                            color: cs.primary,
                           ),
-                          ButtonSegment(
-                            value: '-datetime_updated',
-                            label: Text('更新'),
-                            icon: Icon(Icons.schedule),
+                          const SizedBox(width: 6),
+                          Text(
+                            '热门搜索',
+                            style: tt.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
-                        selected: {_ordering},
-                        onSelectionChanged: (v) {
-                          setState(() => _ordering = v.first);
-                          _loadComics();
-                        },
                       ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _danmeiHotKeywords.map((k) {
+                          return ActionChip(
+                            label: Text(k),
+                            onPressed: () => _onKeywordTap(k),
+                            avatar: Icon(
+                              Icons.trending_up,
+                              size: 16,
+                              color: cs.primary,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 20),
                     ],
-                    const SizedBox(height: 12),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          if (_searchQuery != null && _hasResults)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hp, 4, hp, 12),
-                child: Text(
-                  '搜索 "$_searchQuery" 找到 $_total 个$_modeLabel结果',
-                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              // 耽美分类标签
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hp, 0, hp, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.category, size: 20, color: cs.primary),
+                          const SizedBox(width: 6),
+                          Text(
+                            '耽美分类',
+                            style: tt.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${CategoryConfig.categories.length} 个小类',
+                            style: tt.bodySmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: _tagSpacing,
+                        runSpacing: _tagSpacing,
+                        children: [
+                          for (final c in CategoryConfig.categories)
+                            FilterChip(
+                              label: Text(c.categoryName),
+                              selected: false,
+                              showCheckmark: false,
+                              onSelected: (_) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => CategoryComicsPage(
+                                      categoryId: c.categoryId,
+                                      categoryName: c.categoryName,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          if (!_isAnimeMode && _comics.isNotEmpty)
-            _ComicGrid(
-              comics: _comics,
-              hp: hp,
-              loadingMore: _loadingMore,
-              onOpen: (comic, heroTagBase) => Navigator.push(
-                context,
-                ComicDetailPage.route(
-                  pathWord: comic.pathWord,
-                  initialComic: comic,
-                  heroTagBase: heroTagBase,
+            ],
+            // ── 搜索结果统计 ──
+            if (_searchQuery != null && _hasResults)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(hp, 4, hp, 12),
+                  child: Text(
+                    '在耽美范围内搜索 "$_searchQuery" 找到 $_total 个结果',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
                 ),
               ),
-            ),
-          if (_isAnimeMode && _animes.isNotEmpty)
-            _AnimeGrid(
-              animes: _animes,
-              hp: hp,
-              loadingMore: _loadingMore,
-              onOpen: _openAnime,
-            ),
-          const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
-        ],
+            // ── 搜索结果网格 ──
+            if (_comics.isNotEmpty)
+              _ComicGrid(
+                comics: _comics,
+                hp: hp,
+                loadingMore: _loadingMore,
+                onOpen: (comic, heroTagBase) => Navigator.push(
+                  context,
+                  ComicDetailPage.route(
+                    pathWord: comic.pathWord,
+                    initialComic: comic,
+                    heroTagBase: heroTagBase,
+                  ),
+                ),
+              ),
+            const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 联想列表卡片
+class _SuggestionsCard extends StatelessWidget {
+  final List<Comic> suggestions;
+  final void Function(Comic) onTap;
+
+  const _SuggestionsCard({required this.suggestions, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Card(
+      elevation: 0,
+      color: cs.surfaceContainerHigh.withValues(alpha: 0.95),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: suggestions.map((comic) {
+            return ListTile(
+              dense: true,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: CachedNetworkImage(
+                  imageUrl: comic.cover,
+                  width: 36,
+                  height: 48,
+                  fit: BoxFit.cover,
+                  errorWidget: (_, _, _) => Container(
+                    width: 36,
+                    height: 48,
+                    color: cs.surfaceContainerHighest,
+                    child: const Icon(Icons.image_outlined, size: 18),
+                  ),
+                ),
+              ),
+              title: Text(
+                comic.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tt.bodyMedium,
+              ),
+              subtitle: comic.authors.isNotEmpty
+                  ? Text(
+                      comic.authors.map((a) => a.name).join(', '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    )
+                  : null,
+              trailing: Icon(
+                Icons.search,
+                size: 18,
+                color: cs.onSurfaceVariant,
+              ),
+              onTap: () => onTap(comic),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -545,7 +584,7 @@ class _ComicGrid extends StatelessWidget {
             pathWord: comic.pathWord,
             index: i,
           );
-          return _ComicGridItem(
+          return ComicCoverCard(
             comic: comic,
             heroTagBase: heroTagBase,
             onTap: () => onOpen(comic, heroTagBase),
@@ -553,202 +592,11 @@ class _ComicGrid extends StatelessWidget {
         }, childCount: comics.length + (loadingMore ? 6 : 0)),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 130,
-          childAspectRatio: 0.55,
+          childAspectRatio: 0.62,
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
         ),
       ),
     );
-  }
-}
-
-class _AnimeGrid extends StatelessWidget {
-  final List<Anime> animes;
-  final double hp;
-  final bool loadingMore;
-  final ValueChanged<Anime> onOpen;
-
-  const _AnimeGrid({
-    required this.animes,
-    required this.hp,
-    required this.loadingMore,
-    required this.onOpen,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SliverPadding(
-      padding: EdgeInsets.symmetric(horizontal: hp),
-      sliver: SliverGrid(
-        delegate: SliverChildBuilderDelegate((_, i) {
-          if (i >= animes.length) {
-            return const ComicCardSkeleton();
-          }
-          final anime = animes[i];
-          return _AnimeGridItem(anime: anime, onTap: () => onOpen(anime));
-        }, childCount: animes.length + (loadingMore ? 6 : 0)),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 130,
-          childAspectRatio: 0.55,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-        ),
-      ),
-    );
-  }
-}
-
-class _AnimeGridItem extends StatelessWidget {
-  final Anime anime;
-  final VoidCallback onTap;
-
-  const _AnimeGridItem({required this.anime, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Card(
-              clipBehavior: Clip.antiAlias,
-              margin: EdgeInsets.zero,
-              child: CoverBrightnessFilter(
-                child: CachedNetworkImage(
-                  imageUrl: anime.cover,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                  fadeInDuration: Duration.zero,
-                  fadeOutDuration: Duration.zero,
-                  placeholder: (_, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                      child: Icon(
-                        Icons.movie_outlined,
-                        color: cs.onSurfaceVariant,
-                        size: 32,
-                      ),
-                    ),
-                  ),
-                  errorWidget: (_, _, _) => Container(
-                    color: cs.surfaceContainerHighest,
-                    child: Center(
-                      child: Icon(
-                        Icons.broken_image,
-                        color: cs.onSurfaceVariant,
-                        size: 32,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            anime.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ComicGridItem extends StatelessWidget {
-  final Comic comic;
-  final String? heroTagBase;
-  final VoidCallback onTap;
-
-  const _ComicGridItem({
-    required this.comic,
-    this.heroTagBase,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: _hero(
-              ComicHeroTags.cover,
-              Card(
-                clipBehavior: Clip.antiAlias,
-                margin: EdgeInsets.zero,
-                child: CoverBrightnessFilter(
-                  child: CachedNetworkImage(
-                    imageUrl: comic.cover,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fadeInDuration: Duration.zero,
-                    fadeOutDuration: Duration.zero,
-                    placeholder: (_, _) => Container(
-                      color: cs.surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.image,
-                          color: cs.onSurfaceVariant,
-                          size: 32,
-                        ),
-                      ),
-                    ),
-                    errorWidget: (_, _, _) => Container(
-                      color: cs.surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.broken_image,
-                          color: cs.onSurfaceVariant,
-                          size: 32,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            comic.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _hero(String Function(String base) tagOf, Widget child) {
-    final base = heroTagBase;
-    if (base == null) return child;
-    return Hero(
-      tag: tagOf(base),
-      createRectTween: ComicHeroTags.createRectTween,
-      placeholderBuilder: _buildHeroPlaceholder,
-      child: child,
-    );
-  }
-
-  Widget _buildHeroPlaceholder(
-    BuildContext context,
-    Size heroSize,
-    Widget child,
-  ) {
-    return SizedBox(width: heroSize.width, height: heroSize.height);
   }
 }

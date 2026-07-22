@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -9,19 +8,21 @@ import 'package:media_kit/media_kit.dart';
 import 'package:system_fonts/system_fonts.dart';
 
 import 'models/user_manager.dart';
-import 'pages/anime_home_page.dart';
+import 'pages/favorite_page.dart';
 import 'pages/home_page.dart';
-import 'pages/search_page.dart';
-import 'pages/bookshelf_page.dart';
 import 'pages/profile_page.dart';
-import 'utils/app_update.dart';
+import 'utils/glass_widgets.dart';
 
 bool get isDesktop =>
     !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  try {
+    MediaKit.ensureInitialized();
+  } catch (e) {
+    debugPrint('MediaKit init failed (non-ARM device?): $e');
+  }
   await UserManager().init();
   if (isDesktop) {
     final font = UserManager().desktopFontFamily;
@@ -65,9 +66,14 @@ class _KiraAppState extends State<KiraApp> {
   final _user = UserManager();
 
   static final _cardTheme = CardThemeData(
-    clipBehavior: Clip.hardEdge,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    clipBehavior: Clip.antiAlias,
+    color: Colors.white,
+    shadowColor: Colors.black.withValues(alpha: 0.06),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(appleCardRadius),
+    ),
     elevation: 0,
+    surfaceTintColor: Colors.transparent,
   );
 
   @override
@@ -87,14 +93,21 @@ class _KiraAppState extends State<KiraApp> {
   }
 
   ThemeData _buildTheme(Brightness brightness) {
-    final seedColor = _user.themeOption.seedColor;
+    // 苹果风配色常量
+    const lightBg = appleLightBg;
+    const lightSurface = Color(0xFF1C1C1E);
+    const lightVariant = Color(0xFF8E8E93);
+
+    final seedColor = brightness == Brightness.light
+        ? appleBlue
+        : _user.themeOption.seedColor;
     var colorScheme = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: brightness,
       dynamicSchemeVariant: _user.themeVariant,
     );
 
-    // 修复“彩虹”等变体会固定生成独立色相（例如粉色）且不随主题色变化的背景问题
+    // 修复“彩虹”等变体会固定生成独立色相且不随主题色变化的背景问题
     if (_user.themeVariant == DynamicSchemeVariant.rainbow) {
       final standardScheme = ColorScheme.fromSeed(
         seedColor: seedColor,
@@ -114,10 +127,135 @@ class _KiraAppState extends State<KiraApp> {
       );
     }
 
+    if (brightness == Brightness.light) {
+      // 苹果风浅色模式:系统灰背景 + 冷调表面色
+      colorScheme = colorScheme.copyWith(
+        primary: appleBlue,
+        onPrimary: Colors.white,
+        surface: lightBg,
+        onSurface: lightSurface,
+        surfaceDim: const Color(0xFFE5E5EA),
+        surfaceBright: Colors.white,
+        surfaceContainerLowest: Colors.white,
+        surfaceContainerLow: const Color(0xFFF7F7FA),
+        surfaceContainer: const Color(0xFFF2F2F7),
+        surfaceContainerHigh: const Color(0xFFE5E5EA),
+        surfaceContainerHighest: const Color(0xFFD1D1D6),
+        onSurfaceVariant: lightVariant,
+        outline: const Color(0xFFD1D1D6),
+        outlineVariant: const Color(0xFFE5E5EA),
+      );
+    } else {
+      // 苹果风深色模式:纯黑背景 + 分层灰
+      colorScheme = colorScheme.copyWith(
+        surface: appleDarkBg,
+        onSurface: Colors.white,
+        surfaceDim: appleDarkBgSecondary,
+        surfaceBright: const Color(0xFF2C2C2E),
+        surfaceContainerLowest: appleDarkBg,
+        surfaceContainerLow: const Color(0xFF1C1C1E),
+        surfaceContainer: appleDarkBgSecondary,
+        surfaceContainerHigh: const Color(0xFF2C2C2E),
+        surfaceContainerHighest: const Color(0xFF3A3A3C),
+        onSurfaceVariant: const Color(0xFF8E8E93),
+        outline: const Color(0xFF3A3A3C),
+        outlineVariant: const Color(0xFF2C2C2E),
+      );
+    }
+
     return ThemeData(
       colorScheme: colorScheme,
       useMaterial3: true,
+      scaffoldBackgroundColor: colorScheme.surface,
       cardTheme: _cardTheme,
+      appBarTheme: AppBarTheme(
+        backgroundColor: Colors.transparent,
+        foregroundColor: colorScheme.onSurface,
+        elevation: 0,
+        centerTitle: true,
+        titleTextStyle: TextStyle(
+          color: colorScheme.onSurface,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.transparent,
+        indicatorColor: Colors.transparent,
+        elevation: 0,
+        height: 0,
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(color: colorScheme.onSurface, fontSize: 0),
+        ),
+        iconTheme: WidgetStatePropertyAll(
+          IconThemeData(color: colorScheme.onSurface),
+        ),
+      ),
+      searchBarTheme: SearchBarThemeData(
+        backgroundColor: WidgetStatePropertyAll(
+          (brightness == Brightness.light ? Colors.white : Colors.black)
+              .withValues(alpha: 0.72),
+        ),
+        elevation: const WidgetStatePropertyAll(0),
+        shadowColor: const WidgetStatePropertyAll(Colors.transparent),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        hintStyle: WidgetStatePropertyAll(
+          TextStyle(color: colorScheme.onSurfaceVariant),
+        ),
+        textStyle: WidgetStatePropertyAll(
+          TextStyle(color: colorScheme.onSurface, fontWeight: FontWeight.w500),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(appleButtonRadius),
+          ),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor:
+            (brightness == Brightness.light ? Colors.white : Colors.black)
+                .withValues(alpha: 0.6),
+        selectedColor: colorScheme.primary.withValues(alpha: 0.85),
+        labelStyle: TextStyle(color: colorScheme.onSurface),
+        side: BorderSide(color: colorScheme.outlineVariant),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor:
+            (brightness == Brightness.light ? Colors.white : Colors.black)
+                .withValues(alpha: 0.6),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(appleButtonRadius),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(appleButtonRadius),
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(appleButtonRadius),
+          borderSide: BorderSide(color: colorScheme.primary, width: 2),
+        ),
+      ),
+      listTileTheme: ListTileThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(appleButtonRadius),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(appleButtonRadius),
+        ),
+      ),
       fontFamily: isDesktop && _user.desktopFontFamily.isNotEmpty
           ? _user.desktopFontFamily
           : null,
@@ -127,7 +265,7 @@ class _KiraAppState extends State<KiraApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Kira',
+      title: '炸鸡腿漫画',
       debugShowCheckedModeBanner: false,
       scrollBehavior: _AppScrollBehavior(),
       theme: _buildTheme(Brightness.light),
@@ -228,10 +366,12 @@ class _DisclaimerDialogState extends State<_DisclaimerDialog> {
   }
 }
 
+/// 全局底部导航索引，供子页面切换 Tab
+final globalNavIndex = ValueNotifier<int>(0);
+
 class _MainPageState extends State<MainPage> {
   final _user = UserManager();
-  String _selectedNavKey = UserManager.defaultNavKey;
-  bool _didAutoCheckUpdate = false;
+  int _selectedIndex = 0;
   bool _didCheckDisclaimer = false;
 
   static const _disclaimerItems = [
@@ -250,12 +390,7 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
-    final visibleKeys = _visibleNavKeys();
-    _selectedNavKey = _resolveVisibleNavKey(_user.lastNavKey, visibleKeys);
-    if (_selectedNavKey != _user.lastNavKey) {
-      unawaited(_user.setLastNavKey(_selectedNavKey));
-    }
-    _user.addListener(_onUserChanged);
+    globalNavIndex.addListener(_onGlobalNavChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _runStartupFlow();
     });
@@ -263,9 +398,6 @@ class _MainPageState extends State<MainPage> {
 
   Future<void> _runStartupFlow() async {
     await _ensureDisclaimerAccepted();
-    if (!mounted) return;
-
-    await _maybeAutoCheckUpdate();
   }
 
   Future<void> _ensureDisclaimerAccepted() async {
@@ -288,131 +420,102 @@ class _MainPageState extends State<MainPage> {
   }
 
   @override
+  @override
   void dispose() {
-    _user.removeListener(_onUserChanged);
+    globalNavIndex.removeListener(_onGlobalNavChanged);
     super.dispose();
   }
 
-  void _onUserChanged() {
-    if (!mounted) return;
-    final visibleKeys = _visibleNavKeys();
-    final nextNavKey = _resolveVisibleNavKey(_selectedNavKey, visibleKeys);
-    if (nextNavKey != _selectedNavKey) {
-      unawaited(_user.setLastNavKey(nextNavKey));
+  void _onGlobalNavChanged() {
+    if (globalNavIndex.value != _selectedIndex) {
+      setState(() => _selectedIndex = globalNavIndex.value);
     }
-    setState(() {
-      _selectedNavKey = nextNavKey;
-    });
-  }
-
-  Future<void> _maybeAutoCheckUpdate() async {
-    if (!mounted || _didAutoCheckUpdate || !_user.autoCheckUpdate) return;
-    _didAutoCheckUpdate = true;
-    await AppUpdateService.checkAndPrompt(context, auto: true);
-  }
-
-  // 可见 tabs 取决于登录状态和动漫功能开关；外观页仍保留完整顺序。
-
-  static final _navItemData = {
-    'comic': _NavItem(
-      page: HomePage(),
-      icon: Icon(Icons.menu_book_outlined),
-      selectedIcon: Icon(Icons.menu_book),
-      label: '漫画',
-    ),
-    'anime': _NavItem(
-      page: AnimeHomePage(),
-      icon: Icon(Icons.movie_outlined),
-      selectedIcon: Icon(Icons.movie),
-      label: '动漫',
-    ),
-    'search': _NavItem(
-      page: SearchPage(),
-      icon: Icon(Icons.search_outlined),
-      selectedIcon: Icon(Icons.search),
-      label: '搜索',
-    ),
-    'bookshelf': _NavItem(
-      page: BookshelfPage(),
-      icon: Icon(Icons.bookmark_border),
-      selectedIcon: Icon(Icons.bookmark),
-      label: '书架',
-    ),
-    'profile': _NavItem(
-      page: ProfilePage(),
-      icon: Icon(Icons.person_outline),
-      selectedIcon: Icon(Icons.person),
-      label: '我的',
-    ),
-  };
-
-  List<String> _visibleNavKeys() {
-    final keys = _user.navOrder
-        .where(_navItemData.containsKey)
-        .where((k) => _user.isLoggedIn || k != 'bookshelf')
-        .where((k) => _user.animeFeatureEnabled || k != 'anime')
-        .toList();
-    return keys.isEmpty ? const [UserManager.defaultNavKey] : keys;
-  }
-
-  String _resolveVisibleNavKey(String navKey, List<String> visibleKeys) {
-    if (visibleKeys.contains(navKey)) return navKey;
-    if (visibleKeys.contains(UserManager.defaultNavKey)) {
-      return UserManager.defaultNavKey;
-    }
-    return visibleKeys.isEmpty ? UserManager.defaultNavKey : visibleKeys.first;
-  }
-
-  int _selectedIndex(List<String> orderedKeys) {
-    final selectedKey = _resolveVisibleNavKey(_selectedNavKey, orderedKeys);
-    final index = orderedKeys.indexOf(selectedKey);
-    return index < 0 ? 0 : index;
   }
 
   @override
   Widget build(BuildContext context) {
-    final orderedKeys = _visibleNavKeys();
-    final destinations = [
-      for (final key in orderedKeys)
-        NavigationDestination(
-          icon: _navItemData[key]!.icon,
-          selectedIcon: _navItemData[key]!.selectedIcon,
-          label: _navItemData[key]!.label,
-        ),
+    // 扩展页已隐藏，入口保留以备后用
+    // 如需恢复：取消下方 ExtensionBrowsePage 注释 + 底部导航加回 '扩展' tab
+    const pages = [
+      HomePage(),
+      // ExtensionBrowsePage(),
+      FavoritePage(),
+      ProfilePage(),
     ];
-    final orderedPages = [
-      for (final key in orderedKeys) _navItemData[key]!.page,
-    ];
-    final selectedIndex = _selectedIndex(orderedKeys);
 
     return Scaffold(
-      body: IndexedStack(index: selectedIndex, children: orderedPages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex,
-        onDestinationSelected: (i) {
-          final navKey = orderedKeys[i];
-          setState(() => _selectedNavKey = navKey);
-          unawaited(_user.setLastNavKey(navKey));
+      body: IndexedStack(index: _selectedIndex, children: pages),
+      extendBody: true,
+      bottomNavigationBar: GlassBottomBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() => _selectedIndex = index);
+          globalNavIndex.value = index;
         },
-        height: _user.bottomNavShowLabels ? null : 64,
-        labelBehavior: _user.bottomNavShowLabels
-            ? NavigationDestinationLabelBehavior.alwaysShow
-            : NavigationDestinationLabelBehavior.alwaysHide,
-        destinations: destinations,
+        destinations: const [
+          GlassDestination(
+            icon: _NavMascotIcon(assetPath: 'assets/nav_danmei.png'),
+            selectedIcon: _NavMascotIcon(
+              assetPath: 'assets/nav_danmei.png',
+              selected: true,
+            ),
+            label: '耽美',
+          ),
+          // 扩展 tab 已隐藏
+          // GlassDestination(
+          //   icon: _NavMascotIcon(assetPath: 'assets/nav_local.png'),
+          //   selectedIcon: _NavMascotIcon(
+          //     assetPath: 'assets/nav_local.png',
+          //     selected: true,
+          //   ),
+          //   label: '扩展',
+          // ),
+          GlassDestination(
+            icon: _NavMascotIcon(assetPath: 'assets/nav_mine.png'),
+            selectedIcon: _NavMascotIcon(
+              assetPath: 'assets/nav_mine.png',
+              selected: true,
+            ),
+            label: '收藏',
+          ),
+          GlassDestination(
+            icon: _NavMascotIcon(assetPath: 'assets/nav_local.png'),
+            selectedIcon: _NavMascotIcon(
+              assetPath: 'assets/nav_local.png',
+              selected: true,
+            ),
+            label: '我的',
+          ),
+        ],
       ),
     );
   }
 }
 
-class _NavItem {
-  final Widget page;
-  final Icon icon;
-  final Icon selectedIcon;
-  final String label;
-  const _NavItem({
-    required this.page,
-    required this.icon,
-    required this.selectedIcon,
-    required this.label,
-  });
+class _NavMascotIcon extends StatelessWidget {
+  final String assetPath;
+  final bool selected;
+
+  const _NavMascotIcon({required this.assetPath, this.selected = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final size = selected ? 34.0 : 28.0;
+    return AnimatedScale(
+      scale: selected ? 1.06 : 1,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      child: Opacity(
+        opacity: selected ? 1 : 0.72,
+        child: Image.asset(
+          assetPath,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+          cacheWidth: selected ? 102 : 84,
+          cacheHeight: selected ? 102 : 84,
+        ),
+      ),
+    );
+  }
 }

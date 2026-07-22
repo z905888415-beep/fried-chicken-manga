@@ -103,7 +103,7 @@ mixin _UserApi on _ApiClientBase {
     final resp = await _dio.get(
       _url('/api/v3/member/securityquestionall/', _hostSd),
     );
-    final results = resp.data['results'] as List? ?? const [];
+    final results = safeRawList<Map>(resp.data['results'], required: true);
     return results
         .map((e) => e['code']?.toString() ?? '')
         .where((e) => e.isNotEmpty)
@@ -214,7 +214,7 @@ mixin _UserApi on _ApiClientBase {
       },
       host: _hostSg,
     );
-    final list = (data['list'] as List).map((e) {
+    final list = safeRawList<Map>(data['list'], required: true).map((e) {
       final item = Map<String, dynamic>.from(e);
       return BrowseHistoryItem(
         id: item['id'] as int? ?? 0,

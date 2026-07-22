@@ -4,16 +4,19 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
-import '../models/anime.dart';
 import '../models/comic.dart';
 import '../models/chapter.dart';
 import '../models/chapter_comment.dart';
 import '../models/comic_comment.dart';
 import '../models/user_manager.dart';
-import '../utils/data_cache.dart';
 import '../utils/network_error.dart';
 
-part 'anime/anime_api.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter_js/flutter_js.dart';
+import 'api_helpers.dart';
+
+part 'js_source_manager.dart';
 part 'manga/manga_api.dart';
 part 'network/network_api.dart';
 part 'user/user_api.dart';
@@ -37,7 +40,6 @@ abstract class _ApiClientBase {
   late final Dio _dio;
   late final Dio _commentDio;
   final _user = UserManager();
-  final _cache = DataCache();
   int _hostIndex = 0;
   // 手动管理 cookie: host → {name: value}
   final Map<String, Map<String, String>> _cookies = {};
@@ -78,7 +80,6 @@ abstract class _ApiClientBase {
         onRequest: (options, handler) {
           options.headers.addAll({
             'Accept': 'application/json',
-            'Content-Encoding': 'gzip, compress, br',
             'platform': '3',
             'User-Agent':
                 'Mozilla/5.0 (Linux; Android 15; 23113RKC6C Build/AQ3A.240812.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.200 Mobile Safari/537.36',
@@ -155,6 +156,12 @@ abstract class _ApiClientBase {
                 username.isNotEmpty &&
                 password != null &&
                 password.isNotEmpty) {
+              // 限制 401 自动重登录重试次数,避免死循环
+              final retryCount =
+                  error.requestOptions.extra['authRetryCount'] as int? ?? 0;
+              if (retryCount >= 1) {
+                return handler.next(error);
+              }
               try {
                 // 防止并发 401 同时触发多次登录
                 if (_autoLoginCompleter != null) {
@@ -181,9 +188,10 @@ abstract class _ApiClientBase {
                   }
                   _autoLoginCompleter = null;
                 }
-                // 用新 token 重试原请求
+                // 用新 token 重试原请求,标记已重试次数避免死循环
                 final opts = error.requestOptions;
                 opts.headers['Authorization'] = 'Token ${_user.token}';
+                opts.extra['authRetryCount'] = retryCount + 1;
                 final resp = await _dio.fetch(opts);
                 return handler.resolve(resp);
               } catch (_) {
@@ -242,7 +250,7 @@ abstract class _ApiClientBase {
         'Host': host,
         'referer': 'https://www.mangacopy.com/',
         'sec-fetch-site': secFetchSite,
-        if (headers != null) ...headers,
+        ...?headers,
       },
     );
   }
@@ -263,20 +271,74 @@ abstract class _ApiClientBase {
     Map<String, dynamic>? params,
     String host = _hostSg,
   }) async {
-    final url = host == _hostMangaHome
-        ? 'https://$host$path'
-        : _url(path, host);
-    final resp = await _dio.get(url, queryParameters: params);
-    return resp.data['results'];
+    // 固定域名(manga home)不走多域名容灾
+    if (host == _hostMangaHome) {
+      final resp = await _dio.get(
+        'https://$host$path',
+        queryParameters: params,
+      );
+      return _extractResults(resp, path);
+    }
+    // 路由组域名:失败时切换 host 重试,实现请求级容灾
+    const maxAttempts = 3;
+    Object? lastError;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final selectedHost = _nextHost();
+      try {
+        final resp = await _dio.get(
+          'https://$selectedHost$path',
+          queryParameters: params,
+        );
+        return _extractResults(resp, path);
+      } on DioException catch (e) {
+        lastError = e;
+        // 仅对网络/服务器错误重试切换 host;业务错误(401/429 等)直接抛出
+        if (!_isTransientNetworkError(e)) rethrow;
+        // 衰减失败域名权重,降低下次被选中的概率
+        _hostWeights[selectedHost] = (_hostWeights[selectedHost] ?? 1.0) * 0.5;
+      }
+    }
+    throw lastError ?? StateError('请求失败: $path');
+  }
+
+  /// 从响应中提取 results 字段,做防御式校验。
+  Map<String, dynamic> _extractResults(Response resp, String path) {
+    final data = resp.data;
+    final results = data is Map ? data['results'] : null;
+    if (results is Map<String, dynamic>) return results;
+    if (results is Map) return Map<String, dynamic>.from(results);
+    throw DioException(
+      requestOptions: resp.requestOptions,
+      response: resp,
+      message: '响应结构异常(results 缺失): $path',
+      error: '响应结构异常: $path',
+      type: DioExceptionType.badResponse,
+    );
+  }
+
+  /// 判断是否为可重试的瞬时网络/服务器错误。
+  bool _isTransientNetworkError(DioException e) {
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.connectionError ||
+        (e.response?.statusCode != null && e.response!.statusCode! >= 500)) {
+      return true;
+    }
+    final inner = e.error;
+    if (inner is HttpException || inner is SocketException) return true;
+    if (e.type == DioExceptionType.unknown && inner != null) return true;
+    return false;
   }
 }
 
-class ApiClient extends _ApiClientBase
-    with _UserApi, _MangaApi, _AnimeApi, _NetworkApi {
+class ApiClient extends _ApiClientBase with _UserApi, _MangaApi, _NetworkApi {
   static const routeLabels = ['线路 1', '线路 2'];
 
   static final ApiClient _instance = ApiClient._();
   factory ApiClient() => _instance;
 
-  ApiClient._() : super();
+  ApiClient._() : super() {
+    JsSourceManager().init(this);
+  }
 }
